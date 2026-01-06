@@ -1,0 +1,5 @@
+{
+  "name": "FGBMFI Nigeria Regional Events Management System",
+  "description": "Full-stack registration, attendance, and reporting system for Regional Council Meetings. Features delegate lookup, fast check-in, financial tracking, and role-based dashboards.",
+  "requestFramePermissions": []
+}

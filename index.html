@@ -1,0 +1,82 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+    <title>FGBMFI Nigeria - Regional Events Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+      @media print {
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+        body { background: white; color: black; }
+        .card { box-shadow: none; border: 1px solid #ddd; }
+      }
+      .print-only { display: none; }
+
+      /* New styles for robust PDF exporting */
+      .print-mode {
+        background-color: white !important;
+        padding: 20px !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        min-height: auto !important;
+        height: auto !important;
+        width: 100% !important;
+        overflow: visible !important;
+        position: static !important;
+      }
+      
+      /* Ensure .no-print elements are hidden during PDF generation snapshot */
+      .print-mode .no-print {
+        display: none !important;
+      }
+      
+      /* Force all children to be visible and auto-height */
+      .print-mode * {
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+      }
+
+      .print-mode table {
+        width: 100% !important;
+        table-layout: auto !important;
+        border-collapse: collapse !important;
+      }
+      
+      .print-mode tr {
+        page-break-inside: avoid;
+      }
+      
+      .print-mode thead {
+        display: table-header-group;
+      }
+      
+      .print-mode .sticky {
+        position: static !important;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.10.1",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-gray-50 text-slate-900">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
