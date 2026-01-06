@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
@@ -36,13 +35,14 @@ const AppContent = () => {
   useEffect(() => {
     let mounted = true;
 
-    // Safety watchdog: Force initialization to stop after 8 seconds
+    // PRODUCTION HARDENING: 10-second Safety watchdog
+    // Optimized for Niger/Nigeria low-bandwidth 3G/4G stability
     const safetyTimeout = setTimeout(() => {
       if (mounted && isLoading) {
-        console.warn("Auth initialization timed out. Dropping to fallback state.");
+        console.warn("Network Latency Warning: Safety Watchdog activated.");
         setIsLoading(false);
       }
-    }, 8000);
+    }, 10000);
 
     const initAuth = async () => {
       try {
@@ -63,7 +63,7 @@ const AppContent = () => {
            if (!userError && appUser && mounted) {
              setUser(appUser as User);
            } else if (mounted) {
-             // Resilience fallback: Use synthetic user if profile lookup fails
+             // Basic session recovery if profile retrieval is slow
              setUser({
                id: session.user.id,
                email: session.user.email || '',
@@ -72,7 +72,7 @@ const AppContent = () => {
            }
         }
       } catch (err) {
-        console.error("Critical Auth Initialization Error:", err);
+        console.error("Auth init failure:", err);
       } finally {
         if (mounted) {
           setIsLoading(false);
@@ -89,22 +89,15 @@ const AppContent = () => {
         if (event === 'SIGNED_OUT') { 
           setUser(null); 
         } 
-        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
           if (session?.user) {
              try {
                 const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
                 if (appUser && mounted) {
                     setUser(appUser as User);
-                } else if (mounted) {
-                    // Handshake fallback for live session events
-                    setUser({
-                        id: session.user.id,
-                        email: session.user.email || '',
-                        role: UserRole.ADMIN
-                    });
                 }
              } catch (e) {
-                console.warn("User profile sync error, using fallback session.");
+                console.warn("Real-time profile sync pending...");
              }
           }
         }
@@ -119,9 +112,12 @@ const AppContent = () => {
 
   const login = (u: User) => setUser(u);
   const logout = async () => { 
-    // Optimistic logout to prevent UI freeze
     setUser(null);
-    try { await supabase.auth.signOut(); } catch (e) {}
+    try { 
+      await supabase.auth.signOut();
+      localStorage.clear();
+      window.location.hash = "/login";
+    } catch (e) {}
   };
 
   if (!isSupabaseConfigured) return <ConfigurationError />;
@@ -131,8 +127,8 @@ const AppContent = () => {
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6">
         <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6"></div>
         <div className="text-center">
-            <p className="text-blue-900 font-black uppercase tracking-widest text-sm">Initializing System</p>
-            <p className="text-gray-400 text-[10px] font-bold uppercase mt-2">Connecting to Secure Database...</p>
+            <p className="text-blue-900 font-black uppercase tracking-widest text-sm">System Secure Link</p>
+            <p className="text-gray-400 text-[10px] font-bold uppercase mt-2 animate-pulse tracking-[0.2em]">Establishing Data Connection...</p>
         </div>
       </div>
     );

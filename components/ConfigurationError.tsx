@@ -26,7 +26,7 @@ export const ConfigurationError = () => (
                     <p className="font-bold text-blue-900 mb-2">Supabase Credential Guide:</p>
                     <ol className="list-decimal ml-5 space-y-1">
                         <li>Log in to your Supabase Project Dashboard.</li>
-                        <li>Navigate to <strong>Project Settings</strong> > <strong>API</strong>.</li>
+                        <li>Navigate to <strong>Project Settings</strong> &gt; <strong>API</strong>.</li>
                         <li>Verify the <strong>Project URL</strong> and <strong>Anon Public</strong> key.</li>
                         <li>Update <code>supabaseClient.ts</code> with these values.</li>
                     </ol>
