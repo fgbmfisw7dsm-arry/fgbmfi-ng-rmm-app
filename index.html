@@ -16,41 +16,52 @@
       }
       .print-only { display: none; }
 
-      /* New styles for robust PDF exporting */
+      /* Robust PDF Exporting Styles */
       .print-mode {
         background-color: white !important;
-        padding: 20px !important;
+        /* Strip all external margins/paddings that cause misalignment */
+        padding: 0 !important; 
         margin: 0 !important;
         box-shadow: none !important;
         border: none !important;
+        border-radius: 0 !important;
         min-height: auto !important;
         height: auto !important;
         width: 100% !important;
         overflow: visible !important;
         position: static !important;
+        box-sizing: border-box !important;
       }
       
-      /* Ensure .no-print elements are hidden during PDF generation snapshot */
+      /* Target the common report container classes to force width */
+      .print-mode.p-12, .print-mode.rounded-\[2\.5rem\] {
+        padding: 15px !important; /* Minimal internal padding */
+        border-radius: 0 !important;
+      }
+      
       .print-mode .no-print {
         display: none !important;
       }
       
-      /* Force all children to be visible and auto-height */
       .print-mode * {
         overflow: visible !important;
         height: auto !important;
         min-height: 0 !important;
         max-height: none !important;
+        box-sizing: border-box !important;
       }
 
       .print-mode table {
         width: 100% !important;
         table-layout: auto !important;
         border-collapse: collapse !important;
+        page-break-inside: auto !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
       }
       
       .print-mode tr {
-        page-break-inside: avoid;
+        page-break-inside: avoid !important;
       }
       
       .print-mode thead {
@@ -59,6 +70,10 @@
       
       .print-mode .sticky {
         position: static !important;
+      }
+
+      .print-mode .break-inside-avoid {
+        page-break-inside: avoid !important;
       }
     </style>
   <script type="importmap">

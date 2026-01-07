@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 // =================================================================================
@@ -17,5 +18,12 @@ export const isSupabaseConfigured = !!supabaseUrl && !!supabaseAnonKey;
 // Flag for diagnostic UI feedback
 export const isStripeKeyDetected = false; 
 
-// Initialize and export the Supabase client.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Initialize and export the Supabase client with hardened settings for mobile browsers.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: 'fgbmfi_auth_token' // Explicit storage key for better isolation
+  }
+});

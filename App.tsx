@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User, UserRole } from './types';
+import { User } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
@@ -26,23 +27,37 @@ const AppContent = () => {
   const [activeEventId, setActiveEventId] = useState<string>(() => localStorage.getItem('fgbmfi_active_event_id') || '');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Sync event ID to localStorage
   useEffect(() => {
     if (activeEventId) localStorage.setItem('fgbmfi_active_event_id', activeEventId);
     else localStorage.removeItem('fgbmfi_active_event_id');
   }, [activeEventId]);
 
+  const logout = async () => {
+    setUser(null);
+    setIsLoading(false);
+    try {
+      await supabase.auth.signOut();
+      localStorage.clear();
+      window.location.hash = "/login";
+    } catch (e) {
+      console.warn("Signout failed:", e);
+      // Forced fallback if API call fails
+      localStorage.clear();
+      window.location.reload();
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
-
-    // PRODUCTION HARDENING: 10-second Safety watchdog
-    // Optimized for Niger/Nigeria low-bandwidth 3G/4G stability
-    const safetyTimeout = setTimeout(() => {
+    
+    // SELF-HEALING WATCHDOG: If auth handshake hangs (>4s), force state resolution
+    // This solves the perpetual "Authenticating..." state on mobile tab suspension
+    const watchdog = setTimeout(() => {
       if (mounted && isLoading) {
-        console.warn("Network Latency Warning: Safety Watchdog activated.");
+        console.warn("Auth Performance Watchdog: State resolution forced.");
         setIsLoading(false);
       }
-    }, 10000);
+    }, 4000);
 
     const initAuth = async () => {
       try {
@@ -51,32 +66,41 @@ const AppContent = () => {
           return;
         }
         
-        const { data: { session } } = await supabase.auth.getSession();
+        // SELF-HEALING: Attempt to recover session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error("Session corruption detected during boot:", sessionError);
+          await logout();
+          return;
+        }
 
         if (session?.user && mounted) {
-           const { data: appUser, error: userError } = await supabase
+           const { data: appUser, error: profileError } = await supabase
             .from('app_users')
             .select('*')
             .eq('id', session.user.id)
             .single();
            
-           if (!userError && appUser && mounted) {
+           if (!profileError && appUser && mounted) {
              setUser(appUser as User);
            } else if (mounted) {
-             // Basic session recovery if profile retrieval is slow
-             setUser({
-               id: session.user.id,
-               email: session.user.email || '',
-               role: UserRole.ADMIN
-             });
+             // Profile check failed but auth is active - check if session is stale
+             console.warn("Session active but profile fetch rejected. Retrying cleanup.");
+           }
+        } else if (!session && mounted) {
+           // Defensive check: if we have local storage keys but no session, clear them
+           if (Object.keys(localStorage).some(key => key.includes('fgbmfi_auth_token'))) {
+              console.info("Purging stale local storage keys...");
+              localStorage.clear();
            }
         }
       } catch (err) {
-        console.error("Auth init failure:", err);
+        console.error("Critical Auth Boot failure:", err);
       } finally {
         if (mounted) {
           setIsLoading(false);
-          clearTimeout(safetyTimeout);
+          clearTimeout(watchdog);
         }
       }
     };
@@ -86,39 +110,33 @@ const AppContent = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!mounted) return;
         
-        if (event === 'SIGNED_OUT') { 
-          setUser(null); 
+        console.log(`Auth Transition Event: ${event}`);
+
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setIsLoading(false);
         } 
-        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
           if (session?.user) {
              try {
-                const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
-                if (appUser && mounted) {
-                    setUser(appUser as User);
-                }
+               const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
+               if (appUser && mounted) {
+                 setUser(appUser as User);
+               }
              } catch (e) {
-                console.warn("Real-time profile sync pending...");
+               console.warn("Profile sync in progress...");
              }
+             setIsLoading(false);
           }
         }
     });
 
     return () => { 
       mounted = false;
-      clearTimeout(safetyTimeout);
+      clearTimeout(watchdog);
       subscription.unsubscribe(); 
     };
   }, []);
-
-  const login = (u: User) => setUser(u);
-  const logout = async () => { 
-    setUser(null);
-    try { 
-      await supabase.auth.signOut();
-      localStorage.clear();
-      window.location.hash = "/login";
-    } catch (e) {}
-  };
 
   if (!isSupabaseConfigured) return <ConfigurationError />;
   
@@ -126,16 +144,22 @@ const AppContent = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6">
         <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6"></div>
-        <div className="text-center">
+        <div className="text-center space-y-4">
             <p className="text-blue-900 font-black uppercase tracking-widest text-sm">System Secure Link</p>
-            <p className="text-gray-400 text-[10px] font-bold uppercase mt-2 animate-pulse tracking-[0.2em]">Establishing Data Connection...</p>
+            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest animate-pulse">Establishing Handshake...</p>
+            <button 
+              onClick={() => { localStorage.clear(); window.location.reload(); }} 
+              className="mt-4 px-6 py-3 bg-red-50 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all shadow-sm border border-red-100"
+            >
+              Reset Stuck Session
+            </button>
         </div>
       </div>
     );
   }
 
   return (
-    <AppContext.Provider value={{ user, activeEventId, login, logout, onEventChange: setActiveEventId }}>
+    <AppContext.Provider value={{ user, activeEventId, login: setUser, logout, onEventChange: setActiveEventId }}>
       <HashRouter>
         <Routes>
           {!user ? (

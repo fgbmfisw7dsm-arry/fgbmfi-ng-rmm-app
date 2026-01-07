@@ -23,7 +23,6 @@ export const generateCodeFromId = (delegateId: string, eventId: string): string 
     }
     
     // Convert to 4-digit numeric string (0001 - 9999)
-    // We use 9999 as modulo to keep it strictly 4 digits and avoid 0000 usually
     const code = (Math.abs(hash) % 9999) + 1;
     return code.toString().padStart(4, '0');
 };
@@ -60,7 +59,10 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
     printContainer.style.left = '0';
     printContainer.style.zIndex = '-1000';
     printContainer.style.background = '#ffffff';
-    printContainer.style.width = orientation === 'landscape' ? '1120px' : '790px';
+    
+    // Use wider capture area for landscape to ensure right-most columns aren't clipped
+    const containerWidth = orientation === 'landscape' ? 1550 : 1000;
+    printContainer.style.width = `${containerWidth}px`;
     printContainer.style.height = 'auto';
     printContainer.style.overflow = 'visible';
     
@@ -68,7 +70,8 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
     document.body.appendChild(printContainer);
 
     const options = {
-        margin: [10, 10, 10, 10],
+        // [top, left, bottom, right] in mm
+        margin: [10, 5, 20, 5],
         filename: filename,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
@@ -76,10 +79,11 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
             useCORS: true, 
             logging: false,
             scrollY: 0,
-            windowWidth: document.documentElement.offsetWidth,
-            windowHeight: document.documentElement.offsetHeight
+            scrollX: 0,
+            windowWidth: containerWidth,
+            width: containerWidth
         },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: orientation }
+        jsPDF: { unit: 'mm', format: 'a4', orientation: orientation, compress: true }
     };
 
     setTimeout(() => {
@@ -90,5 +94,5 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
             console.error("An error occurred during PDF generation:", error);
             document.body.removeChild(printContainer);
         });
-    }, 500);
+    }, 1000);
 };

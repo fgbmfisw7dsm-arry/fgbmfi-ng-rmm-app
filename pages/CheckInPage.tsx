@@ -17,6 +17,16 @@ const CheckInPage = () => {
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
 
+  // Ensure search is cleared on unmount (exiting the feature)
+  useEffect(() => {
+    return () => {
+      setQuery('');
+      setResults([]);
+      setFeedback(null);
+      setCode('');
+    };
+  }, []);
+
   const loadSessions = useCallback(async () => {
     if(activeEventId) {
         try {
@@ -31,9 +41,8 @@ const CheckInPage = () => {
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
   const performSearch = useCallback(async () => {
-    if (query.length > 1 && activeEventId) {
+    if (query.trim().length > 1 && activeEventId) {
         try {
-            // Apply district filter ONLY for REGISTRAR roles. FINANCE and ADMIN see everything.
             const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) ? user.district : undefined;
             const data = await db.searchDelegates(query, activeEventId, districtFilter, selectedSessionId);
             
@@ -51,7 +60,7 @@ const CheckInPage = () => {
         } catch(e: any) { 
             console.error("Search failed:", e); 
         }
-    } else if (query.length === 0) { 
+    } else if (query.trim().length === 0) { 
         setResults([]); 
     }
   }, [query, activeEventId, selectedSessionId, user]);
@@ -119,6 +128,12 @@ const CheckInPage = () => {
     }
   };
 
+  const clearSearch = () => {
+    setQuery('');
+    setResults([]);
+    setFeedback(null);
+  };
+
   if(!activeEventId) return (
     <div className="p-20 text-center flex flex-col items-center gap-6 opacity-60">
         <div className="text-6xl">📍</div>
@@ -160,15 +175,26 @@ const CheckInPage = () => {
 
        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
          <h2 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-[0.2em]">{selectedSessionId ? '3.' : '2.'} Database Lookup & Manual Verify</h2>
-         <input 
-           className="w-full p-5 text-xl border-2 border-gray-50 rounded-2xl bg-gray-50 focus:bg-white focus:border-blue-500 outline-none font-bold" 
-           placeholder="Search delegate by name or phone..." 
-           value={query} 
-           onChange={e => {
-             setQuery(e.target.value);
-             if (feedback?.type === 'error') setFeedback(null);
-           }} 
-         />
+         <div className="relative">
+             <input 
+               className="w-full p-5 pr-14 text-xl border-2 border-gray-50 rounded-2xl bg-gray-50 focus:bg-white focus:border-blue-500 outline-none font-bold transition-all" 
+               placeholder="Search delegate by name or phone..." 
+               value={query} 
+               onChange={e => {
+                 setQuery(e.target.value);
+                 if (feedback?.type === 'error') setFeedback(null);
+               }} 
+             />
+             {query && (
+                 <button 
+                    onClick={clearSearch}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-gray-200 hover:bg-red-100 text-gray-500 hover:text-red-600 rounded-full transition-all"
+                    title="Clear search"
+                 >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                 </button>
+             )}
+         </div>
        </div>
 
        <div className="space-y-4">
@@ -180,15 +206,20 @@ const CheckInPage = () => {
               </div>
               <div className="flex items-center gap-4 w-full md:w-auto justify-end">
                   {d.checkedIn ? (
-                    <div className="flex flex-col items-end">
+                    <div className="flex flex-col items-end gap-3">
                         <span className="px-6 py-2 bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-green-100 animate-in zoom-in">Verified</span>
-                        <div className="mt-3 text-right">
+                        <div className="text-right flex flex-col items-end">
                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Session Code:</span>
-                           {/* HIGH VISIBILITY CODE FOR COPYING */}
                            <span className="text-3xl font-black text-white tracking-[0.3em] font-mono bg-blue-900 px-6 py-2.5 rounded-2xl shadow-xl inline-block border-2 border-blue-700 animate-in slide-in-from-right-2">
                              {d.code || generateCodeFromId(d.delegate_id, activeEventId)}
                            </span>
                         </div>
+                        <button 
+                          onClick={clearSearch}
+                          className="text-[10px] font-black text-blue-600 uppercase border-b border-blue-200 pb-0.5 mt-1 hover:text-blue-800 transition-colors"
+                        >
+                          Done & Clear Results
+                        </button>
                     </div>
                   ) : (
                     <button 

@@ -4,7 +4,8 @@ import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult
 import { generateCodeFromId } from './utils';
 
 /**
- * Aggressive normalization to handle whitespace and casing issues in district strings.
+ * Normalizes input by trimming whitespace. 
+ * Removed .toLowerCase() to support non-email based usernames that may be case sensitive.
  */
 const normalize = (val?: string) => (val || '').trim();
 
@@ -15,15 +16,16 @@ const handleSupabaseError = (res: { error: any, data: any }, customMessage?: str
         const hint = res.error.hint || "";
         const msg = `${res.error.message} ${detail} ${hint}`.trim();
         
-        // SESSION TIMEOUT DETECTION
-        if (msg.toLowerCase().includes('jwt expired') || msg.toLowerCase().includes('invalid token')) {
-            alert("Security Session Expired: Please refresh the page or log in again.");
-            // Optional: trigger redirect
-            window.location.hash = "/login";
-            throw new Error("SESSION_EXPIRED");
+        // SESSION TIMEOUT & CORRUPTION DETECTION
+        const lowerMsg = msg.toLowerCase();
+        if (lowerMsg.includes('jwt expired') || lowerMsg.includes('invalid token') || lowerMsg.includes('refresh_token_not_found')) {
+            console.warn("Auth Session Corrupted. Triggering local cleanup.");
+            localStorage.clear();
+            window.location.reload(); // Force full reload to reset state
+            throw new Error("SESSION_CORRUPTED");
         }
 
-        if (msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied')) {
+        if (lowerMsg.includes('row-level security') || lowerMsg.includes('permission denied')) {
             throw new Error(customMessage ? `${customMessage}: Access Denied (Check Roles & Permissions)` : "Access Denied: You do not have permission for this database operation.");
         }
         
@@ -34,8 +36,15 @@ const handleSupabaseError = (res: { error: any, data: any }, customMessage?: str
 
 export const auth = {
     login: async (email: string, password: string): Promise<User | null> => {
+        // DEFENSIVE: Clear any local session ghosts before attempting a new sign-in
+        try {
+            await supabase.auth.signOut({ scope: 'local' });
+        } catch (e) {
+            console.warn("Pre-login cleanup skipped:", e);
+        }
+
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
-            email: normalize(email).toLowerCase(), 
+            email: normalize(email), 
             password 
         });
 
@@ -54,6 +63,7 @@ export const auth = {
                 .single();
 
             if (profileError) {
+                // Return a basic object if the app_users record is missing but auth succeeded
                 return {
                     id: authData.user.id,
                     email: authData.user.email || email,
@@ -71,7 +81,10 @@ export const auth = {
         }
     },
     logout: async () => {
-        try { await supabase.auth.signOut(); } catch (e) {}
+        try { 
+            await supabase.auth.signOut(); 
+            localStorage.clear();
+        } catch (e) {}
     }
 };
 
@@ -115,7 +128,7 @@ export const db = {
     createUser: async (user: Omit<User, 'id'>, password: string) => {
         const payloadRole = (user.role || '').toLowerCase();
         const payloadDistrict = (payloadRole === 'registrar') ? normalize(user.district) : null;
-        const payloadEmail = normalize(user.email).toLowerCase();
+        const payloadEmail = normalize(user.email);
 
         const { data, error } = await supabase.rpc('create_app_user', { 
             email: payloadEmail, 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
 import { UserRole, FinancialType, Session, Event, SystemSettings } from '../types';
@@ -102,7 +103,7 @@ const ReportsPage = () => {
                                 <span>{districtName}</span>
                                 <span className="bg-white/20 px-2 rounded">Total: {districtDelegates.length}</span>
                             </div>
-                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1000px]">
+                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
                                 <thead>
                                     <tr className="bg-gray-50 font-black uppercase text-gray-400">
                                         <th className="border p-2 w-8 text-center">S/N</th>
@@ -176,18 +177,14 @@ const ReportsPage = () => {
                                 <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
                                     <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200">{rowName}</td>
                                     {matrixColumns.map(col => {
-                                        // National Officer Rule: Count strictly by Office once
                                         const isNationalRow = rowName.toUpperCase() === "NATIONAL/EXTERNAL DISTRICT";
-                                        
                                         const count = rowDelegates.filter(d => {
                                             if (isNationalRow) {
                                                 return (d.office || '').trim().toUpperCase() === col.toUpperCase();
                                             }
-                                            // Normal flow: Check if delegate matches column via Rank or Office
                                             return (d.rank || '').trim().toUpperCase() === col.toUpperCase() || 
                                                    (d.office || '').trim().toUpperCase() === col.toUpperCase();
                                         }).length;
-                                        
                                         colTotals[col] = (colTotals[col] || 0) + count;
                                         return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'}`}>{count || '-'}</td>;
                                     })}
@@ -195,7 +192,6 @@ const ReportsPage = () => {
                                 </tr>
                             )
                         })}
-                        {/* FOOTER: Vertical Totals */}
                         <tr className="bg-blue-900 text-white font-black uppercase shadow-2xl">
                             <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl">Grand Entity Totals</td>
                             {matrixColumns.map(col => (
@@ -207,23 +203,6 @@ const ReportsPage = () => {
                         </tr>
                     </tbody>
                 </table>
-                <div className="mt-8 flex flex-wrap gap-8 items-center bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-300 no-print">
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 bg-blue-100 border border-blue-900"></div>
-                        <span className="text-[10px] font-black text-gray-500 uppercase">District Rows (Horizontal)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 bg-blue-900"></div>
-                        <span className="text-[10px] font-black text-gray-500 uppercase">Rank/Office Totals (Vertical)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 bg-yellow-400 rounded shadow-sm"></div>
-                        <span className="text-[10px] font-black text-gray-500 uppercase">Total Distinct Individuals</span>
-                    </div>
-                    <div className="flex items-center gap-2 ml-auto">
-                        <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase">* National Officers indexed by Office only</span>
-                    </div>
-                </div>
             </div>
         );
     };
@@ -235,7 +214,7 @@ const ReportsPage = () => {
 
         return (
             <div className="overflow-x-auto w-full">
-                <table className="w-full text-sm text-left border border-gray-300 min-w-[1000px] rounded-lg overflow-hidden">
+                <table className="w-full text-sm text-left border border-gray-300 min-w-[950px] rounded-lg overflow-hidden">
                     <thead className="bg-slate-100 font-black uppercase text-[10px] text-slate-700">
                         <tr><th className="p-3 border sticky left-0 bg-slate-100 z-10">Financial Category</th>{sessionCols.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50">Grand Total</th></tr>
                     </thead>
@@ -282,7 +261,7 @@ const ReportsPage = () => {
         const totalRedeemed = districtSummary.reduce((s, d) => s + d.redeemed, 0);
         return (
              <div className="overflow-x-auto w-full">
-                 <table className="w-full text-sm text-left border-collapse border border-gray-300 min-w-[1000px] rounded-lg">
+                 <table className="w-full text-sm text-left border-collapse border border-gray-300 min-w-[950px] rounded-lg">
                     <thead className="bg-slate-100 uppercase text-[10px] font-black text-slate-700">
                         <tr><th className="border p-3">District Entity</th><th className="border p-3 text-right">Amount Pledged</th><th className="border p-3 text-right">Amount Redeemed</th><th className="border p-3 text-right">Balance Outstanding</th></tr>
                     </thead>
@@ -325,7 +304,6 @@ const ReportsPage = () => {
                     });
 
                     if (distPledges.length === 0) return null;
-                    
                     const sortedDistPledges = [...distPledges].sort((a, b) => a.donor_name.localeCompare(b.donor_name));
                     const dPledged = sortedDistPledges.reduce((s, p) => s + Number(p.amount_pledged), 0);
                     const dRedeemed = sortedDistPledges.reduce((s, p) => s + Number(p.amount_redeemed), 0);
@@ -333,7 +311,7 @@ const ReportsPage = () => {
                     return (
                         <div key={districtName} className="mb-8 break-inside-avoid">
                             <div className="bg-slate-800 text-white p-2 font-black uppercase text-xs rounded-t-lg">{districtName} Detailed Pledges</div>
-                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1000px]">
+                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
                                 <thead className="bg-gray-50 font-black uppercase text-slate-500">
                                     <tr><th className="border p-2">Donor Identity</th><th className="border p-2">Chapter</th><th className="border p-2">Contact</th><th className="border p-2 text-right">Pledged (NGN)</th><th className="border p-2 text-right">Redeemed (NGN)</th><th className="border p-2 text-right">Balance (NGN)</th></tr>
                                 </thead>
@@ -359,7 +337,7 @@ const ReportsPage = () => {
                         </div>
                     );
                 })}
-                <div className="p-6 bg-blue-900 text-white font-black text-right flex justify-between items-center rounded-2xl min-w-[1000px] uppercase text-xs shadow-xl">
+                <div className="p-6 bg-blue-900 text-white font-black text-right flex justify-between items-center rounded-2xl min-w-[950px] uppercase text-xs shadow-xl">
                     <span>Global Cumulative Pledge Ledger</span>
                     <div className="flex gap-10">
                         <span>Pledged: {formatCurrency(totalPledged)}</span>

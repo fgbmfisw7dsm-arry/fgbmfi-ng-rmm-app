@@ -33,8 +33,8 @@ const UsersModule = () => {
     const handleAction = async () => {
         setStatus(null);
 
-        if (!form.email || !form.email.includes('@')) {
-            setStatus({ type: 'error', msg: "Please enter a valid email address." });
+        if (!form.email || form.email.trim().length < 3) {
+            setStatus({ type: 'error', msg: "Please enter a valid username." });
             return;
         }
 
@@ -153,11 +153,11 @@ const UsersModule = () => {
                 
                 <div className="space-y-4">
                     <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-400 uppercase">Login Email</label>
+                        <label className="text-[10px] font-black text-gray-400 uppercase">Login Username</label>
                         <input 
                             type="text" 
                             className="w-full p-3 border rounded-xl bg-gray-50 font-bold focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" 
-                            placeholder="email@example.com" 
+                            placeholder="e.g. jdoe_registrar" 
                             value={form.email} 
                             onChange={e => setForm({...form, email: e.target.value})} 
                             disabled={!!editingUserId || loading} 
