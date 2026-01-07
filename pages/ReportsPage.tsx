@@ -106,25 +106,25 @@ const ReportsPage = () => {
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
                                 <thead>
                                     <tr className="bg-gray-50 font-black uppercase text-gray-400">
-                                        <th className="border p-2 w-8 text-center">S/N</th>
-                                        <th className="border p-2">Full Name</th>
-                                        <th className="border p-2">Office</th>
-                                        <th className="border p-2">Rank</th>
-                                        <th className="border p-2">Chapter</th>
-                                        <th className="border p-2">Phone</th>
-                                        <th className="border p-2 text-center">Verification Time</th>
+                                        <th className="border p-2 w-8 text-center whitespace-nowrap">S/N</th>
+                                        <th className="border p-2 whitespace-nowrap">Full Name</th>
+                                        <th className="border p-2 whitespace-nowrap">Office</th>
+                                        <th className="border p-2 whitespace-nowrap">Rank</th>
+                                        <th className="border p-2 whitespace-nowrap">Chapter</th>
+                                        <th className="border p-2 whitespace-nowrap">Phone</th>
+                                        <th className="border p-2 text-center whitespace-nowrap">Verification Time</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {sortedDistrictDelegates.map((d: any, idx: number) => (
                                         <tr key={d.delegate_id} className="hover:bg-gray-50 border-b last:border-b-0">
                                             <td className="border p-2 text-center text-gray-400 font-bold">{idx + 1}</td>
-                                            <td className="border p-2 font-black uppercase text-blue-900">{d.title} {d.first_name} {d.last_name}</td>
-                                            <td className="border p-2 font-bold text-gray-600 uppercase">{d.office || '-'}</td>
-                                            <td className="border p-2 font-bold text-blue-800 uppercase">{d.rank}</td>
-                                            <td className="border p-2 uppercase text-gray-500 font-medium">{d.chapter || 'Individual'}</td>
-                                            <td className="border p-2 font-mono text-gray-600">{d.phone}</td>
-                                            <td className="border p-2 text-center text-gray-400">
+                                            <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">{d.title} {d.first_name} {d.last_name}</td>
+                                            <td className="border p-2 font-bold text-gray-600 uppercase whitespace-nowrap">{d.office || '-'}</td>
+                                            <td className="border p-2 font-bold text-blue-800 uppercase whitespace-nowrap">{d.rank}</td>
+                                            <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{d.chapter || 'Individual'}</td>
+                                            <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{d.phone}</td>
+                                            <td className="border p-2 text-center text-gray-400 whitespace-nowrap">
                                                 {d.checked_in_at ? (
                                                     <>
                                                         <span className="block font-black text-gray-500">{new Date(d.checked_in_at).toLocaleDateString([], {day:'2-digit', month:'short'})}</span>
@@ -154,9 +154,9 @@ const ReportsPage = () => {
                 <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1200px]">
                     <thead>
                         <tr className="bg-slate-100 uppercase font-black text-slate-700">
-                            <th className="border p-3 text-left bg-slate-100 sticky left-0 z-10 w-48 shadow-sm">District / Entity</th>
-                            {matrixColumns.map(col => <th key={col} className="border p-3 text-center">{col}</th>)}
-                            <th className="border p-3 text-center bg-blue-100 text-blue-900 w-24">ROW TOTAL</th>
+                            <th className="border p-3 text-left bg-slate-100 sticky left-0 z-10 w-48 shadow-sm whitespace-nowrap">District / Entity</th>
+                            {matrixColumns.map(col => <th key={col} className="border p-3 text-center whitespace-nowrap">{col}</th>)}
+                            <th className="border p-3 text-center bg-blue-100 text-blue-900 w-24 whitespace-nowrap">ROW TOTAL</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -175,7 +175,7 @@ const ReportsPage = () => {
 
                             return (
                                 <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
-                                    <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200">{rowName}</td>
+                                    <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200 whitespace-nowrap">{rowName}</td>
                                     {matrixColumns.map(col => {
                                         const isNationalRow = rowName.toUpperCase() === "NATIONAL/EXTERNAL DISTRICT";
                                         const count = rowDelegates.filter(d => {
@@ -186,18 +186,18 @@ const ReportsPage = () => {
                                                    (d.office || '').trim().toUpperCase() === col.toUpperCase();
                                         }).length;
                                         colTotals[col] = (colTotals[col] || 0) + count;
-                                        return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'}`}>{count || '-'}</td>;
+                                        return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'} whitespace-nowrap`}>{count || '-'}</td>;
                                     })}
-                                    <td className="border p-3 text-center font-black bg-blue-100/50 text-blue-900 text-xs shadow-inner">{rowHeadCount}</td>
+                                    <td className="border p-3 text-center font-black bg-blue-100/50 text-blue-900 text-xs shadow-inner whitespace-nowrap">{rowHeadCount}</td>
                                 </tr>
                             )
                         })}
                         <tr className="bg-blue-900 text-white font-black uppercase shadow-2xl">
-                            <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl">Grand Entity Totals</td>
+                            <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl whitespace-nowrap">Grand Entity Totals</td>
                             {matrixColumns.map(col => (
-                                <td key={col} className="border p-3 text-center bg-blue-800/80">{colTotals[col] || '0'}</td>
+                                <td key={col} className="border p-3 text-center bg-blue-800/80 whitespace-nowrap">{colTotals[col] || '0'}</td>
                             ))}
-                            <td className="border p-3 text-center bg-yellow-400 text-blue-900 font-black text-sm shadow-xl animate-pulse">
+                            <td className="border p-3 text-center bg-yellow-400 text-blue-900 font-black text-sm shadow-xl animate-pulse whitespace-nowrap">
                                 {grandTotal}
                             </td>
                         </tr>
@@ -216,23 +216,23 @@ const ReportsPage = () => {
             <div className="overflow-x-auto w-full">
                 <table className="w-full text-sm text-left border border-gray-300 min-w-[950px] rounded-lg overflow-hidden">
                     <thead className="bg-slate-100 font-black uppercase text-[10px] text-slate-700">
-                        <tr><th className="p-3 border sticky left-0 bg-slate-100 z-10">Financial Category</th>{sessionCols.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50">Grand Total</th></tr>
+                        <tr><th className="p-3 border sticky left-0 bg-slate-100 z-10 whitespace-nowrap">Financial Category</th>{sessionCols.map(s => <th key={s.session_id} className="p-3 border text-right whitespace-nowrap">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50 whitespace-nowrap">Grand Total</th></tr>
                     </thead>
                     <tbody className="divide-y divide-gray-300">
                         {types.map(t => {
                             let rowTotal = 0;
                             return (
                                 <tr key={t.id} className="hover:bg-gray-50">
-                                    <td className="p-3 border font-black uppercase text-[11px] sticky left-0 bg-white group-hover:bg-gray-50">{t.label}</td>
-                                    {sessionCols.map(s => { const amt = getAmount(t.id as any, s.session_id); rowTotal += amt; return <td key={s.session_id} className="p-3 border text-right font-bold text-slate-600">{formatCurrency(amt)}</td>; })}
-                                    <td className="p-3 border text-right font-black bg-blue-50 text-blue-900">{formatCurrency(rowTotal)}</td>
+                                    <td className="p-3 border font-black uppercase text-[11px] sticky left-0 bg-white group-hover:bg-gray-50 whitespace-nowrap">{t.label}</td>
+                                    {sessionCols.map(s => { const amt = getAmount(t.id as any, s.session_id); rowTotal += amt; return <td key={s.session_id} className="p-3 border text-right font-bold text-slate-600 whitespace-nowrap">{formatCurrency(amt)}</td>; })}
+                                    <td className="p-3 border text-right font-black bg-blue-50 text-blue-900 whitespace-nowrap">{formatCurrency(rowTotal)}</td>
                                 </tr>
                             );
                         })}
                         <tr className="bg-blue-900 text-white font-black uppercase text-[11px]">
-                            <td className="p-3 border sticky left-0 bg-blue-900">Financial Session Totals</td>
-                            {sessionCols.map(s => <td key={s.session_id} className="p-3 border text-right">{formatCurrency(getAmount(FinancialType.OFFERING, s.session_id) + getAmount(FinancialType.PLEDGE_REDEMPTION, s.session_id))}</td>)}
-                            <td className="p-3 border text-right bg-blue-950">{formatCurrency(financials.reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0))}</td>
+                            <td className="p-3 border sticky left-0 bg-blue-900 whitespace-nowrap">Financial Session Totals</td>
+                            {sessionCols.map(s => <td key={s.session_id} className="p-3 border text-right whitespace-nowrap">{formatCurrency(getAmount(FinancialType.OFFERING, s.session_id) + getAmount(FinancialType.PLEDGE_REDEMPTION, s.session_id))}</td>)}
+                            <td className="p-3 border text-right bg-blue-950 whitespace-nowrap">{formatCurrency(financials.reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0))}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -263,22 +263,22 @@ const ReportsPage = () => {
              <div className="overflow-x-auto w-full">
                  <table className="w-full text-sm text-left border-collapse border border-gray-300 min-w-[950px] rounded-lg">
                     <thead className="bg-slate-100 uppercase text-[10px] font-black text-slate-700">
-                        <tr><th className="border p-3">District Entity</th><th className="border p-3 text-right">Amount Pledged</th><th className="border p-3 text-right">Amount Redeemed</th><th className="border p-3 text-right">Balance Outstanding</th></tr>
+                        <tr><th className="border p-3 whitespace-nowrap">District Entity</th><th className="border p-3 text-right whitespace-nowrap">Amount Pledged</th><th className="border p-3 text-right whitespace-nowrap">Amount Redeemed</th><th className="border p-3 text-right whitespace-nowrap">Balance Outstanding</th></tr>
                     </thead>
                     <tbody>
                         {districtSummary.map((d: any) => (
                             <tr key={d.district} className="hover:bg-gray-50 transition-colors">
-                                <td className="border p-3 font-black uppercase text-slate-800">{d.district}</td>
-                                <td className="border p-3 text-right font-bold">{formatCurrency(d.pledged)}</td>
-                                <td className="border p-3 text-right text-green-700 font-bold">{formatCurrency(d.redeemed)}</td>
-                                <td className="border p-3 text-right text-red-600 font-black">{formatCurrency(d.pledged - d.redeemed)}</td>
+                                <td className="border p-3 font-black uppercase text-slate-800 whitespace-nowrap">{d.district}</td>
+                                <td className="border p-3 text-right font-bold whitespace-nowrap">{formatCurrency(d.pledged)}</td>
+                                <td className="border p-3 text-right text-green-700 font-bold whitespace-nowrap">{formatCurrency(d.redeemed)}</td>
+                                <td className="border p-3 text-right text-red-600 font-black whitespace-nowrap">{formatCurrency(d.pledged - d.redeemed)}</td>
                             </tr>
                         ))}
                         <tr className="bg-blue-900 text-white font-black uppercase text-xs">
-                            <td className="border p-3">Global Pledge Totals</td>
-                            <td className="border p-3 text-right">{formatCurrency(totalPledged)}</td>
-                            <td className="border p-3 text-right">{formatCurrency(totalRedeemed)}</td>
-                            <td className="border p-3 text-right bg-red-800">{formatCurrency(totalPledged - totalRedeemed)}</td>
+                            <td className="border p-3 whitespace-nowrap">Global Pledge Totals</td>
+                            <td className="border p-3 text-right whitespace-nowrap">{formatCurrency(totalPledged)}</td>
+                            <td className="border p-3 text-right whitespace-nowrap">{formatCurrency(totalRedeemed)}</td>
+                            <td className="border p-3 text-right bg-red-800 whitespace-nowrap">{formatCurrency(totalPledged - totalRedeemed)}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -313,24 +313,24 @@ const ReportsPage = () => {
                             <div className="bg-slate-800 text-white p-2 font-black uppercase text-xs rounded-t-lg">{districtName} Detailed Pledges</div>
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
                                 <thead className="bg-gray-50 font-black uppercase text-slate-500">
-                                    <tr><th className="border p-2">Donor Identity</th><th className="border p-2">Chapter</th><th className="border p-2">Contact</th><th className="border p-2 text-right">Pledged (NGN)</th><th className="border p-2 text-right">Redeemed (NGN)</th><th className="border p-2 text-right">Balance (NGN)</th></tr>
+                                    <tr><th className="border p-2 whitespace-nowrap">Donor Identity</th><th className="border p-2 whitespace-nowrap">Chapter</th><th className="border p-2 whitespace-nowrap">Contact</th><th className="border p-2 text-right whitespace-nowrap">Pledged (NGN)</th><th className="border p-2 text-right whitespace-nowrap">Redeemed (NGN)</th><th className="border p-2 text-right whitespace-nowrap">Balance (NGN)</th></tr>
                                 </thead>
                                 <tbody>
                                     {sortedDistPledges.map((p: any) => (
                                         <tr key={p.id} className="hover:bg-gray-50 border-b last:border-b-0">
-                                            <td className="border p-2 font-black uppercase text-blue-900">{p.donor_name}</td>
-                                            <td className="border p-2 uppercase text-gray-500 font-medium">{p.chapter || '-'}</td>
-                                            <td className="border p-2 font-mono text-gray-600">{p.phone || '-'}</td>
-                                            <td className="border p-2 text-right font-bold text-slate-700">{formatCurrency(p.amount_pledged)}</td>
-                                            <td className="border p-2 text-right text-green-700 font-bold">{formatCurrency(p.amount_redeemed)}</td>
-                                            <td className="border p-2 text-right text-red-600 font-black">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>
+                                            <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">{p.donor_name}</td>
+                                            <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{p.chapter || '-'}</td>
+                                            <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{p.phone || '-'}</td>
+                                            <td className="border p-2 text-right font-bold text-slate-700 whitespace-nowrap">{formatCurrency(p.amount_pledged)}</td>
+                                            <td className="border p-2 text-right text-green-700 font-bold whitespace-nowrap">{formatCurrency(p.amount_redeemed)}</td>
+                                            <td className="border p-2 text-right text-red-600 font-black whitespace-nowrap">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>
                                         </tr>
                                     ))}
                                     <tr className="bg-slate-50 font-black uppercase text-slate-900">
-                                        <td colSpan={3} className="border p-2 text-right">Sub-Total for {districtName}:</td>
-                                        <td className="border p-2 text-right">{formatCurrency(dPledged)}</td>
-                                        <td className="border p-2 text-right text-green-700">{formatCurrency(dRedeemed)}</td>
-                                        <td className="border p-2 text-right text-red-600">{formatCurrency(dPledged - dRedeemed)}</td>
+                                        <td colSpan={3} className="border p-2 text-right whitespace-nowrap">Sub-Total for {districtName}:</td>
+                                        <td className="border p-2 text-right whitespace-nowrap">{formatCurrency(dPledged)}</td>
+                                        <td className="border p-2 text-right text-green-700 whitespace-nowrap">{formatCurrency(dRedeemed)}</td>
+                                        <td className="border p-2 text-right text-red-600 whitespace-nowrap">{formatCurrency(dPledged - dRedeemed)}</td>
                                     </tr>
                                 </tbody>
                             </table>
