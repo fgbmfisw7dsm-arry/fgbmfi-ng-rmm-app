@@ -16,36 +16,50 @@ const ReportsPage = () => {
     const [loading, setLoading] = useState(false);
     const reportRef = useRef<HTMLDivElement>(null);
 
+    // Track user.id instead of user object to prevent blinking loops if context re-provides user reference
     useEffect(() => {
         if (!activeEventId) return;
+        let mounted = true;
         setLoading(true);
-        Promise.all([
-            db.getAllDataForExport(activeEventId), 
-            db.getSessions(activeEventId), 
-            db.getEvents(),
-            db.getSettings()
-        ])
-        .then(([exportData, sessionData, eventList, sysSettings]) => {
-            const userDistrict = user?.district ? user.district.trim().toLowerCase() : null;
-            if (user?.role === UserRole.REGISTRAR && userDistrict) {
-                exportData.delegates = (exportData.delegates || []).filter((d: any) => 
-                    (d.district || '').trim().toLowerCase() === userDistrict
-                );
-                const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
-                exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
-                exportData.pledges = (exportData.pledges || []).filter((p: any) => 
-                    (p.district || '').trim().toLowerCase() === userDistrict
-                );
+
+        const fetchData = async () => {
+            try {
+                const [exportData, sessionData, eventList, sysSettings] = await Promise.all([
+                    db.getAllDataForExport(activeEventId), 
+                    db.getSessions(activeEventId), 
+                    db.getEvents(),
+                    db.getSettings()
+                ]);
+
+                if (!mounted) return;
+
+                const userDistrict = user?.district ? user.district.trim().toLowerCase() : null;
+                if (user?.role === UserRole.REGISTRAR && userDistrict) {
+                    exportData.delegates = (exportData.delegates || []).filter((d: any) => 
+                        (d.district || '').trim().toLowerCase() === userDistrict
+                    );
+                    const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
+                    exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
+                    exportData.pledges = (exportData.pledges || []).filter((p: any) => 
+                        (p.district || '').trim().toLowerCase() === userDistrict
+                    );
+                }
+
+                setData(exportData);
+                setSessions(sessionData);
+                setEvents(eventList);
+                setSettings(sysSettings);
+            } catch (err) {
+                console.error("Reports aggregation failure:", err);
+                if (mounted) setData({});
+            } finally {
+                if (mounted) setLoading(false);
             }
-            setData(exportData);
-            setSessions(sessionData);
-            setEvents(eventList);
-            setSettings(sysSettings);
-        }).catch(err => {
-            console.error("Reports aggregation failure:", err);
-            setData({});
-        }).finally(() => setLoading(false));
-    }, [activeEventId, user]);
+        };
+
+        fetchData();
+        return () => { mounted = false; };
+    }, [activeEventId, user?.id]); // Only re-fetch if event or actual user id changes
 
     const reportData = useMemo(() => {
         if (!data || !settings) return null;
@@ -72,7 +86,7 @@ const ReportsPage = () => {
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
-    if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Compiling Analytics Matrix...</div>;
+    if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Attendance Matrix...</div>;
 
     const { attendedDelegates, officialDistricts, matrixColumns, financials, pledges } = reportData;
     const selectedSessionTitle = sessions.find(s => s.session_id === selectedSessionId)?.title;

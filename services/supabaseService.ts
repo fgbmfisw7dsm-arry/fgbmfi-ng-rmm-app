@@ -5,11 +5,21 @@ import { generateCodeFromId } from './utils';
 
 /**
  * Normalizes input by trimming whitespace. 
- * Removed .toLowerCase() to support non-email based usernames that may be case sensitive.
  */
 const normalize = (val?: string) => (val || '').trim();
 
-const handleSupabaseError = (res: { error: any, data: any }, customMessage?: string) => {
+/**
+ * Helper to wrap promises with a timeout to prevent indefinite hangs.
+ */
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMessage)), timeoutMs))
+    ]);
+};
+
+// Fix: Using 'any' for the 'res' parameter to accommodate various Supabase response objects and resolve type narrowing issues.
+const handleSupabaseError = (res: any, customMessage?: string) => {
     if (res.error) {
         console.error("Supabase Error Context:", res.error);
         const detail = res.error.details || "";
@@ -21,7 +31,7 @@ const handleSupabaseError = (res: { error: any, data: any }, customMessage?: str
         if (lowerMsg.includes('jwt expired') || lowerMsg.includes('invalid token') || lowerMsg.includes('refresh_token_not_found')) {
             console.warn("Auth Session Corrupted. Triggering local cleanup.");
             localStorage.clear();
-            window.location.reload(); // Force full reload to reset state
+            window.location.reload(); 
             throw new Error("SESSION_CORRUPTED");
         }
 
@@ -43,10 +53,18 @@ export const auth = {
             console.warn("Pre-login cleanup skipped:", e);
         }
 
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
+        // Apply a 15-second timeout to the authentication handshake
+        const loginPromise = supabase.auth.signInWithPassword({ 
             email: normalize(email), 
             password 
         });
+
+        // Fix: Explicitly type withTimeout call as <any> to resolve destructuring errors (Property 'data' and 'error' do not exist on type '{}').
+        const { data: authData, error: authError } = await withTimeout<any>(
+            loginPromise, 
+            15000, 
+            "Login Timeout: Connection took too long. Please try again or reset connection."
+        );
 
         if (authError) {
             console.error("Auth Login Error:", authError);
@@ -63,7 +81,6 @@ export const auth = {
                 .single();
 
             if (profileError) {
-                // Return a basic object if the app_users record is missing but auth succeeded
                 return {
                     id: authData.user.id,
                     email: authData.user.email || email,
@@ -168,7 +185,6 @@ export const db = {
         const safeSessionId = (sessionId && sessionId.trim() !== "") ? sessionId : null;
         let queryBuilder = supabase.from('delegates').select('*');
         
-        // Aggressive District Filtering
         if (district && district.trim() !== "") {
             queryBuilder = queryBuilder.eq('district', normalize(district));
         }
@@ -299,14 +315,12 @@ export const db = {
 
         if (updates.length === 0) return 0;
 
-        // Optimized Sequential Update for Stability
         let count = 0;
         for (const update of updates) {
             const { error } = await supabase.from('delegates')
                 .update({ district: update.district })
                 .eq('delegate_id', update.delegate_id);
             if (!error) count++;
-            else console.warn(`Harmonize skip ID ${update.delegate_id}: ${error.message}`);
         }
         return count;
     },
@@ -329,46 +343,9 @@ export const db = {
         
         if (toDelete.length === 0) return 0;
         
-        // Use batch delete via 'in' clause for speed
         const { data, error } = await supabase.from('delegates').delete().in('delegate_id', toDelete).select();
         if (error) throw handleSupabaseError({ data: null, error }, "Deduplication Failed");
         return data?.length || 0;
-    },
-
-    searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {
-        let qb = supabase.from('pledges').select('*').eq('event_id', eventId);
-        if (district && district.trim() !== "") qb = qb.eq('district', normalize(district));
-        if (query && query.trim().length > 1) qb = qb.ilike('donor_name', `%${query.trim()}%`);
-        const { data } = await qb.limit(50);
-        return data || [];
-    },
-
-    addFinancialEntry: async (entry: Partial<FinancialEntry>) => 
-        handleSupabaseError(await supabase.from('financial_entries').insert(entry)),
-
-    createPledge: async (pledge: Partial<Pledge>) => 
-        handleSupabaseError(await supabase.from('pledges').insert(pledge)),
-
-    clearEventData: async (eventId: string) => {
-        await handleSupabaseError(await supabase.from('checkins').delete().eq('event_id', eventId));
-        await handleSupabaseError(await supabase.from('financial_entries').delete().eq('event_id', eventId));
-        await handleSupabaseError(await supabase.from('pledges').delete().eq('event_id', eventId));
-        return true;
-    },
-
-    deleteDelegatesByDistrict: async (district: string): Promise<number> => {
-        const { data, error } = await supabase.from('delegates').delete().eq('district', normalize(district)).select();
-        if (error) throw error;
-        return data?.length || 0;
-    },
-
-    deleteDelegatesByScope: async (scope: 'all' | string): Promise<number> => {
-        if (scope === 'all') {
-            const { data, error } = await supabase.from('delegates').delete().not('delegate_id', 'is', null).select();
-            if (error) throw error;
-            return data?.length || 0;
-        }
-        return 0;
     },
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
@@ -424,5 +401,54 @@ export const db = {
             supabase.from('pledges').select('*').eq('event_id', eventId)
         ]);
         return { delegates: d.data || [], checkins: c.data || [], financials: f.data || [], pledges: p.data || [] };
+    },
+
+    // Fix: Implement missing method searchPledges
+    searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {
+        if (!eventId) return [];
+        let qb = supabase.from('pledges').select('*').eq('event_id', eventId);
+        if (district && district.trim() !== "") {
+            qb = qb.eq('district', normalize(district));
+        }
+        if (query && query.length > 0) {
+            qb = qb.ilike('donor_name', `%${query}%`);
+        }
+        const { data, error } = await qb;
+        if (error) return [];
+        return data || [];
+    },
+
+    // Fix: Implement missing method addFinancialEntry
+    addFinancialEntry: async (entry: Partial<FinancialEntry>) => 
+        handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single()),
+
+    // Fix: Implement missing method createPledge
+    createPledge: async (pledge: Partial<Pledge>) => 
+        handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single()),
+
+    // Fix: Implement missing method clearEventData
+    clearEventData: async (eventId: string) => {
+        if (!eventId) throw new Error("Event ID required");
+        await handleSupabaseError(await supabase.from('checkins').delete().eq('event_id', eventId));
+        await handleSupabaseError(await supabase.from('financial_entries').delete().eq('event_id', eventId));
+        await handleSupabaseError(await supabase.from('pledges').delete().eq('event_id', eventId));
+    },
+
+    // Fix: Implement missing method deleteDelegatesByDistrict
+    deleteDelegatesByDistrict: async (district: string): Promise<number> => {
+        const { data, error } = await supabase.from('delegates').delete().eq('district', normalize(district)).select();
+        if (error) throw error;
+        return data?.length || 0;
+    },
+
+    // Fix: Implement missing method deleteDelegatesByScope
+    deleteDelegatesByScope: async (scope: string) => {
+        if (scope === 'all') {
+            await supabase.from('checkins').delete().neq('checkin_id', '00000000-0000-0000-0000-000000000000');
+            await supabase.from('financial_entries').delete().neq('entry_id', '00000000-0000-0000-0000-000000000000');
+            await supabase.from('pledges').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            const { error } = await supabase.from('delegates').delete().neq('delegate_id', '00000000-0000-0000-0000-000000000000');
+            if (error) throw error;
+        }
     }
 };

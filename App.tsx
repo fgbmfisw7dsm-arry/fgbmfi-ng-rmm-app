@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { User } from './types';
@@ -26,13 +26,17 @@ const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
   const [activeEventId, setActiveEventId] = useState<string>(() => localStorage.getItem('fgbmfi_active_event_id') || '');
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Use a ref to track current user ID for comparison during auth state changes
+  const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (activeEventId) localStorage.setItem('fgbmfi_active_event_id', activeEventId);
     else localStorage.removeItem('fgbmfi_active_event_id');
   }, [activeEventId]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
+    userIdRef.current = null;
     setUser(null);
     setIsLoading(false);
     try {
@@ -41,17 +45,26 @@ const AppContent = () => {
       window.location.hash = "/login";
     } catch (e) {
       console.warn("Signout failed:", e);
-      // Forced fallback if API call fails
       localStorage.clear();
       window.location.reload();
     }
-  };
+  }, []);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session) {
+        if (userIdRef.current) await logout();
+        return;
+      }
+    } catch (e) {
+      console.warn("Heartbeat refresh failed:", e);
+    }
+  }, [logout]);
 
   useEffect(() => {
     let mounted = true;
     
-    // SELF-HEALING WATCHDOG: If auth handshake hangs (>4s), force state resolution
-    // This solves the perpetual "Authenticating..." state on mobile tab suspension
     const watchdog = setTimeout(() => {
       if (mounted && isLoading) {
         console.warn("Auth Performance Watchdog: State resolution forced.");
@@ -66,11 +79,10 @@ const AppContent = () => {
           return;
         }
         
-        // SELF-HEALING: Attempt to recover session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
-          console.error("Session corruption detected during boot:", sessionError);
+          console.error("Session corruption detected:", sessionError);
           await logout();
           return;
         }
@@ -83,16 +95,8 @@ const AppContent = () => {
             .single();
            
            if (!profileError && appUser && mounted) {
+             userIdRef.current = appUser.id;
              setUser(appUser as User);
-           } else if (mounted) {
-             // Profile check failed but auth is active - check if session is stale
-             console.warn("Session active but profile fetch rejected. Retrying cleanup.");
-           }
-        } else if (!session && mounted) {
-           // Defensive check: if we have local storage keys but no session, clear them
-           if (Object.keys(localStorage).some(key => key.includes('fgbmfi_auth_token'))) {
-              console.info("Purging stale local storage keys...");
-              localStorage.clear();
            }
         }
       } catch (err) {
@@ -107,24 +111,38 @@ const AppContent = () => {
 
     initAuth();
     
+    const heartbeat = setInterval(refreshSession, 60000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshSession();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!mounted) return;
         
-        console.log(`Auth Transition Event: ${event}`);
+        console.log(`Auth Transition: ${event}`);
 
         if (event === 'SIGNED_OUT') {
+          userIdRef.current = null;
           setUser(null);
           setIsLoading(false);
         } 
         else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
           if (session?.user) {
-             try {
-               const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
-               if (appUser && mounted) {
-                 setUser(appUser as User);
-               }
-             } catch (e) {
-               console.warn("Profile sync in progress...");
+             // Only update if the user is different to avoid infinite context loops
+             if (userIdRef.current !== session.user.id) {
+                try {
+                  const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
+                  if (appUser && mounted) {
+                    userIdRef.current = appUser.id;
+                    setUser(appUser as User);
+                  }
+                } catch (e) {
+                  console.error("Auth profile fetch error:", e);
+                }
              }
              setIsLoading(false);
           }
@@ -134,9 +152,11 @@ const AppContent = () => {
     return () => { 
       mounted = false;
       clearTimeout(watchdog);
+      clearInterval(heartbeat);
+      window.removeEventListener('visibilitychange', handleVisibility);
       subscription.unsubscribe(); 
     };
-  }, []);
+  }, [logout, refreshSession]);
 
   if (!isSupabaseConfigured) return <ConfigurationError />;
   

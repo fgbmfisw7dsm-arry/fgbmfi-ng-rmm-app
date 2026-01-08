@@ -1,6 +1,7 @@
 
 import React, { useState, useContext, useEffect } from 'react';
 import { auth } from '../services/supabaseService';
+import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { FGBMFILogo } from '../components/Logos';
 
@@ -12,7 +13,6 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Clear any existing stale state when visiting login page
   useEffect(() => {
     setError('');
   }, []);
@@ -34,14 +34,22 @@ const LoginPage = () => {
     } catch (e: any) {
       console.error("Login component caught error:", e);
       const msg = e.message || 'System error. Check your connection.';
-      
-      if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('load failed')) {
-        setError('Network Connection Unstable. Please retry.');
-      } else {
-        setError(msg);
-      }
+      setError(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeepReset = async () => {
+    if (window.confirm("This will clear all system connection data and refresh the login page for a clean start. Proceed?")) {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+        localStorage.clear();
+        window.location.reload();
+      } catch (e) {
+        localStorage.clear();
+        window.location.reload();
+      }
     }
   };
 
@@ -55,12 +63,8 @@ const LoginPage = () => {
         </div>
         
         {error && (
-            <div className={`p-5 rounded-2xl mb-6 text-xs font-bold border text-center leading-relaxed animate-in slide-in-from-top-2 ${
-              error.includes('Database Access') || error.includes('Schema') ? 'bg-orange-50 text-orange-800 border-orange-200' : 'bg-red-50 text-red-600 border-red-100'
-            }`}>
-                <div className="flex flex-col gap-2">
-                    <span>{error}</span>
-                </div>
+            <div className="p-5 rounded-2xl mb-6 text-xs font-bold border text-center leading-relaxed bg-red-50 text-red-600 border-red-100 animate-in slide-in-from-top-2">
+                <span>{error}</span>
             </div>
         )}
 
@@ -100,16 +104,27 @@ const LoginPage = () => {
           <button 
             type="submit" 
             disabled={loading} 
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-100 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none uppercase tracking-[0.2em] text-xs mt-4 transform active:scale-[0.98]"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-100 disabled:bg-gray-200 disabled:text-gray-400 uppercase tracking-[0.2em] text-xs mt-4 transform active:scale-[0.98]"
           >
               {loading ? (
                 <div className="flex items-center justify-center gap-3">
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Verifying Credentials...</span>
+                  <span>Verifying...</span>
                 </div>
               ) : 'Sign In To System'}
           </button>
         </form>
+
+        <div className="mt-8 flex flex-col items-center gap-4">
+            <button 
+              type="button" 
+              onClick={handleDeepReset}
+              className="text-[10px] font-black text-gray-400 hover:text-blue-600 uppercase tracking-widest transition-colors flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-full border border-gray-100"
+            >
+              <span>Reset Connection</span>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            </button>
+        </div>
         
         <div className="mt-10 pt-6 border-t border-gray-100 text-center">
             <p className="text-[10px] text-gray-300 font-bold uppercase tracking-[0.2em] leading-loose">Full Gospel Business Men's Fellowship International</p>

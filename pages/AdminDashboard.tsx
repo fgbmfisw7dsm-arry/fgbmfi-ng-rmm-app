@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { UserRole, DashboardStats } from '../types';
@@ -13,11 +13,10 @@ const AdminDashboard = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchStats = () => {
+  const fetchStats = useCallback(() => {
     if (activeEventId) {
-        // SCoping Logic: FINANCE and ADMIN get Regional (unscoped) view.
-        // REGISTRAR gets district-scoped view.
-        const districtFilter = (user?.role === UserRole.REGISTRAR && user.district && user.district.trim() !== "") 
+        // Scoping Logic: REGISTRAR gets district-scoped view.
+        const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) 
             ? user.district.trim() 
             : undefined;
             
@@ -26,19 +25,31 @@ const AdminDashboard = () => {
           .catch(err => console.error("Stats fetch error", err))
           .finally(() => setLoading(false));
     }
-  };
+  }, [activeEventId, user?.id, user?.district, user?.role]);
 
   useEffect(() => {
     fetchStats();
     const sub = supabase.channel('dashboard_sync').on('postgres_changes', { event: '*', table: 'checkins' }, () => fetchStats()).subscribe();
     return () => { sub.unsubscribe(); };
-  }, [activeEventId, user]);
+  }, [fetchStats]);
 
   if (loading && !stats) return <div className="p-8 text-center text-gray-500 font-bold animate-pulse">Loading Regional Analytics...</div>;
   if (!activeEventId || !stats) return <div className="p-8 text-center text-gray-500 font-bold uppercase tracking-widest opacity-50">Select Event to view Regional Dashboard</div>;
 
-  const rankData = stats.checkInsByRank ? Object.entries(stats.checkInsByRank).map(([name, value]) => ({ name, value })) : [];
-  const districtData = stats.checkInsByDistrict ? Object.entries(stats.checkInsByDistrict).map(([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  // Ensure rankData doesn't contain empty names and Recharts gets a clean array
+  const rankData = stats.checkInsByRank 
+    ? Object.entries(stats.checkInsByRank)
+        .filter(([name]) => name && name.trim().length > 0)
+        .map(([name, value]) => ({ name: name.toUpperCase(), value }))
+    : [];
+
+  const districtData = stats.checkInsByDistrict 
+    ? Object.entries(stats.checkInsByDistrict)
+        .filter(([name]) => name && name.trim().length > 0)
+        .map(([name, value]) => ({ name: name.toUpperCase(), value }))
+        .sort((a, b) => a.name.localeCompare(b.name)) 
+    : [];
+
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
   const percentage = stats.totalDelegates > 0 ? Math.round((stats.totalCheckIns / stats.totalDelegates) * 100) : 0;
 
@@ -50,17 +61,50 @@ const AdminDashboard = () => {
         <StatCard title="Total Financials" value={formatCurrency(stats.totalFinancials || 0)} color="purple" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border h-96">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border min-h-[400px]">
           <h3 className="font-black mb-4 text-gray-400 uppercase text-[10px] tracking-widest border-b pb-2">Attendance by Rank</h3>
-          {rankData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="90%"><PieChart><Pie data={rankData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{rankData.map((_, i) => <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
-          ) : <div className="h-full flex items-center justify-center text-gray-400 text-xs">Waiting for records...</div>}
+          <div className="h-80 w-full">
+            {rankData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie 
+                    data={rankData} 
+                    dataKey="value" 
+                    nameKey="name" 
+                    cx="50%" 
+                    cy="50%" 
+                    outerRadius={80} 
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={true}
+                  >
+                    {rankData.map((_, i) => <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <div className="h-full flex items-center justify-center text-gray-400 text-xs">Waiting for records...</div>}
+          </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border h-96">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border min-h-[400px]">
           <h3 className="font-black mb-4 text-gray-400 uppercase text-[10px] tracking-widest border-b pb-2">Attendance by District</h3>
-          {districtData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="90%"><BarChart data={districtData}><XAxis dataKey="name" tick={{fontSize: 9}} angle={-45} textAnchor="end" height={60} /><YAxis /><Tooltip /><Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
-          ) : <div className="h-full flex items-center justify-center text-gray-400 text-xs">Waiting for records...</div>}
+          <div className="h-80 w-full">
+            {districtData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={districtData} margin={{ bottom: 40 }}>
+                  <XAxis 
+                    dataKey="name" 
+                    tick={{fontSize: 9, fontWeight: 800}} 
+                    angle={-45} 
+                    textAnchor="end" 
+                    interval={0}
+                  />
+                  <YAxis tick={{fontSize: 10}} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <div className="h-full flex items-center justify-center text-gray-400 text-xs">Waiting for records...</div>}
+          </div>
         </div>
       </div>
       <div className="bg-white p-8 rounded-2xl shadow-sm border">
