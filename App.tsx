@@ -21,6 +21,7 @@ import UsersModule from './pages/UsersModule';
 import ImportModule from './pages/ImportModule';
 import SetupModule from './pages/SetupModule';
 import DataModule from './pages/DataModule';
+import UserManualModule from './pages/UserManualModule';
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -168,7 +169,11 @@ const AppContent = () => {
             <p className="text-blue-900 font-black uppercase tracking-widest text-sm">System Secure Link</p>
             <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest animate-pulse">Establishing Handshake...</p>
             <button 
-              onClick={() => { localStorage.clear(); window.location.reload(); }} 
+              onClick={() => { 
+                localStorage.clear(); 
+                sessionStorage.clear(); 
+                window.location.href = window.location.origin + window.location.pathname; 
+              }} 
               className="mt-4 px-6 py-3 bg-red-50 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all shadow-sm border border-red-100"
             >
               Reset Stuck Session
@@ -202,6 +207,7 @@ const AppContent = () => {
                     <Route path="/admin/import" element={<ImportModule />} />
                     <Route path="/admin/setup" element={<SetupModule />} />
                     <Route path="/admin/data" element={<DataModule />} />
+                    <Route path="/help" element={<UserManualModule />} />
                     <Route path="/" element={<Navigate to="/admin" replace />} />
                  </Routes>
               </Layout>

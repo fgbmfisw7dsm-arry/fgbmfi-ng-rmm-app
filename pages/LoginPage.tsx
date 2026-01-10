@@ -40,16 +40,21 @@ const LoginPage = () => {
     }
   };
 
-  const handleDeepReset = async () => {
+  const handleDeepReset = () => {
     if (window.confirm("This will clear all system connection data and refresh the login page for a clean start. Proceed?")) {
+      // 1. Immediately clear storage to guarantee it happens even if network/auth hangs
+      localStorage.clear();
+      sessionStorage.clear();
+
       try {
-        await supabase.auth.signOut({ scope: 'local' });
-        localStorage.clear();
-        window.location.reload();
+        // 2. Fire and forget local signout (no await to prevent hanging the reload logic)
+        supabase.auth.signOut({ scope: 'local' });
       } catch (e) {
-        localStorage.clear();
-        window.location.reload();
+        console.warn("Local signout failed during reset:", e);
       }
+
+      // 3. Force a hard reload to the root URL (base origin) to reset the entire JS memory state
+      window.location.href = window.location.origin + window.location.pathname;
     }
   };
 

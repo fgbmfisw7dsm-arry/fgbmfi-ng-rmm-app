@@ -115,6 +115,12 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
                </Link>
             </MenuSection>
           )}
+
+          <MenuSection title="System Support">
+             <Link to="/help" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/help')}`}>
+               User Manual
+             </Link>
+          </MenuSection>
         </nav>
 
         <div className="p-4 border-t border-gray-800">
