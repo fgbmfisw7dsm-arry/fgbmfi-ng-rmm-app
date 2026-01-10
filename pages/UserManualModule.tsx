@@ -275,12 +275,12 @@ const UserManualModule = () => {
                             <div className="space-y-4">
                                 <div className="border-l-4 border-green-600 pl-6">
                                     <h4 className="text-sm font-black uppercase mb-1">Workflow: Session Collection</h4>
-                                    <p className="text-xs text-gray-600">Immediately after a session offering is counted: Navigate to <strong>Financials > Offerings</strong>. Select the session, enter the bulk total, and record.</p>
+                                    <p className="text-xs text-gray-600">Immediately after a session offering is counted: Navigate to <strong>Financials &gt; Offerings</strong>. Select the session, enter the bulk total, and record.</p>
                                 </div>
                                 <div className="border-l-4 border-green-600 pl-6">
                                     <h4 className="text-sm font-black uppercase mb-1">Workflow: Handling Redemptions</h4>
                                     <p className="text-xs text-gray-600 italic mb-2">"I want to pay towards my pledge from last year."</p>
-                                    <p className="text-xs text-gray-600">Go to <strong>Financials > Redemption</strong>. Search for the donor. Enter the payment amount. The system will auto-calculate the remaining debt.</p>
+                                    <p className="text-xs text-gray-600">Go to <strong>Financials &gt; Redemption</strong>. Search for the donor. Enter the payment amount. The system will auto-calculate the remaining debt.</p>
                                 </div>
                             </div>
                         </section>
