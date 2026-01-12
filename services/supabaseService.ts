@@ -4,9 +4,10 @@ import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult
 import { generateCodeFromId } from './utils';
 
 /**
- * Normalizes input by trimming whitespace. 
+ * Normalizes input by collapsing all whitespace into single spaces and trimming.
+ * Handles double spaces, tabs, and non-breaking spaces common in CSV imports.
  */
-const normalize = (val?: string) => (val || '').trim();
+const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
 /**
  * Helper to wrap promises with a timeout to prevent indefinite hangs.
@@ -309,6 +310,7 @@ export const db = {
         const { data: delegates, error: fetchError } = await supabase.from('delegates').select('delegate_id, district');
         if (fetchError) throw fetchError;
         
+        // Use the new aggressive normalize which collapsed double spaces
         const updates = (delegates || [])
             .filter(d => d.district !== normalize(d.district))
             .map(d => ({ delegate_id: d.delegate_id, district: normalize(d.district) }));
@@ -434,9 +436,12 @@ export const db = {
         await handleSupabaseError(await supabase.from('pledges').delete().eq('event_id', eventId));
     },
 
-    // Fix: Implement missing method deleteDelegatesByDistrict
+    // Fix: Switched to ilike for case-insensitive matching to resolve "South West 1" vs "SOUTH WEST 1" issues.
     deleteDelegatesByDistrict: async (district: string): Promise<number> => {
-        const { data, error } = await supabase.from('delegates').delete().eq('district', normalize(district)).select();
+        const { data, error } = await supabase.from('delegates')
+            .delete()
+            .ilike('district', normalize(district))
+            .select();
         if (error) throw error;
         return data?.length || 0;
     },
