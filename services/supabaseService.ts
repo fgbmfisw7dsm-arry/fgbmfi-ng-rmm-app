@@ -5,7 +5,6 @@ import { generateCodeFromId } from './utils';
 
 /**
  * Normalizes input by collapsing all whitespace into single spaces and trimming.
- * Handles double spaces, tabs, and non-breaking spaces common in CSV imports.
  */
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
@@ -19,7 +18,6 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
     ]);
 };
 
-// Fix: Using 'any' for the 'res' parameter to accommodate various Supabase response objects and resolve type narrowing issues.
 const handleSupabaseError = (res: any, customMessage?: string) => {
     if (res.error) {
         console.error("Supabase Error Context:", res.error);
@@ -27,7 +25,6 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
         const hint = res.error.hint || "";
         const msg = `${res.error.message} ${detail} ${hint}`.trim();
         
-        // SESSION TIMEOUT & CORRUPTION DETECTION
         const lowerMsg = msg.toLowerCase();
         if (lowerMsg.includes('jwt expired') || lowerMsg.includes('invalid token') || lowerMsg.includes('refresh_token_not_found')) {
             console.warn("Auth Session Corrupted. Triggering local cleanup.");
@@ -47,20 +44,17 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
 
 export const auth = {
     login: async (email: string, password: string): Promise<User | null> => {
-        // DEFENSIVE: Clear any local session ghosts before attempting a new sign-in
         try {
             await supabase.auth.signOut({ scope: 'local' });
         } catch (e) {
             console.warn("Pre-login cleanup skipped:", e);
         }
 
-        // Apply a 15-second timeout to the authentication handshake
         const loginPromise = supabase.auth.signInWithPassword({ 
             email: normalize(email), 
             password 
         });
 
-        // Fix: Explicitly type withTimeout call as <any> to resolve destructuring errors (Property 'data' and 'error' do not exist on type '{}').
         const { data: authData, error: authError } = await withTimeout<any>(
             loginPromise, 
             15000, 
@@ -134,11 +128,76 @@ export const db = {
     deleteSession: async (id: string) => 
         handleSupabaseError(await supabase.from('sessions').delete().eq('session_id', id)),
 
-    getSettings: async (): Promise<SystemSettings> => 
-        handleSupabaseError(await supabase.from('system_settings').select('*').limit(1).single()),
+    getSettings: async (): Promise<SystemSettings> => {
+        const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
+        if (error) throw error;
+        // Default values to prevent empty UI on first boot or corruption
+        const defaults = {
+            titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'],
+            districts: [],
+            ranks: [],
+            offices: [],
+            regions: []
+        };
+        return data || defaults;
+    },
 
-    updateSettings: async (settings: SystemSettings) => 
-        handleSupabaseError(await supabase.from('system_settings').upsert(settings)),
+    updateSettings: async (settings: SystemSettings, field?: keyof SystemSettings): Promise<SystemSettings> => {
+        // 1. Identify existing record to get the exact Primary Key (PK)
+        const { data: current, error: fetchError } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
+        if (fetchError) throw fetchError;
+        
+        // 2. Build surgical payload (Only update the specific column if field is provided)
+        let payload: any = {};
+        if (field) {
+            payload[field] = Array.isArray(settings[field]) ? settings[field] : [];
+        } else {
+            payload = {
+                titles: Array.isArray(settings.titles) ? settings.titles : [],
+                districts: Array.isArray(settings.districts) ? settings.districts : [],
+                ranks: Array.isArray(settings.ranks) ? settings.ranks : [],
+                offices: Array.isArray(settings.offices) ? settings.offices : [],
+                regions: Array.isArray(settings.regions) ? settings.regions : []
+            };
+        }
+
+        let result;
+        if (current) {
+            const pkKey = Object.keys(current).find(k => k.toLowerCase().includes('id')) || 'id';
+            const pkValue = current[pkKey];
+            
+            // Explicit UPDATE targeting only specific row and potentially only specific column
+            const { data, error } = await supabase
+                .from('system_settings')
+                .update(payload)
+                .eq(pkKey, pkValue)
+                .select('*')
+                .single();
+            
+            if (error) throw error;
+            result = data;
+        } else {
+            // Explicit INSERT if no settings row exists yet (Full defaults needed here)
+            const insertPayload = {
+                titles: settings.titles || ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'],
+                districts: settings.districts || [],
+                ranks: settings.ranks || [],
+                offices: settings.offices || [],
+                regions: settings.regions || [],
+                ...payload // Overlay the specific field change
+            };
+            const { data, error } = await supabase
+                .from('system_settings')
+                .insert(insertPayload)
+                .select('*')
+                .single();
+            
+            if (error) throw error;
+            result = data;
+        }
+
+        return result as SystemSettings;
+    },
     
     getUsers: async (): Promise<User[]> => 
         handleSupabaseError(await supabase.from('app_users').select('*')),
@@ -210,7 +269,7 @@ export const db = {
         return delegates.map(d => ({ 
             ...d, 
             checkedIn: checkedInSet.has(d.delegate_id),
-            code: generateCodeFromId(d.delegate_id, eventId)
+            code: d.code || generateCodeFromId(d.delegate_id, eventId)
         }));
     },
 
@@ -310,7 +369,6 @@ export const db = {
         const { data: delegates, error: fetchError } = await supabase.from('delegates').select('delegate_id, district');
         if (fetchError) throw fetchError;
         
-        // Use the new aggressive normalize which collapsed double spaces
         const updates = (delegates || [])
             .filter(d => d.district !== normalize(d.district))
             .map(d => ({ delegate_id: d.delegate_id, district: normalize(d.district) }));
@@ -405,7 +463,6 @@ export const db = {
         return { delegates: d.data || [], checkins: c.data || [], financials: f.data || [], pledges: p.data || [] };
     },
 
-    // Fix: Implement missing method searchPledges
     searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {
         if (!eventId) return [];
         let qb = supabase.from('pledges').select('*').eq('event_id', eventId);
@@ -420,15 +477,12 @@ export const db = {
         return data || [];
     },
 
-    // Fix: Implement missing method addFinancialEntry
     addFinancialEntry: async (entry: Partial<FinancialEntry>) => 
         handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single()),
 
-    // Fix: Implement missing method createPledge
     createPledge: async (pledge: Partial<Pledge>) => 
         handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single()),
 
-    // Fix: Implement missing method clearEventData
     clearEventData: async (eventId: string) => {
         if (!eventId) throw new Error("Event ID required");
         await handleSupabaseError(await supabase.from('checkins').delete().eq('event_id', eventId));
@@ -436,7 +490,6 @@ export const db = {
         await handleSupabaseError(await supabase.from('pledges').delete().eq('event_id', eventId));
     },
 
-    // Fix: Switched to ilike for case-insensitive matching to resolve "South West 1" vs "SOUTH WEST 1" issues.
     deleteDelegatesByDistrict: async (district: string): Promise<number> => {
         const { data, error } = await supabase.from('delegates')
             .delete()
@@ -446,7 +499,6 @@ export const db = {
         return data?.length || 0;
     },
 
-    // Fix: Implement missing method deleteDelegatesByScope
     deleteDelegatesByScope: async (scope: string) => {
         if (scope === 'all') {
             await supabase.from('checkins').delete().neq('checkin_id', '00000000-0000-0000-0000-000000000000');

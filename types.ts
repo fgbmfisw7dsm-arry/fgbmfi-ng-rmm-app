@@ -127,6 +127,7 @@ export interface DashboardStats {
 }
 
 export interface SystemSettings {
+  id?: any; // Internal database primary key
   districts: string[];
   ranks: string[];
   offices: string[];
