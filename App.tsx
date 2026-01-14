@@ -7,6 +7,7 @@ import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
 import Layout from './components/Layout';
+import { auth } from './services/supabaseService';
 
 // Modules
 import LoginPage from './pages/LoginPage';
@@ -89,13 +90,9 @@ const AppContent = () => {
         }
 
         if (session?.user && mounted) {
-           const { data: appUser, error: profileError } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-           
-           if (!profileError && appUser && mounted) {
+           // Use repair logic to ensure profile exists
+           const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
+           if (appUser && mounted) {
              userIdRef.current = appUser.id;
              setUser(appUser as User);
            }
@@ -133,10 +130,10 @@ const AppContent = () => {
         } 
         else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
           if (session?.user) {
-             // Only update if the user is different to avoid infinite context loops
+             // Only update if the user is different or profile is missing to avoid loops
              if (userIdRef.current !== session.user.id) {
                 try {
-                  const { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).single();
+                  const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
                   if (appUser && mounted) {
                     userIdRef.current = appUser.id;
                     setUser(appUser as User);
