@@ -271,12 +271,17 @@ export const db = {
         return data || [];
     },
 
-    updateDelegate: async (id: string, updates: Partial<Delegate>) => 
-        handleSupabaseError(await supabase.from('delegates').update({
-            ...updates,
-            district: normalize(updates.district),
-            chapter: normalize(updates.chapter)
-        }).eq('delegate_id', id)),
+    updateDelegate: async (id: string, updates: Partial<Delegate>) => {
+        // CRITICAL FIX: Strip protected/generated columns that PostgreSQL forbids manual updates on.
+        // name_display is a generated column. delegate_id and created_at are protected.
+        const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
+        
+        return handleSupabaseError(await supabase.from('delegates').update({
+            ...validUpdates,
+            district: normalize(validUpdates.district),
+            chapter: normalize(validUpdates.chapter)
+        }).eq('delegate_id', id));
+    },
 
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         const safeSessionId = (sessionId && sessionId.trim() !== "") ? sessionId : null;
