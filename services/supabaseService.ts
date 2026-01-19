@@ -272,10 +272,7 @@ export const db = {
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
-        // CRITICAL FIX: Strip protected/generated columns that PostgreSQL forbids manual updates on.
-        // name_display is a generated column. delegate_id and created_at are protected.
         const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
-        
         return handleSupabaseError(await supabase.from('delegates').update({
             ...validUpdates,
             district: normalize(validUpdates.district),
@@ -462,23 +459,18 @@ export const db = {
     },
 
     harmonizeDistricts: async (): Promise<number> => {
-        console.log("DB: Starting district harmonization task...");
         let count = 0;
-
-        // 1. Fetch system settings
         const { data: settingsData } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
-        if (!settingsData) throw new Error("System settings not found.");
+        if (!settingsData) return 0;
         
         const officialDistrictsList = settingsData.districts || [];
         const cleanedOfficialList = officialDistrictsList.map(d => normalize(d));
 
-        // 2. SELF-HEAL: Update settings table if official names have trailing spaces
+        // SELF-HEAL: Ensure System Settings itself is cleaned first
         if (JSON.stringify(officialDistrictsList) !== JSON.stringify(cleanedOfficialList)) {
-            console.log("DB: Sanitizing official districts list in settings...");
             await supabase.from('system_settings').update({ districts: cleanedOfficialList }).eq('id', settingsData.id);
         }
 
-        // 3. Fetch all records that might be un-normalized
         const [delegatesRes, pledgesRes] = await Promise.all([
             supabase.from('delegates').select('delegate_id, district'),
             supabase.from('pledges').select('id, district')
@@ -487,12 +479,9 @@ export const db = {
         const delegates = delegatesRes.data || [];
         const pledges = pledgesRes.data || [];
 
-        // 4. Process Delegates (Sequential updates to stay within API limits)
         for (const d of delegates) {
             const currentDist = d.district || '';
             const normalizedDist = normalize(currentDist);
-            
-            // Try to match normalized input against cleaned official list (case-insensitive)
             const matchedOfficial = cleanedOfficialList.find(o => o.toUpperCase() === normalizedDist.toUpperCase());
             const targetDist = matchedOfficial || normalizedDist;
 
@@ -502,7 +491,6 @@ export const db = {
             }
         }
 
-        // 5. Process Pledges
         for (const p of pledges) {
             const currentDist = p.district || '';
             const normalizedDist = normalize(currentDist);
@@ -514,43 +502,29 @@ export const db = {
                 if (!error) count++;
             }
         }
-
-        console.log(`DB: Harmonization task complete. Cleaned ${count} records.`);
         return count;
     },
 
     deduplicateDelegates: async (): Promise<number> => {
-        console.log("DB: Starting delegate deduplication task...");
         const { data: delegates } = await supabase.from('delegates').select('*');
         if (!delegates) return 0;
-
         const seenKeys = new Set<string>();
         const duplicatesToDelete: string[] = [];
-
         for (const d of delegates) {
-            // Uniqueness defined by First Name + Last Name + Phone (Normalized)
             const uniquenessKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
-            
             if (seenKeys.has(uniquenessKey)) {
                 duplicatesToDelete.push(d.delegate_id);
             } else {
                 seenKeys.add(uniquenessKey);
             }
         }
-
         if (duplicatesToDelete.length > 0) {
-            // Delete in batches to avoid URL length or server limits
             const batchSize = 50;
             for (let i = 0; i < duplicatesToDelete.length; i += batchSize) {
                 const batch = duplicatesToDelete.slice(i, i + batchSize);
-                const { error } = await supabase.from('delegates').delete().in('delegate_id', batch);
-                if (error) {
-                    console.error("DB: Deletion batch failed:", error);
-                }
+                await supabase.from('delegates').delete().in('delegate_id', batch);
             }
         }
-
-        console.log(`DB: Deduplication task complete. Removed ${duplicatesToDelete.length} duplicates.`);
         return duplicatesToDelete.length;
     }
 };

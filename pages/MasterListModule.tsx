@@ -116,22 +116,22 @@ const MasterListModule = () => {
     };
 
     const startEditing = (d: Delegate) => {
-        // Function to clean values for mapping to dropdowns
         const clean = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
-        
         setEditingId(d.delegate_id);
-        
-        // AUTO-NORMALIZATION: When opening the form, we pre-clean the values.
-        // If the database has "SW5 District ", clean() turns it into "SW5 District",
-        // which will perfectly match the "Official Districts" list.
         setEditForm({ 
             ...d, 
             district: clean(d.district),
             rank: clean(d.rank),
             office: clean(d.office)
         });
-        
         window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Helper: Check if a value exists in the official list (Case-Insensitive)
+    const isValueOfficial = (val: string, list: string[]) => {
+        if (!val) return true;
+        const normalized = val.trim().toUpperCase();
+        return list.some(item => item.trim().toUpperCase() === normalized);
     };
 
     const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape'); };
@@ -158,7 +158,7 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.district} onChange={e => setEditForm({...editForm, district: e.target.value})}>
                                 <option value="">Select District</option>
                                 {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
-                                {editForm.district && !officialDistricts.includes(editForm.district) && (
+                                {editForm.district && !isValueOfficial(editForm.district, officialDistricts) && (
                                     <option value={editForm.district}>{editForm.district} (Un-normalized Data)</option>
                                 )}
                             </select>
@@ -174,7 +174,7 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.rank} onChange={e => setEditForm({...editForm, rank: e.target.value})}>
                                 <option value="">Select Rank</option>
                                 {settings?.ranks.map(r => <option key={r} value={r}>{r}</option>)}
-                                {editForm.rank && !settings?.ranks.includes(editForm.rank) && (
+                                {editForm.rank && !isValueOfficial(editForm.rank, settings?.ranks || []) && (
                                     <option value={editForm.rank}>{editForm.rank} (Custom)</option>
                                 )}
                             </select>
@@ -184,7 +184,7 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.office} onChange={e => setEditForm({...editForm, office: e.target.value})}>
                                 <option value="">Select Office</option>
                                 {settings?.offices.map(o => <option key={o} value={o}>{o}</option>)}
-                                {editForm.office && !settings?.offices.includes(editForm.office) && (
+                                {editForm.office && !isValueOfficial(editForm.office, settings?.offices || []) && (
                                     <option value={editForm.office}>{editForm.office} (Custom)</option>
                                 )}
                             </select>
