@@ -126,7 +126,7 @@ const UsersModule = () => {
             await load();
         } catch (e: any) {
             console.error("Delete failed", e);
-            setStatus({ type: 'error', msg: "Deletion failed: Ensure the 'delete_app_user' SQL function is installed correctly." });
+            setStatus({ type: 'error', msg: "Deletion failed." });
         } finally {
             setLoading(false);
         }
@@ -203,6 +203,9 @@ const UsersModule = () => {
                             >
                                 <option value="">Select District...</option>
                                 {config?.districts.map(d => <option key={d} value={d}>{d}</option>)}
+                                {form.district && !config?.districts.includes(form.district) && (
+                                    <option value={form.district}>{form.district} (Un-normalized)</option>
+                                )}
                             </select>
                         </div>
                     )}

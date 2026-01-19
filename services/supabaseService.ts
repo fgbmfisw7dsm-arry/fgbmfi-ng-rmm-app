@@ -26,25 +26,20 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
         const msg = `${res.error.message} ${detail} ${hint}`.trim();
         const lowerMsg = msg.toLowerCase();
         
-        // 1. Session Expiry / Auth State Errors
         if (lowerMsg.includes('jwt expired') || lowerMsg.includes('invalid token') || lowerMsg.includes('refresh_token_not_found')) {
             localStorage.clear();
             window.location.reload(); 
             throw new Error("SESSION_EXPIRED");
         }
 
-        // 2. Permission / RLS Errors
         if (lowerMsg.includes('row-level security') || lowerMsg.includes('permission denied')) {
             throw new Error(customMessage ? `${customMessage}: Permission Restricted` : "Database Access Restricted.");
         }
 
-        // 3. Structural Errors (Relation missing or renamed)
         if (lowerMsg.includes('relation') && lowerMsg.includes('does not exist')) {
             throw new Error(`CRITICAL: Database table missing. Contact System Admin to run the SQL Setup.`);
         }
         
-        // 4. Schema Handshake Errors (User Request: "Database error querying schema")
-        // We catch this specifically to allow getOrCreateProfile to handle the recovery
         if (lowerMsg.includes('schema')) {
             console.warn("Schema query failure detected. Signalling handshake recovery.");
             return { __isSchemaError: true, originalError: res.error };
@@ -56,28 +51,20 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
 };
 
 export const auth = {
-    /**
-     * Resolves the "Database error querying schema" by ensuring a public profile exists 
-     * and is accessible.
-     */
     getOrCreateProfile: async (authId: string, email: string): Promise<User> => {
         try {
-            // 1. Attempt to fetch existing profile
             const fetchResponse = await supabase
                 .from('app_users')
                 .select('*')
                 .eq('id', authId)
                 .maybeSingle();
 
-            // If we hit the "Schema" error here, we immediately move to the Repair step
             const result = handleSupabaseError(fetchResponse);
             
             if (result && !result.__isSchemaError) {
                 return result as User;
             }
 
-            // 2. SELF-REPAIR: Either profile is missing OR schema error occurred.
-            // We attempt to insert/update to force the database to recognize the user.
             console.warn(`Handshake Repair triggered for ${email}...`);
             
             const { data: newProfile, error: repairError } = await supabase
@@ -85,15 +72,13 @@ export const auth = {
                 .upsert({
                     id: authId,
                     email: email,
-                    role: UserRole.REGISTRAR // Safety fallback
+                    role: UserRole.REGISTRAR 
                 }, { onConflict: 'id' })
                 .select()
                 .single();
 
             if (repairError) {
                 console.error("Critical Profile repair failed:", repairError);
-                // Return a non-persisted user to allow frontend to load, 
-                // though RLS might block actual DB writes until the SQL fix is run.
                 return { id: authId, email, role: UserRole.REGISTRAR };
             }
 
@@ -106,7 +91,6 @@ export const auth = {
 
     login: async (email: string, password: string): Promise<User | null> => {
         try {
-            // Local cleanup before login
             await supabase.auth.signOut({ scope: 'local' });
         } catch (e) {}
 
@@ -123,7 +107,6 @@ export const auth = {
 
         if (!authData.user) return null;
 
-        // Perform the handshake
         return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email);
     },
     
@@ -253,11 +236,20 @@ export const db = {
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
         if (!eventId) return [];
         const safeSessionId = (sessionId && sessionId.trim() !== "") ? sessionId : null;
+        
         let queryBuilder = supabase.from('delegates').select('*');
-        if (district) queryBuilder = queryBuilder.eq('district', normalize(district));
-        if (query.length > 1) queryBuilder = queryBuilder.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,phone.ilike.%${query}%`);
+        
+        if (district) {
+            const normalizedDistrict = normalize(district);
+            queryBuilder = queryBuilder.ilike('district', normalizedDistrict);
+        }
 
-        const { data: delegates } = await queryBuilder.limit(100);
+        if (query.length > 1) {
+            queryBuilder = queryBuilder.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,phone.ilike.%${query}%`);
+        }
+
+        const { data: delegates, error } = await queryBuilder.limit(100);
+        if (error) throw error;
         if (!delegates || delegates.length === 0) return [];
 
         let checkinQuery = supabase.from('checkins').select('delegate_id').eq('event_id', eventId).in('delegate_id', delegates.map(d => d.delegate_id));
@@ -267,7 +259,6 @@ export const db = {
         const { data: checkins } = await checkinQuery;
         const checkedInSet = new Set(checkins?.map(c => c.delegate_id) || []);
         
-        // Fix: Use the `eventId` parameter provided to the function instead of the undefined `activeEventId`
         return delegates.map(d => ({ 
             ...d, 
             checkedIn: checkedInSet.has(d.delegate_id),
@@ -281,7 +272,11 @@ export const db = {
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => 
-        handleSupabaseError(await supabase.from('delegates').update(updates).eq('delegate_id', id)),
+        handleSupabaseError(await supabase.from('delegates').update({
+            ...updates,
+            district: normalize(updates.district),
+            chapter: normalize(updates.chapter)
+        }).eq('delegate_id', id)),
 
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         const safeSessionId = (sessionId && sessionId.trim() !== "") ? sessionId : null;
@@ -308,21 +303,33 @@ export const db = {
         const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
         
         if (!match) return { success: false, message: 'Invalid code.' };
-        if (registrar.role === UserRole.REGISTRAR && registrar.district && match.district !== registrar.district) {
-            return { success: false, message: 'District Mismatch.' };
+        
+        if (registrar.role === UserRole.REGISTRAR && registrar.district) {
+            const regDist = normalize(registrar.district).toUpperCase();
+            const delDist = normalize(match.district).toUpperCase();
+            if (regDist !== delDist) {
+                return { success: false, message: 'District Mismatch.' };
+            }
         }
         
         return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
     },
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
-        const { data: existing } = await supabase.from('delegates').select('*').eq('phone', normalize(delegate.phone)).maybeSingle();
+        const phone = normalize(delegate.phone);
+        const { data: existing } = await supabase.from('delegates').select('*').eq('phone', phone).maybeSingle();
         if (existing) return existing;
 
         const { data, error } = await supabase.from('delegates').insert({
-            title: normalize(delegate.title), first_name: normalize(delegate.first_name), last_name: normalize(delegate.last_name),
-            district: normalize(delegate.district), chapter: normalize(delegate.chapter), phone: normalize(delegate.phone),
-            email: normalize(delegate.email), rank: delegate.rank || 'CP', office: delegate.office || 'OTHER'
+            title: normalize(delegate.title), 
+            first_name: normalize(delegate.first_name), 
+            last_name: normalize(delegate.last_name),
+            district: normalize(delegate.district), 
+            chapter: normalize(delegate.chapter), 
+            phone: phone,
+            email: normalize(delegate.email), 
+            rank: delegate.rank || 'CP', 
+            office: delegate.office || 'OTHER'
         }).select().single();
 
         if (error) throw error;
@@ -332,30 +339,64 @@ export const db = {
     importDelegates: async (csv: string): Promise<number> => {
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
         if (lines.length === 0) return 0;
+        
         const payload = lines.map(p => ({
-            title: p[0] || 'Mr', first_name: p[1], last_name: p[2], district: p[3] || '',
-            chapter: p[4] || '', phone: p[5] || '', email: p[6] || '', rank: p[7] || 'CP', office: p[8] || 'OTHER'
+            title: normalize(p[0] || 'Mr'), 
+            first_name: normalize(p[1]), 
+            last_name: normalize(p[2]), 
+            district: normalize(p[3] || ''),
+            chapter: normalize(p[4] || ''), 
+            phone: normalize(p[5] || ''), 
+            email: normalize(p[6] || ''), 
+            rank: normalize(p[7] || 'CP'), 
+            office: normalize(p[8] || 'OTHER')
         }));
+        
         const { data, error } = await supabase.from('delegates').insert(payload).select();
         if (error) throw error;
         return data?.length || 0;
     },
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
-        const { data: checkins } = await supabase.from('checkins').select('*').eq('event_id', eventId);
+        const { data: checkinsRaw } = await supabase
+            .from('checkins')
+            .select('*, delegates(*)')
+            .eq('event_id', eventId)
+            .is('session_id', null)
+            .order('checked_in_at', { ascending: false });
+
         const { data: delegates } = await supabase.from('delegates').select('*');
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         
         const filter = district ? normalize(district).toUpperCase() : null;
-        const filteredDelegates = delegates?.filter(d => !filter || (d.district || '').toUpperCase() === filter) || [];
-        const attendedIds = new Set(checkins?.map(c => c.delegate_id) || []);
+        const filteredDelegates = delegates?.filter(d => !filter || normalize(d.district).toUpperCase() === filter) || [];
+        
+        const recentActivity: CheckIn[] = (checkinsRaw || [])
+            .filter(c => !filter || (c.delegates && normalize(c.delegates.district).toUpperCase() === filter))
+            .slice(0, 15)
+            .map(c => ({
+                checkin_id: c.checkin_id,
+                event_id: c.event_id,
+                delegate_id: c.delegate_id,
+                session_id: c.session_id,
+                checked_in_at: c.checked_in_at,
+                checked_in_by: c.checked_in_by,
+                delegate_name: c.delegates ? `${c.delegates.first_name} ${c.delegates.last_name}` : 'Unknown',
+                district: c.delegates?.district || 'Unknown',
+                rank: c.delegates?.rank || '-',
+                office: c.delegates?.office || '-'
+            }));
+
+        const attendedIds = new Set((checkinsRaw || []).map(c => c.delegate_id));
         const attendedDelegates = filteredDelegates.filter(d => attendedIds.has(d.delegate_id));
 
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
         attendedDelegates.forEach(d => {
-            rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
-            districtCounts[d.district] = (districtCounts[d.district] || 0) + 1;
+            const r = normalize(d.rank);
+            const dst = normalize(d.district);
+            rankCounts[r] = (rankCounts[r] || 0) + 1;
+            districtCounts[dst] = (districtCounts[dst] || 0) + 1;
         });
 
         return {
@@ -364,7 +405,7 @@ export const db = {
             totalFinancials: financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
-            recentActivity: [] // Handled via subscription in UI
+            recentActivity
         };
     },
 
@@ -380,7 +421,7 @@ export const db = {
 
     searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {
         let q = supabase.from('pledges').select('*').eq('event_id', eventId);
-        if (district) q = q.eq('district', normalize(district));
+        if (district) q = q.ilike('district', normalize(district));
         if (query) q = q.ilike('donor_name', `%${query}%`);
         const { data } = await q;
         return data || [];
@@ -390,7 +431,11 @@ export const db = {
         handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single()),
 
     createPledge: async (pledge: Partial<Pledge>) => 
-        handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single()),
+        handleSupabaseError(await supabase.from('pledges').insert({
+            ...pledge,
+            district: normalize(pledge.district),
+            chapter: normalize(pledge.chapter)
+        }).select().single()),
 
     clearEventData: async (eventId: string) => {
         await supabase.from('checkins').delete().eq('event_id', eventId);
@@ -399,7 +444,7 @@ export const db = {
     },
 
     deleteDelegatesByDistrict: async (district: string): Promise<number> => {
-        const { data, error } = await supabase.from('delegates').delete().eq('district', normalize(district)).select();
+        const { data, error } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select();
         if (error) throw error;
         return data?.length || 0;
     },
@@ -412,47 +457,95 @@ export const db = {
     },
 
     harmonizeDistricts: async (): Promise<number> => {
+        console.log("DB: Starting district harmonization task...");
         let count = 0;
-        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district');
-        if (delegates) {
-            for (const d of delegates) {
-                const normalized = normalize(d.district);
-                if (normalized !== d.district) {
-                    await supabase.from('delegates').update({ district: normalized }).eq('delegate_id', d.delegate_id);
-                    count++;
-                }
+
+        // 1. Fetch system settings
+        const { data: settingsData } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
+        if (!settingsData) throw new Error("System settings not found.");
+        
+        const officialDistrictsList = settingsData.districts || [];
+        const cleanedOfficialList = officialDistrictsList.map(d => normalize(d));
+
+        // 2. SELF-HEAL: Update settings table if official names have trailing spaces
+        if (JSON.stringify(officialDistrictsList) !== JSON.stringify(cleanedOfficialList)) {
+            console.log("DB: Sanitizing official districts list in settings...");
+            await supabase.from('system_settings').update({ districts: cleanedOfficialList }).eq('id', settingsData.id);
+        }
+
+        // 3. Fetch all records that might be un-normalized
+        const [delegatesRes, pledgesRes] = await Promise.all([
+            supabase.from('delegates').select('delegate_id, district'),
+            supabase.from('pledges').select('id, district')
+        ]);
+        
+        const delegates = delegatesRes.data || [];
+        const pledges = pledgesRes.data || [];
+
+        // 4. Process Delegates (Sequential updates to stay within API limits)
+        for (const d of delegates) {
+            const currentDist = d.district || '';
+            const normalizedDist = normalize(currentDist);
+            
+            // Try to match normalized input against cleaned official list (case-insensitive)
+            const matchedOfficial = cleanedOfficialList.find(o => o.toUpperCase() === normalizedDist.toUpperCase());
+            const targetDist = matchedOfficial || normalizedDist;
+
+            if (targetDist !== currentDist) {
+                const { error } = await supabase.from('delegates').update({ district: targetDist }).eq('delegate_id', d.delegate_id);
+                if (!error) count++;
             }
         }
-        const { data: pledges } = await supabase.from('pledges').select('id, district');
-        if (pledges) {
-            for (const p of pledges) {
-                const normalized = normalize(p.district);
-                if (normalized !== p.district) {
-                    await supabase.from('pledges').update({ district: normalized }).eq('id', p.id);
-                    count++;
-                }
+
+        // 5. Process Pledges
+        for (const p of pledges) {
+            const currentDist = p.district || '';
+            const normalizedDist = normalize(currentDist);
+            const matchedOfficial = cleanedOfficialList.find(o => o.toUpperCase() === normalizedDist.toUpperCase());
+            const targetDist = matchedOfficial || normalizedDist;
+
+            if (targetDist !== currentDist) {
+                const { error } = await supabase.from('pledges').update({ district: targetDist }).eq('id', p.id);
+                if (!error) count++;
             }
         }
+
+        console.log(`DB: Harmonization task complete. Cleaned ${count} records.`);
         return count;
     },
 
     deduplicateDelegates: async (): Promise<number> => {
+        console.log("DB: Starting delegate deduplication task...");
         const { data: delegates } = await supabase.from('delegates').select('*');
         if (!delegates) return 0;
-        const seen = new Set<string>();
-        const toDelete: string[] = [];
+
+        const seenKeys = new Set<string>();
+        const duplicatesToDelete: string[] = [];
+
         for (const d of delegates) {
-            const key = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
-            if (seen.has(key)) {
-                toDelete.push(d.delegate_id);
+            // Uniqueness defined by First Name + Last Name + Phone (Normalized)
+            const uniquenessKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
+            
+            if (seenKeys.has(uniquenessKey)) {
+                duplicatesToDelete.push(d.delegate_id);
             } else {
-                seen.add(key);
+                seenKeys.add(uniquenessKey);
             }
         }
-        if (toDelete.length > 0) {
-            const { error } = await supabase.from('delegates').delete().in('delegate_id', toDelete);
-            if (error) throw error;
+
+        if (duplicatesToDelete.length > 0) {
+            // Delete in batches to avoid URL length or server limits
+            const batchSize = 50;
+            for (let i = 0; i < duplicatesToDelete.length; i += batchSize) {
+                const batch = duplicatesToDelete.slice(i, i + batchSize);
+                const { error } = await supabase.from('delegates').delete().in('delegate_id', batch);
+                if (error) {
+                    console.error("DB: Deletion batch failed:", error);
+                }
+            }
         }
-        return toDelete.length;
+
+        console.log(`DB: Deduplication task complete. Removed ${duplicatesToDelete.length} duplicates.`);
+        return duplicatesToDelete.length;
     }
 };

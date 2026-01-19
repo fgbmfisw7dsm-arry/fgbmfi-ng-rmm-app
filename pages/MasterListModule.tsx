@@ -70,7 +70,6 @@ const MasterListModule = () => {
                 
                 return matchesSearch && (normalizedDelegate === normalizedTarget);
             })
-            // SECONDARY SORT: By Name (Alphabetical)
             .sort((a, b) => 
                 `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
             );
@@ -83,19 +82,14 @@ const MasterListModule = () => {
     }, [settings]);
 
     const displayGroups = useMemo(() => {
-        // Source categories from System Setup strictly
         const groups = [...officialDistricts];
-        
-        // Find any data that doesn't match the official list
         const hasLegacyData = filtered.some(d => {
             const dNorm = (d.district || '').trim().toUpperCase();
             return dNorm !== '' && !groups.some(g => g.toUpperCase() === dNorm);
         });
-        
         if (hasLegacyData) {
             groups.push("Legacy / Uncategorized");
         }
-        
         return groups;
     }, [filtered, officialDistricts]);
 
@@ -110,20 +104,10 @@ const MasterListModule = () => {
         }
         setLoading(true);
         try {
-            const updatableData = {
-                title: editForm.title,
-                first_name: (editForm.first_name || '').trim(),
-                last_name: (editForm.last_name || '').trim(),
-                district: (editForm.district || '').trim(),
-                chapter: (editForm.chapter || '').trim(),
-                rank: editForm.rank,
-                office: editForm.office,
-                phone: (editForm.phone || '').trim(),
-                email: (editForm.email || '').trim()
-            };
-            await db.updateDelegate(editingId, updatableData);
-            alert("SUCCESS: Delegate record updated.");
+            await db.updateDelegate(editingId, editForm);
+            alert("SUCCESS: Delegate record updated and normalized.");
             setEditingId(null); 
+            await loadData();
         } catch(err: any) {
             alert("UPDATE FAILED: " + (err.message || "An error occurred."));
         } finally {
@@ -132,8 +116,21 @@ const MasterListModule = () => {
     };
 
     const startEditing = (d: Delegate) => {
+        // Function to clean values for mapping to dropdowns
+        const clean = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
+        
         setEditingId(d.delegate_id);
-        setEditForm({ ...d });
+        
+        // AUTO-NORMALIZATION: When opening the form, we pre-clean the values.
+        // If the database has "SW5 District ", clean() turns it into "SW5 District",
+        // which will perfectly match the "Official Districts" list.
+        setEditForm({ 
+            ...d, 
+            district: clean(d.district),
+            rank: clean(d.rank),
+            office: clean(d.office)
+        });
+        
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -161,6 +158,9 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.district} onChange={e => setEditForm({...editForm, district: e.target.value})}>
                                 <option value="">Select District</option>
                                 {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
+                                {editForm.district && !officialDistricts.includes(editForm.district) && (
+                                    <option value={editForm.district}>{editForm.district} (Un-normalized Data)</option>
+                                )}
                             </select>
                         </div>
                         <div className="space-y-1"><label className="text-[10px] font-black text-blue-800 uppercase">Chapter</label><input className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.chapter} onChange={e => setEditForm({...editForm, chapter: e.target.value})} /></div>
@@ -174,6 +174,9 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.rank} onChange={e => setEditForm({...editForm, rank: e.target.value})}>
                                 <option value="">Select Rank</option>
                                 {settings?.ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                                {editForm.rank && !settings?.ranks.includes(editForm.rank) && (
+                                    <option value={editForm.rank}>{editForm.rank} (Custom)</option>
+                                )}
                             </select>
                         </div>
                         <div className="space-y-1">
@@ -181,6 +184,9 @@ const MasterListModule = () => {
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.office} onChange={e => setEditForm({...editForm, office: e.target.value})}>
                                 <option value="">Select Office</option>
                                 {settings?.offices.map(o => <option key={o} value={o}>{o}</option>)}
+                                {editForm.office && !settings?.offices.includes(editForm.office) && (
+                                    <option value={editForm.office}>{editForm.office} (Custom)</option>
+                                )}
                             </select>
                         </div>
                         <div className="flex items-end">

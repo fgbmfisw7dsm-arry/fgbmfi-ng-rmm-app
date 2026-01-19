@@ -34,17 +34,15 @@ const DataModule = () => {
 
     // --- LOGIC: HARMONIZE DISTRICTS ---
     const handleHarmonize = async () => {
-        console.log("DEBUG: DataModule -> handleHarmonize starting...");
-        if (!window.confirm("This will scan the entire database and remove hidden spaces/whitespace from all district names. This fixes duplicate entries in reports. Proceed?")) return;
+        if (!window.confirm("This will scan the entire database and remove hidden spaces/whitespace from all district names. This also cleans up the System Settings. Proceed?")) return;
         
         setLoading(true);
         try {
             const count = await db.harmonizeDistricts();
-            console.log("DEBUG: Harmonization task success. Count:", count);
-            alert(`SUCCESS: Harmonization complete. Cleaned ${count} records. Your reports should now be grouped correctly.`);
+            alert(`SUCCESS: Database Harmonization complete.\n\nModified ${count} records.\n- Trailing spaces removed.\n- Casing unified with System Setup.\n- Reports will now group correctly.`);
         } catch (e: any) {
-            console.error("DEBUG: Harmonize failed:", e);
-            alert("Harmonization failed: " + (e.message || "Unknown error"));
+            console.error("UI: Harmonize failed:", e);
+            alert("TASK FAILED: " + (e.message || "Database connection error."));
         } finally {
             setLoading(false);
         }
@@ -52,17 +50,15 @@ const DataModule = () => {
 
     // --- LOGIC: DEDUPLICATE DELEGATES ---
     const handleDeduplicate = async () => {
-        console.log("DEBUG: DataModule -> handleDeduplicate starting...");
-        if (!window.confirm("This will scan the Regional Master List for duplicate delegates (same First Name, Last Name, and Phone). Redundant records will be permanently removed while keeping the first entry. Continue?")) return;
+        if (!window.confirm("This will scan the Regional Master List for duplicate delegates (same Name and Phone). Redundant records will be permanently removed. Continue?")) return;
         
         setLoading(true);
         try {
             const count = await db.deduplicateDelegates();
-            console.log("DEBUG: Deduplication task success. Count:", count);
-            alert(`SUCCESS: Master List Cleaned. Removed ${count} duplicate delegate records.`);
+            alert(`SUCCESS: Master List Cleanup complete.\n\nRemoved ${count} duplicate delegate records.\nYour database is now lean and accurate.`);
         } catch (e: any) {
-            console.error("DEBUG: Deduplicate failed:", e);
-            alert("Deduplication failed: " + (e.message || "Unknown error"));
+            console.error("UI: Deduplicate failed:", e);
+            alert("TASK FAILED: " + (e.message || "Database connection error."));
         } finally {
             setLoading(false);
         }
@@ -157,7 +153,7 @@ const DataModule = () => {
             <div className="bg-red-600 text-white p-6 rounded-2xl shadow-2xl flex items-center gap-6 border-4 border-red-800 animate-pulse">
                 <div className="text-5xl">⚠️</div>
                 <div>
-                    <h1 className="text-2xl font-black uppercase tracking-tighter">System Danger Zone</h1>
+                    <h1 className="text-2xl font-black uppercase tracking-tighter text-white">System Danger Zone</h1>
                     <p className="text-sm font-bold opacity-90 uppercase tracking-widest">Authorized Personnel Only. Actions here are permanent and destructive.</p>
                 </div>
             </div>
@@ -166,9 +162,9 @@ const DataModule = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="bg-blue-900 p-8 rounded-3xl shadow-xl text-white border-4 border-blue-700">
                     <h3 className="text-xl font-black uppercase tracking-tight">District Harmonization</h3>
-                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mt-1 mb-6">Cleans whitespace and hidden characters in District/Chapter names.</p>
+                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mt-1 mb-6">Cleans whitespace and hidden characters in District/Chapter names across the entire database.</p>
                     <button 
-                        onClick={() => handleHarmonize()}
+                        onClick={handleHarmonize}
                         disabled={loading}
                         className="w-full py-4 bg-white text-blue-900 font-black rounded-xl uppercase text-xs tracking-widest shadow-xl hover:bg-blue-50 transition-all disabled:opacity-50"
                     >
@@ -178,9 +174,9 @@ const DataModule = () => {
                 
                 <div className="bg-slate-900 p-8 rounded-3xl shadow-xl text-white border-4 border-slate-700">
                     <h3 className="text-xl font-black uppercase tracking-tight">Master List Deduplication</h3>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 mb-6">Removes redundant delegate records across the Regional Master List.</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 mb-6">Removes redundant delegate records across the Regional Master List to improve search accuracy.</p>
                     <button 
-                        onClick={() => handleDeduplicate()}
+                        onClick={handleDeduplicate}
                         disabled={loading}
                         className="w-full py-4 bg-blue-600 text-white font-black rounded-xl uppercase text-xs tracking-widest shadow-xl hover:bg-blue-700 transition-all disabled:opacity-50"
                     >
@@ -203,7 +199,6 @@ const DataModule = () => {
                             <span className="text-xl font-black text-blue-900 uppercase">{activeEvent?.name || 'NO EVENT SELECTED'}</span>
                         </div>
 
-                        {/* STEP 1 */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
                                 <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span> 
@@ -218,7 +213,6 @@ const DataModule = () => {
                             </button>
                         </div>
 
-                        {/* STEP 2 */}
                         <div className={`space-y-4 transition-all duration-500 ${eventBackupReady ? 'opacity-100 scale-100' : 'opacity-20 scale-95 pointer-events-none'}`}>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
@@ -263,7 +257,6 @@ const DataModule = () => {
                             </select>
                         </div>
 
-                        {/* STEP 1 */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
                                 <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span> 
@@ -278,7 +271,6 @@ const DataModule = () => {
                             </button>
                         </div>
 
-                        {/* STEP 2 */}
                         <div className={`space-y-4 transition-all duration-500 ${districtBackupReady ? 'opacity-100 scale-100' : 'opacity-20 scale-95 pointer-events-none'}`}>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
@@ -307,7 +299,7 @@ const DataModule = () => {
             {/* NUCLEAR OPTION: GLOBAL SYSTEM RESET */}
             <div className="bg-black text-white p-12 rounded-[3rem] shadow-2xl border-8 border-red-900 flex flex-col items-center text-center space-y-6 mt-12">
                 <div className="text-6xl">☢️</div>
-                <h2 className="text-4xl font-black uppercase tracking-tighter">Master Global Purge</h2>
+                <h2 className="text-4xl font-black uppercase tracking-tighter text-white">Master Global Purge</h2>
                 <p className="text-sm font-bold text-red-500 uppercase max-w-xl">This action will completely empty the database of all delegates, check-ins, and financial history across all events. Only system settings will remain.</p>
                 
                 {!isGlobalUnlocked ? (
