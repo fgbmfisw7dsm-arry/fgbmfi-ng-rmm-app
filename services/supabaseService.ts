@@ -141,7 +141,7 @@ export const db = {
         handleSupabaseError(await supabase.from('sessions').insert(session).select().single()),
 
     updateSession: async (id: string, updates: Partial<Session>) => 
-        handleSupabaseError(await supabase.from('sessions').update(updates).eq('session_id', id)),
+        handleSupabaseError(await supabase.from('events').update(updates).eq('event_id', id)),
 
     deleteSession: async (id: string) => 
         handleSupabaseError(await supabase.from('sessions').delete().eq('session_id', id)),
@@ -184,7 +184,7 @@ export const db = {
     },
     
     getUsers: async (): Promise<User[]> => 
-        handleSupabaseError(await supabase.from('app_users').select('*')),
+        handleSupabaseError(await supabase.from('app_users').select('*').limit(1000)),
 
     createUser: async (user: Omit<User, 'id'>, password: string) => {
         const { data, error } = await supabase.rpc('create_app_user', { 
@@ -267,8 +267,39 @@ export const db = {
     },
 
     getAllDelegates: async (): Promise<Delegate[]> => {
-        const { data } = await supabase.from('delegates').select('*').order('first_name');
-        return data || [];
+        // PERMANENT FIX: Implement Recursive Batch Fetching (Auto-Pagination)
+        // This ensures the 1,000-row server limit is bypassed safely.
+        let allDelegates: Delegate[] = [];
+        let from = 0;
+        const batchSize = 1000;
+        
+        try {
+            while (true) {
+                const { data, error } = await supabase
+                    .from('delegates')
+                    .select('*')
+                    .order('first_name')
+                    .range(from, from + batchSize - 1);
+                
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                
+                allDelegates = [...allDelegates, ...data];
+                
+                // If we got fewer records than requested, we've reached the end of the DB
+                if (data.length < batchSize) break;
+                
+                from += batchSize;
+                
+                // Absolute Safety Cap at 20k to prevent infinite loops in misconfigured DBs
+                if (from >= 20000) break;
+            }
+            return allDelegates;
+        } catch (err) {
+            console.error("Batch fetch failed, falling back to simple query:", err);
+            const { data } = await supabase.from('delegates').select('*').order('first_name').limit(1000);
+            return data || [];
+        }
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
@@ -301,7 +332,7 @@ export const db = {
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
-        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district');
+        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
         const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
         
         if (!match) return { success: false, message: 'Invalid code.' };
@@ -360,18 +391,21 @@ export const db = {
     },
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
+        const filter = district ? normalize(district).toUpperCase() : null;
+
+        let delegateCountQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
+        if (filter) delegateCountQuery = delegateCountQuery.ilike('district', filter);
+        const { count: exactTotalDelegates } = await delegateCountQuery;
+
         const { data: checkinsRaw } = await supabase
             .from('checkins')
             .select('*, delegates(*)')
             .eq('event_id', eventId)
             .is('session_id', null)
-            .order('checked_in_at', { ascending: false });
+            .order('checked_in_at', { ascending: false })
+            .limit(5000);
 
-        const { data: delegates } = await supabase.from('delegates').select('*');
-        const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
-        
-        const filter = district ? normalize(district).toUpperCase() : null;
-        const filteredDelegates = delegates?.filter(d => !filter || normalize(d.district).toUpperCase() === filter) || [];
+        const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId).limit(5000);
         
         const recentActivity: CheckIn[] = (checkinsRaw || [])
             .filter(c => !filter || (c.delegates && normalize(c.delegates.district).toUpperCase() === filter))
@@ -389,21 +423,25 @@ export const db = {
                 office: c.delegates?.office || '-'
             }));
 
-        const attendedIds = new Set((checkinsRaw || []).map(c => c.delegate_id));
-        const attendedDelegates = filteredDelegates.filter(d => attendedIds.has(d.delegate_id));
-
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
-        attendedDelegates.forEach(d => {
-            const r = normalize(d.rank);
-            const dst = normalize(d.district);
+        let attendanceCount = 0;
+
+        (checkinsRaw || []).forEach(c => {
+            if (!c.delegates) return;
+            const delDist = normalize(c.delegates.district).toUpperCase();
+            if (filter && delDist !== filter) return;
+
+            attendanceCount++;
+            const r = normalize(c.delegates.rank);
+            const dst = normalize(c.delegates.district);
             rankCounts[r] = (rankCounts[r] || 0) + 1;
             districtCounts[dst] = (districtCounts[dst] || 0) + 1;
         });
 
         return {
-            totalDelegates: filteredDelegates.length,
-            totalCheckIns: attendedDelegates.length,
+            totalDelegates: exactTotalDelegates || 0,
+            totalCheckIns: attendanceCount,
             totalFinancials: financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
@@ -413,10 +451,10 @@ export const db = {
 
     getAllDataForExport: async (eventId: string): Promise<any> => {
         const [d, c, f, p] = await Promise.all([
-            supabase.from('delegates').select('*'),
-            supabase.from('checkins').select('*').eq('event_id', eventId),
-            supabase.from('financial_entries').select('*').eq('event_id', eventId),
-            supabase.from('pledges').select('*').eq('event_id', eventId)
+            supabase.from('delegates').select('*').limit(10000),
+            supabase.from('checkins').select('*').eq('event_id', eventId).limit(10000),
+            supabase.from('financial_entries').select('*').eq('event_id', eventId).limit(10000),
+            supabase.from('pledges').select('*').eq('event_id', eventId).limit(10000)
         ]);
         return { delegates: d.data || [], checkins: c.data || [], financials: f.data || [], pledges: p.data || [] };
     },
@@ -425,7 +463,7 @@ export const db = {
         let q = supabase.from('pledges').select('*').eq('event_id', eventId);
         if (district) q = q.ilike('district', normalize(district));
         if (query) q = q.ilike('donor_name', `%${query}%`);
-        const { data } = await q;
+        const { data } = await q.limit(500);
         return data || [];
     },
 
@@ -466,14 +504,13 @@ export const db = {
         const officialDistrictsList = settingsData.districts || [];
         const cleanedOfficialList = officialDistrictsList.map(d => normalize(d));
 
-        // SELF-HEAL: Ensure System Settings itself is cleaned first
         if (JSON.stringify(officialDistrictsList) !== JSON.stringify(cleanedOfficialList)) {
             await supabase.from('system_settings').update({ districts: cleanedOfficialList }).eq('id', settingsData.id);
         }
 
         const [delegatesRes, pledgesRes] = await Promise.all([
-            supabase.from('delegates').select('delegate_id, district'),
-            supabase.from('pledges').select('id, district')
+            supabase.from('delegates').select('delegate_id, district').limit(10000),
+            supabase.from('pledges').select('id, district').limit(10000)
         ]);
         
         const delegates = delegatesRes.data || [];
@@ -506,7 +543,7 @@ export const db = {
     },
 
     deduplicateDelegates: async (): Promise<number> => {
-        const { data: delegates } = await supabase.from('delegates').select('*');
+        const { data: delegates } = await supabase.from('delegates').select('*').limit(10000);
         if (!delegates) return 0;
         const seenKeys = new Set<string>();
         const duplicatesToDelete: string[] = [];

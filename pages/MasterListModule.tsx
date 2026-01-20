@@ -83,11 +83,12 @@ const MasterListModule = () => {
 
     const displayGroups = useMemo(() => {
         const groups = [...officialDistricts];
-        const hasLegacyData = filtered.some(d => {
+        // PERMANENT FIX: Catch records with NULL or BLANK districts as well as unrecognized text
+        const hasUncategorizedData = filtered.some(d => {
             const dNorm = (d.district || '').trim().toUpperCase();
-            return dNorm !== '' && !groups.some(g => g.toUpperCase() === dNorm);
+            return dNorm === '' || !groups.some(g => g.toUpperCase() === dNorm);
         });
-        if (hasLegacyData) {
+        if (hasUncategorizedData) {
             groups.push("Legacy / Uncategorized");
         }
         return groups;
@@ -229,7 +230,8 @@ const MasterListModule = () => {
                     const distDelegates = filtered.filter(d => {
                         const dNorm = (d.district || '').trim().toUpperCase();
                         if (groupName === "Legacy / Uncategorized") {
-                             return dNorm !== '' && !officialDistricts.some(od => od.trim().toUpperCase() === dNorm);
+                             // Catch both empty districts and non-official ones
+                             return dNorm === '' || !officialDistricts.some(od => od.trim().toUpperCase() === dNorm);
                         }
                         return dNorm === groupName.toUpperCase();
                     });
