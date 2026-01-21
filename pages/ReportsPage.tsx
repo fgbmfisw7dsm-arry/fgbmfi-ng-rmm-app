@@ -16,7 +16,8 @@ const ReportsPage = () => {
     const [loading, setLoading] = useState(false);
     const reportRef = useRef<HTMLDivElement>(null);
 
-    // Track user.id instead of user object to prevent blinking loops if context re-provides user reference
+    const norm = (v?: string) => (v || '').replace(/\s+/g, ' ').trim().toUpperCase();
+
     useEffect(() => {
         if (!activeEventId) return;
         let mounted = true;
@@ -33,15 +34,15 @@ const ReportsPage = () => {
 
                 if (!mounted) return;
 
-                const userDistrict = user?.district ? user.district.trim().toLowerCase() : null;
-                if (user?.role === UserRole.REGISTRAR && userDistrict) {
+                const userDistrictNorm = user?.district ? norm(user.district) : null;
+                if (user?.role === UserRole.REGISTRAR && userDistrictNorm) {
                     exportData.delegates = (exportData.delegates || []).filter((d: any) => 
-                        (d.district || '').trim().toLowerCase() === userDistrict
+                        norm(d.district) === userDistrictNorm
                     );
                     const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
                     exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
                     exportData.pledges = (exportData.pledges || []).filter((p: any) => 
-                        (p.district || '').trim().toLowerCase() === userDistrict
+                        norm(p.district) === userDistrictNorm
                     );
                 }
 
@@ -59,7 +60,7 @@ const ReportsPage = () => {
 
         fetchData();
         return () => { mounted = false; };
-    }, [activeEventId, user?.id]); // Only re-fetch if event or actual user id changes
+    }, [activeEventId, user?.id]);
 
     const reportData = useMemo(() => {
         if (!data || !settings) return null;
@@ -71,7 +72,8 @@ const ReportsPage = () => {
 
         const attendedDelegates = filteredCheckIns.map((c: any) => {
             const d = delegates.find((del: any) => del.delegate_id === c.delegate_id);
-            return d ? { ...d, district: (d.district || '').trim(), checked_in_at: c.checked_in_at } : null;
+            if (!d) return null;
+            return { ...d, district: (d.district || '').trim(), checked_in_at: c.checked_in_at };
         }).filter(Boolean);
 
         const officialDistricts = (settings.districts || [])
@@ -98,11 +100,11 @@ const ReportsPage = () => {
             <div className="overflow-x-auto w-full">
                 {districtGroups.map(districtName => {
                     const districtDelegates = attendedDelegates.filter((d: any) => {
-                        const dNorm = (d.district || '').trim();
+                        const dNorm = norm(d.district);
                         if (districtName === "Legacy / Uncategorized") {
-                            return !officialDistricts.some(od => od.toUpperCase() === dNorm.toUpperCase());
+                            return dNorm === '' || !officialDistricts.some(od => norm(od) === dNorm);
                         }
-                        return dNorm.toUpperCase() === districtName.toUpperCase();
+                        return dNorm === norm(districtName);
                     });
 
                     if (districtDelegates.length === 0) return null;
@@ -176,11 +178,11 @@ const ReportsPage = () => {
                     <tbody>
                         {rowLabels.map(rowName => {
                             const rowDelegates = attendedDelegates.filter((del: any) => {
-                                const dn = (del.district || '').trim().toUpperCase();
+                                const dn = norm(del.district);
                                 if (rowName === "Other Entities") {
-                                    return !officialDistricts.some(od => od.toUpperCase() === dn);
+                                    return dn === '' || !officialDistricts.some(od => norm(od) === dn);
                                 }
-                                return dn === rowName.toUpperCase();
+                                return dn === norm(rowName);
                             });
                             
                             if (rowDelegates.length === 0) return null;
@@ -191,14 +193,9 @@ const ReportsPage = () => {
                                 <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
                                     <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200 whitespace-nowrap">{rowName}</td>
                                     {matrixColumns.map(col => {
-                                        const isNationalRow = rowName.toUpperCase() === "NATIONAL/EXTERNAL DISTRICT";
-                                        const count = rowDelegates.filter(d => {
-                                            if (isNationalRow) {
-                                                return (d.office || '').trim().toUpperCase() === col.toUpperCase();
-                                            }
-                                            return (d.rank || '').trim().toUpperCase() === col.toUpperCase() || 
-                                                   (d.office || '').trim().toUpperCase() === col.toUpperCase();
-                                        }).length;
+                                        const count = rowDelegates.filter(d => 
+                                            norm(d.rank) === norm(col) || norm(d.office) === norm(col)
+                                        ).length;
                                         colTotals[col] = (colTotals[col] || 0) + count;
                                         return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'} whitespace-nowrap`}>{count || '-'}</td>;
                                     })}
@@ -258,11 +255,11 @@ const ReportsPage = () => {
         const rows = [...officialDistricts, "Other Entities"];
         const districtSummary = rows.map(dName => {
             const distPledges = pledges.filter((p: any) => {
-                const dn = (p.district || '').trim();
+                const dn = norm(p.district);
                 if (dName === "Other Entities") {
-                    return !officialDistricts.some(od => od.toUpperCase() === dn.toUpperCase());
+                    return dn === '' || !officialDistricts.some(od => norm(od) === dn);
                 }
-                return dn.toUpperCase() === dName.toUpperCase();
+                return dn === norm(dName);
             });
             return {
                 district: dName,
@@ -310,11 +307,11 @@ const ReportsPage = () => {
             <div className="overflow-x-auto w-full space-y-8">
                 {rows.map(districtName => {
                     const distPledges = sortedPledges.filter((p: any) => {
-                        const dn = (p.district || '').trim();
+                        const dn = norm(p.district);
                         if (districtName === "Other Entities") {
-                            return !officialDistricts.some(od => od.toUpperCase() === dn.toUpperCase());
+                            return dn === '' || !officialDistricts.some(od => norm(od) === dn);
                         }
-                        return dn.toUpperCase() === districtName.toUpperCase();
+                        return dn === norm(districtName);
                     });
 
                     if (distPledges.length === 0) return null;

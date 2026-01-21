@@ -83,7 +83,6 @@ const MasterListModule = () => {
 
     const displayGroups = useMemo(() => {
         const groups = [...officialDistricts];
-        // PERMANENT FIX: Catch records with NULL or BLANK districts as well as unrecognized text
         const hasUncategorizedData = filtered.some(d => {
             const dNorm = (d.district || '').trim().toUpperCase();
             return dNorm === '' || !groups.some(g => g.toUpperCase() === dNorm);
@@ -128,11 +127,11 @@ const MasterListModule = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Helper: Check if a value exists in the official list (Case-Insensitive)
+    // Helper: Robust Official Check (Case-Insensitive & Whitespace Collapsed)
     const isValueOfficial = (val: string, list: string[]) => {
         if (!val) return true;
-        const normalized = val.trim().toUpperCase();
-        return list.some(item => item.trim().toUpperCase() === normalized);
+        const normalized = val.replace(/\s+/g, ' ').trim().toUpperCase();
+        return list.some(item => item.replace(/\s+/g, ' ').trim().toUpperCase() === normalized);
     };
 
     const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape'); };
@@ -230,7 +229,6 @@ const MasterListModule = () => {
                     const distDelegates = filtered.filter(d => {
                         const dNorm = (d.district || '').trim().toUpperCase();
                         if (groupName === "Legacy / Uncategorized") {
-                             // Catch both empty districts and non-official ones
                              return dNorm === '' || !officialDistricts.some(od => od.trim().toUpperCase() === dNorm);
                         }
                         return dNorm === groupName.toUpperCase();
