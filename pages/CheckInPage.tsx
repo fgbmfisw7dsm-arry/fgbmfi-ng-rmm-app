@@ -202,6 +202,7 @@ const CheckInPage = () => {
               <div className="flex-1 w-full text-left">
                 <div className="flex items-center flex-wrap gap-2">
                     <h3 className="font-black text-blue-900 uppercase text-lg leading-tight">{d.title} {d.first_name} {d.last_name}</h3>
+                    {/* RESTORED: Rank Badge */}
                     <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>
                 </div>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT • {d.chapter || 'INDIVIDUAL'} • {d.office}</p>

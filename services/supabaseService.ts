@@ -150,8 +150,16 @@ export const db = {
         return all;
     },
 
-    updateDelegate: async (id: string, updates: Partial<Delegate>) => 
-        handleSupabaseError(await supabase.from('delegates').update(updates).eq('delegate_id', id)),
+    updateDelegate: async (id: string, updates: Partial<Delegate>) => {
+        // PERMANENT FIX: Surgically strip read-only generated columns and metadata
+        const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
+        
+        return handleSupabaseError(await supabase.from('delegates').update({
+            ...validUpdates,
+            district: normalize(validUpdates.district),
+            chapter: normalize(validUpdates.chapter)
+        }).eq('delegate_id', id));
+    },
 
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         const safeSessionId = sessionId || null;
@@ -191,7 +199,7 @@ export const db = {
 
         const recentActivity: CheckIn[] = (checkinsRaw || [])
             .filter(c => !filter || (c.delegates && normalize(c.delegates.district).toUpperCase() === filter))
-            .slice(0, 10) // STRICT 10 RECORD LIMIT
+            .slice(0, 10) 
             .map(c => ({
                 checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
                 delegate_name: c.delegates ? `${c.delegates.first_name} ${c.delegates.last_name}` : 'Unknown',
@@ -256,23 +264,33 @@ export const db = {
     clearEventData: async (eventId: string) => { await supabase.from('checkins').delete().eq('event_id', eventId); await supabase.from('financial_entries').delete().eq('event_id', eventId); await supabase.from('pledges').delete().eq('event_id', eventId); },
     deleteDelegatesByDistrict: async (district: string) => { const { data } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select(); return data?.length || 0; },
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
+    
     harmonizeDistricts: async () => {
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
+        
         const official = (settings.districts || []).map(d => normalize(d));
         await supabase.from('system_settings').update({ districts: official }).eq('id', settings.id);
+        
         const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(10000);
         let count = 0;
+        
         for (const d of (delegates || [])) {
-            const normDist = normalize(d.district);
+            const currentDist = d.district || '';
+            const normDist = normalize(currentDist);
+            
+            // PERMANENT FIX: Case-insensitive match to find the correct official version
             const matched = official.find(o => o.toUpperCase() === normDist.toUpperCase());
-            if (matched && matched !== d.district) {
+            
+            // If the text matches (case-insensitive) but is casing or whitespace different, correct it
+            if (matched && matched !== currentDist) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
             }
         }
         return count;
     },
+    
     deduplicateDelegates: async () => {
         const { data } = await supabase.from('delegates').select('*').limit(10000);
         if (!data) return 0;

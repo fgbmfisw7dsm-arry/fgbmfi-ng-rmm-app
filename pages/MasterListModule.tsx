@@ -127,7 +127,7 @@ const MasterListModule = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Helper: Robust Official Check (Case-Insensitive & Whitespace Collapsed)
+    // Helper: Robust Official Check (PERMANENT FIX: Case-Insensitive)
     const isValueOfficial = (val: string, list: string[]) => {
         if (!val) return true;
         const normalized = val.replace(/\s+/g, ' ').trim().toUpperCase();
