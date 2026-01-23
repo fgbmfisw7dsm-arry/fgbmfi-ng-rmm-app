@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, Event } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { db } from '../services/supabaseService';
+import { FGBMFILogo } from '../components/Logos';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -60,11 +60,12 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">
-      <aside className="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 no-print flex flex-col">
-        <div className="p-6 border-b border-gray-800">
-          <h1 className="text-xl font-bold tracking-tight text-white leading-tight">FGBMFI Nigeria</h1>
-          <p className="text-xs text-gray-400 mt-1">{getRoleLabel()}</p>
-          {user.district && <p className="text-xs text-blue-400 mt-0.5 font-bold uppercase">{user.district} District</p>}
+      <aside className="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 no-print flex flex-col shadow-2xl">
+        <div className="p-8 border-b border-gray-800 flex flex-col items-center text-center">
+          <FGBMFILogo className="h-32 w-auto mb-6 drop-shadow-[0_10px_15px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-300" />
+          <h1 className="text-xl font-black tracking-tight text-white leading-tight uppercase">FGBMFI Nigeria</h1>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Regional Event Admin</p>
+          {user.district && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4">
