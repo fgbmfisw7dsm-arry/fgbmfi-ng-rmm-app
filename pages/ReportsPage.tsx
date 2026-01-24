@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
-import { UserRole, FinancialType, Session, Event, SystemSettings } from '../types';
+import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF } from '../services/utils';
 
@@ -66,6 +65,21 @@ const ReportsPage = () => {
         if (!data || !settings) return null;
         const { delegates = [], checkins = [], financials = [], pledges = [] } = data;
         
+        // --- Calculate Dynamic Redemptions ---
+        // We iterate through pledges and sum up redemptions from the financials table
+        // This ensures the reports match the Financial Matrix and Dashboard exactly.
+        const calculatedPledges = pledges.map((p: Pledge) => {
+            const redemptionsForThisPledge = financials.filter((f: FinancialEntry) => 
+                f.type === FinancialType.PLEDGE_REDEMPTION && f.pledge_id === p.id
+            );
+            const totalRedeemed = redemptionsForThisPledge.reduce((sum: number, f: FinancialEntry) => sum + (Number(f.amount) || 0), 0);
+            
+            return {
+                ...p,
+                amount_redeemed: totalRedeemed // Override the static DB value with the actual sum of payments
+            };
+        });
+
         const filteredCheckIns = selectedSessionId 
             ? checkins.filter((c: any) => c.session_id === selectedSessionId)
             : checkins.filter((c: any, idx: number, self: any[]) => self.findIndex((t: any) => t.delegate_id === c.delegate_id) === idx);
@@ -82,7 +96,15 @@ const ReportsPage = () => {
             
         const matrixColumns = Array.from(new Set([...settings.ranks, ...settings.offices])).sort();
 
-        return { delegates, checkins, financials, pledges, attendedDelegates, officialDistricts, matrixColumns };
+        return { 
+            delegates, 
+            checkins, 
+            financials, 
+            pledges: calculatedPledges, // Use our dynamically calculated pledges
+            attendedDelegates, 
+            officialDistricts, 
+            matrixColumns 
+        };
     }, [data, selectedSessionId, settings]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
