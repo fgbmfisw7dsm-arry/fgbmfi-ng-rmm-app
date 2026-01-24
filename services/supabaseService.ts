@@ -1,4 +1,3 @@
-
 import { supabase } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType } from '../types';
 import { generateCodeFromId } from './utils';
@@ -151,7 +150,6 @@ export const db = {
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
-        // PERMANENT FIX: Surgically strip read-only generated columns and metadata
         const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
         
         return handleSupabaseError(await supabase.from('delegates').update({
@@ -193,39 +191,48 @@ export const db = {
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
         const filter = district ? normalize(district).toUpperCase() : null;
-        const { data: checkinsRaw } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).is('session_id', null).order('checked_in_at', { ascending: false }).limit(2000);
+        
+        // --- PERFORMANCE FIX ---
+        // We fetch ALL check-ins for the event (not just Arrivals) to ensure the counters 
+        // match the Attendance Matrix which deduplicates across all activity.
+        const { data: checkinsRaw } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).limit(4000);
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         const { count: totalDelegates } = await supabase.from('delegates').select('*', { count: 'exact', head: true });
 
-        const recentActivity: CheckIn[] = (checkinsRaw || [])
-            .filter(c => !filter || (c.delegates && normalize(c.delegates.district).toUpperCase() === filter))
-            .slice(0, 10) 
-            .map(c => ({
-                checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
-                delegate_name: c.delegates ? `${c.delegates.first_name} ${c.delegates.last_name}` : 'Unknown',
-                district: c.delegates?.district || 'Unknown', rank: c.delegates?.rank || '-', office: c.delegates?.office || '-'
-            }));
-
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
-        let attendanceCount = 0;
+        const seenDelegateIds = new Set<string>();
+        const deduplicatedLog: CheckIn[] = [];
 
         (checkinsRaw || []).forEach(c => {
             if (!c.delegates) return;
             const d = c.delegates;
             if (filter && normalize(d.district).toUpperCase() !== filter) return;
-            attendanceCount++;
-            rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
-            districtCounts[d.district] = (districtCounts[d.district] || 0) + 1;
+            
+            // Deduplication logic for summary figures (Count unique people only)
+            if (!seenDelegateIds.has(c.delegate_id)) {
+                seenDelegateIds.add(c.delegate_id);
+                rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
+                districtCounts[d.district] = (districtCounts[d.district] || 0) + 1;
+                
+                // Add to list for activity feed (representing unique arrivals/entries)
+                if (deduplicatedLog.length < 10) {
+                    deduplicatedLog.push({
+                        checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
+                        delegate_name: `${d.first_name} ${d.last_name}`,
+                        district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
+                    });
+                }
+            }
         });
 
         return {
             totalDelegates: totalDelegates || 0,
-            totalCheckIns: attendanceCount,
+            totalCheckIns: seenDelegateIds.size, // This now matches the Matrix report precisely
             totalFinancials: financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
-            recentActivity
+            recentActivity: deduplicatedLog
         };
     },
 
@@ -279,10 +286,8 @@ export const db = {
             const currentDist = d.district || '';
             const normDist = normalize(currentDist);
             
-            // PERMANENT FIX: Case-insensitive match to find the correct official version
             const matched = official.find(o => o.toUpperCase() === normDist.toUpperCase());
             
-            // If the text matches (case-insensitive) but is casing or whitespace different, correct it
             if (matched && matched !== currentDist) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
