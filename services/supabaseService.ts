@@ -192,12 +192,38 @@ export const db = {
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
         const filter = district ? normalize(district).toUpperCase() : null;
         
-        // --- PERFORMANCE FIX ---
-        // We fetch ALL check-ins for the event (not just Arrivals) to ensure the counters 
-        // match the Attendance Matrix which deduplicates across all activity.
-        const { data: checkinsRaw } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).limit(4000);
-        const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
-        const { count: totalDelegates } = await supabase.from('delegates').select('*', { count: 'exact', head: true });
+        // 1. Total Delegates (Filtered by District if Registrar)
+        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
+        if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
+        const { count: totalDelegatesCount } = await delegatesQuery;
+
+        // 2. Fetch Check-ins with joined delegate data for filtering and charts
+        // We fetch enough to get a representative sample and recent feed.
+        const { data: checkinsRaw } = await supabase.from('checkins')
+            .select('*, delegates(*)')
+            .eq('event_id', eventId)
+            .order('checked_in_at', { ascending: false })
+            .limit(5000); // Increased limit to ensure better data for larger events
+        
+        // 3. Total Financials (Scoped to District if Registrar)
+        let financialsSum = 0;
+        if (filter) {
+            // For district registrars, we sum up redemptions for pledges belonging to their district.
+            // General offerings are typically event-wide and managed by regional finance.
+            const { data: distPledges } = await supabase.from('pledges').select('id').eq('event_id', eventId).ilike('district', filter);
+            const pledgeIds = (distPledges || []).map(p => p.id);
+            if (pledgeIds.length > 0) {
+                const { data: distFinancials } = await supabase.from('financial_entries')
+                    .select('amount')
+                    .eq('event_id', eventId)
+                    .in('pledge_id', pledgeIds);
+                financialsSum = (distFinancials || []).reduce((s, f) => s + (Number(f.amount) || 0), 0);
+            }
+        } else {
+            // Regional View: Sum everything (Offerings + All Redemptions)
+            const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
+            financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
+        }
 
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
@@ -207,9 +233,11 @@ export const db = {
         (checkinsRaw || []).forEach(c => {
             if (!c.delegates) return;
             const d = c.delegates;
+            
+            // Apply district filter for arrivals/check-ins
             if (filter && normalize(d.district).toUpperCase() !== filter) return;
             
-            // Deduplication logic for summary figures (Count unique people only)
+            // Unique people count (Total Event Entry)
             if (!seenDelegateIds.has(c.delegate_id)) {
                 seenDelegateIds.add(c.delegate_id);
                 rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
@@ -227,9 +255,9 @@ export const db = {
         });
 
         return {
-            totalDelegates: totalDelegates || 0,
-            totalCheckIns: seenDelegateIds.size, // This now matches the Matrix report precisely
-            totalFinancials: financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0,
+            totalDelegates: totalDelegatesCount || 0,
+            totalCheckIns: seenDelegateIds.size, // Scoped unique arrivals
+            totalFinancials: financialsSum, // Scoped financials
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
             recentActivity: deduplicatedLog
