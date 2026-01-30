@@ -132,7 +132,7 @@ export const db = {
         else cq = cq.is('session_id', null);
         const { data: checkins } = await cq;
         const checkedInSet = new Set(checkins?.map(c => c.delegate_id) || []);
-        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), code: generateCodeFromId(d.delegate_id, eventId) }));
+        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
     },
 
     getAllDelegates: async (): Promise<Delegate[]> => {
@@ -192,38 +192,94 @@ export const db = {
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
         const filter = district ? normalize(district).toUpperCase() : null;
         
-        // 1. Total Delegates (Filtered by District if Registrar)
+        // --- PAGINATION HELPER ---
+        const fetchPaginated = async (table: string, eventIdFilter: string, selectStr: string = '*', districtFilter: string | null = null) => {
+            let results: any[] = [];
+            let from = 0;
+            while (true) {
+                let q = supabase.from(table).select(selectStr).eq('event_id', eventIdFilter).range(from, from + 999);
+                const { data, error } = await q;
+                if (error || !data || data.length === 0) break;
+                results = [...results, ...data];
+                if (data.length < 1000) break;
+                from += 1000;
+            }
+            return results;
+        };
+
+        // 1. Total Delegates Count (Scoped)
         let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
         if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
-        // 2. Fetch Check-ins with joined delegate data for filtering and charts
-        // We fetch enough to get a representative sample and recent feed.
+        // 2. Total Attendance (Total Event Entry) - EXHAUSTIVE PAGINATED COUNT
+        let attendanceCount = 0;
+        if (filter) {
+            // DISTRICT REGISTRAR SCOPE
+            // Fetch ALL delegates in this district (Paginated)
+            let distDelegateIds: string[] = [];
+            let fromD = 0;
+            while (true) {
+                const { data } = await supabase.from('delegates').select('delegate_id').ilike('district', filter).range(fromD, fromD + 999);
+                if (!data || data.length === 0) break;
+                distDelegateIds = [...distDelegateIds, ...data.map(d => d.delegate_id)];
+                if (data.length < 1000) break;
+                fromD += 1000;
+            }
+
+            if (distDelegateIds.length > 0) {
+                const uniqueCheckinIds = new Set<string>();
+                // We must chunk the 'in' filter to avoid URL length limits if the district is huge
+                const chunkSize = 500;
+                for (let i = 0; i < distDelegateIds.length; i += chunkSize) {
+                    const chunk = distDelegateIds.slice(i, i + chunkSize);
+                    // Fetch all checkins for this chunk of delegates
+                    let fromC = 0;
+                    while(true) {
+                        const { data } = await supabase.from('checkins').select('delegate_id').eq('event_id', eventId).in('delegate_id', chunk).range(fromC, fromC + 999);
+                        if (!data || data.length === 0) break;
+                        data.forEach(c => uniqueCheckinIds.add(c.delegate_id));
+                        if (data.length < 1000) break;
+                        fromC += 1000;
+                    }
+                }
+                attendanceCount = uniqueCheckinIds.size;
+            }
+        } else {
+            // REGIONAL ADMIN SCOPE
+            const uniqueCheckinIds = new Set<string>();
+            let fromC = 0;
+            while (true) {
+                const { data } = await supabase.from('checkins').select('delegate_id').eq('event_id', eventId).range(fromC, fromC + 999);
+                if (!data || data.length === 0) break;
+                data.forEach(c => uniqueCheckinIds.add(c.delegate_id));
+                if (data.length < 1000) break;
+                fromC += 1000;
+            }
+            attendanceCount = uniqueCheckinIds.size;
+        }
+
+        // 3. Total Financials (Scoped)
+        let financialsSum = 0;
+        if (filter) {
+            const { data: distPledges } = await supabase.from('pledges').select('id').eq('event_id', eventId).ilike('district', filter);
+            const pledgeIds = (distPledges || []).map(p => p.id);
+            if (pledgeIds.length > 0) {
+                const { data: distFinancials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId).in('pledge_id', pledgeIds);
+                financialsSum = (distFinancials || []).reduce((s, f) => s + (Number(f.amount) || 0), 0);
+            }
+        } else {
+            const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
+            financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
+        }
+
+        // 4. Activity Feed & Charts
+        // We fetch the most recent 10,000 to balance performance and chart accuracy
         const { data: checkinsRaw } = await supabase.from('checkins')
             .select('*, delegates(*)')
             .eq('event_id', eventId)
             .order('checked_in_at', { ascending: false })
-            .limit(5000); // Increased limit to ensure better data for larger events
-        
-        // 3. Total Financials (Scoped to District if Registrar)
-        let financialsSum = 0;
-        if (filter) {
-            // For district registrars, we sum up redemptions for pledges belonging to their district.
-            // General offerings are typically event-wide and managed by regional finance.
-            const { data: distPledges } = await supabase.from('pledges').select('id').eq('event_id', eventId).ilike('district', filter);
-            const pledgeIds = (distPledges || []).map(p => p.id);
-            if (pledgeIds.length > 0) {
-                const { data: distFinancials } = await supabase.from('financial_entries')
-                    .select('amount')
-                    .eq('event_id', eventId)
-                    .in('pledge_id', pledgeIds);
-                financialsSum = (distFinancials || []).reduce((s, f) => s + (Number(f.amount) || 0), 0);
-            }
-        } else {
-            // Regional View: Sum everything (Offerings + All Redemptions)
-            const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
-            financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
-        }
+            .limit(10000); 
 
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
@@ -233,17 +289,12 @@ export const db = {
         (checkinsRaw || []).forEach(c => {
             if (!c.delegates) return;
             const d = c.delegates;
-            
-            // Apply district filter for arrivals/check-ins
             if (filter && normalize(d.district).toUpperCase() !== filter) return;
             
-            // Unique people count (Total Event Entry)
             if (!seenDelegateIds.has(c.delegate_id)) {
                 seenDelegateIds.add(c.delegate_id);
                 rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
                 districtCounts[d.district] = (districtCounts[d.district] || 0) + 1;
-                
-                // Add to list for activity feed (representing unique arrivals/entries)
                 if (deduplicatedLog.length < 10) {
                     deduplicatedLog.push({
                         checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
@@ -256,8 +307,8 @@ export const db = {
 
         return {
             totalDelegates: totalDelegatesCount || 0,
-            totalCheckIns: seenDelegateIds.size, // Scoped unique arrivals
-            totalFinancials: financialsSum, // Scoped financials
+            totalCheckIns: attendanceCount, 
+            totalFinancials: financialsSum,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
             recentActivity: deduplicatedLog
@@ -313,9 +364,7 @@ export const db = {
         for (const d of (delegates || [])) {
             const currentDist = d.district || '';
             const normDist = normalize(currentDist);
-            
             const matched = official.find(o => o.toUpperCase() === normDist.toUpperCase());
-            
             if (matched && matched !== currentDist) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
