@@ -1,4 +1,3 @@
-
 export const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-NG', {
         style: 'currency',
@@ -41,7 +40,9 @@ export const downloadJSON = (data: any, filename: string) => {
 };
 
 /**
- * Robustly exports a given HTML element to a PDF, ensuring the full content is captured.
+ * Robustly exports a given HTML element to a PDF.
+ * FIXED: Reduced scale to 1 to avoid blank pages on large reports (Master List / Detailed Reports)
+ * which often exceed browser canvas size limits.
  */
 export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
     if (!element) {
@@ -49,50 +50,59 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         return;
     }
 
+    // Scroll to top to ensure capture starts from the beginning
     window.scrollTo(0, 0);
-    const nodeToPrint = element.cloneNode(true) as HTMLElement;
-    nodeToPrint.classList.add('print-mode');
 
-    const printContainer = document.createElement('div');
-    printContainer.style.position = 'fixed';
-    printContainer.style.top = '0';
-    printContainer.style.left = '0';
-    printContainer.style.zIndex = '-1000';
-    printContainer.style.background = '#ffffff';
+    // Deep clone the node for processing
+    const nodeToPrint = element.cloneNode(true) as HTMLElement;
     
-    // Use wider capture area for landscape to ensure right-most columns aren't clipped
-    const containerWidth = orientation === 'landscape' ? 1550 : 1000;
-    printContainer.style.width = `${containerWidth}px`;
-    printContainer.style.height = 'auto';
+    // Force the removal of any potential ID collisions and add print-mode class
+    nodeToPrint.classList.add('print-mode');
+    nodeToPrint.style.width = orientation === 'landscape' ? '1200px' : '800px';
+
+    // Create a temporary visible container far off-screen
+    const printContainer = document.createElement('div');
+    printContainer.id = 'pdf-export-container';
+    printContainer.style.position = 'fixed';
+    printContainer.style.left = '-10000px';
+    printContainer.style.top = '0';
+    printContainer.style.width = orientation === 'landscape' ? '1250px' : '850px';
+    printContainer.style.background = '#ffffff';
+    printContainer.style.zIndex = '-9999';
     printContainer.style.overflow = 'visible';
     
     printContainer.appendChild(nodeToPrint);
     document.body.appendChild(printContainer);
 
+    // html2pdf options optimized for large FGBMFI reports
     const options = {
-        // [top, left, bottom, right] in mm
-        margin: [10, 5, 20, 5],
+        margin: [10, 5, 15, 5],
         filename: filename,
-        image: { type: 'jpeg', quality: 0.98 },
+        image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { 
-            scale: 2, 
+            scale: 1, // REDUCED FROM 2 TO 1: Vital for large tables to prevent blank pages
             useCORS: true, 
             logging: false,
-            scrollY: 0,
-            scrollX: 0,
-            windowWidth: containerWidth,
-            width: containerWidth
+            letterRendering: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff'
         },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: orientation, compress: true }
+        jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: orientation, 
+            compress: true 
+        }
     };
 
+    // Use a longer delay to ensure large DOM structures are fully painted
     setTimeout(() => {
         // @ts-ignore
         window.html2pdf().from(nodeToPrint).set(options).save().then(() => {
-            document.body.removeChild(printContainer);
+            if (printContainer.parentNode) document.body.removeChild(printContainer);
         }).catch((error: any) => {
-            console.error("An error occurred during PDF generation:", error);
-            document.body.removeChild(printContainer);
+            console.error("PDF engine failure:", error);
+            if (printContainer.parentNode) document.body.removeChild(printContainer);
         });
-    }, 1000);
+    }, 2000); 
 };

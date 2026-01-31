@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -16,65 +15,70 @@
       }
       .print-only { display: none; }
 
-      /* Robust PDF Exporting Styles */
+      /* Robust PDF Exporting Styles - STRATEGIC OVERRIDES FOR BLANK PAGES */
       .print-mode {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
         background-color: white !important;
-        /* Strip all external margins/paddings that cause misalignment */
-        padding: 0 !important; 
+        padding: 40px !important; 
         margin: 0 !important;
         box-shadow: none !important;
         border: none !important;
-        border-radius: 0 !important;
-        min-height: auto !important;
-        height: auto !important;
         width: 100% !important;
+        height: auto !important;
         overflow: visible !important;
-        position: static !important;
-        box-sizing: border-box !important;
-      }
-      
-      /* Target the common report container classes to force width */
-      .print-mode.p-12, .print-mode.rounded-\[2\.5rem\] {
-        padding: 15px !important; /* Minimal internal padding */
-        border-radius: 0 !important;
+        position: relative !important;
       }
       
       .print-mode .no-print {
         display: none !important;
       }
       
+      /* Force all children to be visible and non-clipping */
       .print-mode * {
         overflow: visible !important;
-        height: auto !important;
-        min-height: 0 !important;
         max-height: none !important;
+        background-color: transparent !important; /* Let parent background show */
         box-sizing: border-box !important;
+        transition: none !important;
+        animation: none !important;
       }
 
       .print-mode table {
         width: 100% !important;
-        table-layout: auto !important;
+        display: table !important;
         border-collapse: collapse !important;
-        page-break-inside: auto !important;
-        margin-left: 0 !important;
-        margin-right: 0 !important;
+        margin-bottom: 20px !important;
       }
       
       .print-mode tr {
+        display: table-row !important;
         page-break-inside: avoid !important;
+      }
+      
+      .print-mode td, .print-mode th {
+        display: table-cell !important;
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 1px solid #eeeeee !important;
       }
       
       .print-mode thead {
-        display: table-header-group;
+        display: table-header-group !important;
       }
       
+      /* Neutralize Tailwind's sticky headers for the snapshot */
       .print-mode .sticky {
         position: static !important;
       }
+      
+      /* Ensure text is dark and legible */
+      .print-mode .text-blue-900 { color: #1e3a8a !important; }
+      .print-mode .text-gray-400 { color: #94a3b8 !important; }
+      .print-mode .text-gray-500 { color: #64748b !important; }
+      .print-mode .bg-blue-900 { background-color: #1e3a8a !important; color: white !important; }
 
-      .print-mode .break-inside-avoid {
-        page-break-inside: avoid !important;
-      }
     </style>
   <script type="importmap">
 {
