@@ -41,8 +41,8 @@ export const downloadJSON = (data: any, filename: string) => {
 
 /**
  * Robustly exports a given HTML element to a PDF.
- * FIXED: Reduced scale to 1 to avoid blank pages on large reports (Master List / Detailed Reports)
- * which often exceed browser canvas size limits.
+ * FIXED: Use a 1400px viewport for landscape to accommodate wide matrix columns.
+ * Forced alignment to top-left (0,0) to prevent margin drift.
  */
 export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
     if (!element) {
@@ -50,42 +50,49 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         return;
     }
 
+    // Increased width to prevent clipping of wide tables
+    const viewportWidth = orientation === 'landscape' ? 1400 : 850;
+
     // Scroll to top to ensure capture starts from the beginning
     window.scrollTo(0, 0);
 
     // Deep clone the node for processing
     const nodeToPrint = element.cloneNode(true) as HTMLElement;
     
-    // Force the removal of any potential ID collisions and add print-mode class
+    // Add print-mode class to trigger specific CSS overrides
     nodeToPrint.classList.add('print-mode');
-    nodeToPrint.style.width = orientation === 'landscape' ? '1200px' : '800px';
-
+    
     // Create a temporary visible container far off-screen
     const printContainer = document.createElement('div');
     printContainer.id = 'pdf-export-container';
     printContainer.style.position = 'fixed';
     printContainer.style.left = '-10000px';
     printContainer.style.top = '0';
-    printContainer.style.width = orientation === 'landscape' ? '1250px' : '850px';
+    printContainer.style.width = `${viewportWidth}px`;
     printContainer.style.background = '#ffffff';
     printContainer.style.zIndex = '-9999';
     printContainer.style.overflow = 'visible';
+    printContainer.style.textAlign = 'left';
     
     printContainer.appendChild(nodeToPrint);
     document.body.appendChild(printContainer);
 
-    // html2pdf options optimized for large FGBMFI reports
+    // html2pdf options synchronized with the capture container
     const options = {
-        margin: [10, 5, 15, 5],
+        margin: [10, 5, 10, 5],
         filename: filename,
-        image: { type: 'jpeg', quality: 0.95 },
+        image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
-            scale: 1, // REDUCED FROM 2 TO 1: Vital for large tables to prevent blank pages
+            scale: 1, 
             useCORS: true, 
             logging: false,
             letterRendering: true,
             allowTaint: false,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            width: viewportWidth,
+            windowWidth: viewportWidth,
+            x: 0,
+            y: 0
         },
         jsPDF: { 
             unit: 'mm', 
@@ -95,7 +102,7 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         }
     };
 
-    // Use a longer delay to ensure large DOM structures are fully painted
+    // Delay to allow full layout calculation and paint
     setTimeout(() => {
         // @ts-ignore
         window.html2pdf().from(nodeToPrint).set(options).save().then(() => {

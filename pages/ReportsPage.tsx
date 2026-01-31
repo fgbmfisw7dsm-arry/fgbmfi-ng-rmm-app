@@ -66,8 +66,6 @@ const ReportsPage = () => {
         const { delegates = [], checkins = [], financials = [], pledges = [] } = data;
         
         // --- Calculate Dynamic Redemptions ---
-        // We iterate through pledges and sum up redemptions from the financials table
-        // This ensures the reports match the Financial Matrix and Dashboard exactly.
         const calculatedPledges = pledges.map((p: Pledge) => {
             const redemptionsForThisPledge = financials.filter((f: FinancialEntry) => 
                 f.type === FinancialType.PLEDGE_REDEMPTION && f.pledge_id === p.id
@@ -76,7 +74,7 @@ const ReportsPage = () => {
             
             return {
                 ...p,
-                amount_redeemed: totalRedeemed // Override the static DB value with the actual sum of payments
+                amount_redeemed: totalRedeemed 
             };
         });
 
@@ -100,7 +98,7 @@ const ReportsPage = () => {
             delegates, 
             checkins, 
             financials, 
-            pledges: calculatedPledges, // Use our dynamically calculated pledges
+            pledges: calculatedPledges, 
             attendedDelegates, 
             officialDistricts, 
             matrixColumns 
@@ -230,7 +228,8 @@ const ReportsPage = () => {
                             {matrixColumns.map(col => (
                                 <td key={col} className="border p-3 text-center bg-blue-800/80 whitespace-nowrap">{colTotals[col] || '0'}</td>
                             ))}
-                            <td className="border p-3 text-center bg-yellow-400 text-blue-900 font-black text-sm shadow-xl animate-pulse whitespace-nowrap">
+                            {/* RESTORED: Gold styling with custom print-gold priority class */}
+                            <td className="border p-3 text-center print-gold bg-yellow-400 text-blue-900 font-black text-sm shadow-xl whitespace-nowrap">
                                 {grandTotal}
                             </td>
                         </tr>
@@ -443,7 +442,8 @@ const ReportsPage = () => {
                     {activeTab === 'pledgeList' && renderPledgeList()}
                 </div>
                 
-                <div className="print-only mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                {/* RESTORED: certification provisions stacks vertically below the wide matrix content */}
+                <div className="print-only report-footer mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>Generated via FGBMFI Nigeria EMS</span>
                     <span>Date: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</span>
                     <span>Authorized Signature: _______________________</span>
