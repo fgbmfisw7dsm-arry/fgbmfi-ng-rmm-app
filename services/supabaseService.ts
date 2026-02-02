@@ -192,71 +192,69 @@ export const db = {
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
         const filter = district ? normalize(district).toUpperCase() : null;
         
-        // --- PAGINATION HELPER ---
-        const fetchPaginated = async (table: string, eventIdFilter: string, selectStr: string = '*', districtFilter: string | null = null) => {
-            let results: any[] = [];
-            let from = 0;
-            while (true) {
-                let q = supabase.from(table).select(selectStr).eq('event_id', eventIdFilter).range(from, from + 999);
-                const { data, error } = await q;
-                if (error || !data || data.length === 0) break;
-                results = [...results, ...data];
-                if (data.length < 1000) break;
-                from += 1000;
-            }
-            return results;
-        };
-
         // 1. Total Delegates Count (Scoped)
         let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
         if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
-        // 2. Total Attendance (Total Event Entry) - EXHAUSTIVE PAGINATED COUNT
-        let attendanceCount = 0;
-        if (filter) {
-            // DISTRICT REGISTRAR SCOPE
-            // Fetch ALL delegates in this district (Paginated)
-            let distDelegateIds: string[] = [];
-            let fromD = 0;
-            while (true) {
-                const { data } = await supabase.from('delegates').select('delegate_id').ilike('district', filter).range(fromD, fromD + 999);
-                if (!data || data.length === 0) break;
-                distDelegateIds = [...distDelegateIds, ...data.map(d => d.delegate_id)];
-                if (data.length < 1000) break;
-                fromD += 1000;
-            }
+        // 2. EXHAUSTIVE PAGINATED SCAN for Attendance & Chart Data
+        // This ensures the charts match the Matrix reports exactly.
+        const rankCounts: Record<string, number> = {};
+        const districtCounts: Record<string, number> = {};
+        const seenDelegateIds = new Set<string>();
+        const recentActivity: CheckIn[] = [];
+        let from = 0;
 
-            if (distDelegateIds.length > 0) {
-                const uniqueCheckinIds = new Set<string>();
-                // We must chunk the 'in' filter to avoid URL length limits if the district is huge
-                const chunkSize = 500;
-                for (let i = 0; i < distDelegateIds.length; i += chunkSize) {
-                    const chunk = distDelegateIds.slice(i, i + chunkSize);
-                    // Fetch all checkins for this chunk of delegates
-                    let fromC = 0;
-                    while(true) {
-                        const { data } = await supabase.from('checkins').select('delegate_id').eq('event_id', eventId).in('delegate_id', chunk).range(fromC, fromC + 999);
-                        if (!data || data.length === 0) break;
-                        data.forEach(c => uniqueCheckinIds.add(c.delegate_id));
-                        if (data.length < 1000) break;
-                        fromC += 1000;
+        while (true) {
+            // Fetch checkins with delegate details joined.
+            // We use ordering by checked_in_at to ensure the "Recent Activity" is accurate.
+            const { data, error } = await supabase.from('checkins')
+                .select('*, delegates(*)')
+                .eq('event_id', eventId)
+                .order('checked_in_at', { ascending: false })
+                .range(from, from + 999);
+
+            if (error || !data || data.length === 0) break;
+
+            data.forEach(c => {
+                if (!c.delegates) return;
+                const d = c.delegates;
+                
+                // Apply security/district filtering if registrar scoped
+                if (filter && normalize(d.district).toUpperCase() !== filter) return;
+                
+                // Deduplicate to ensure we only count each PHYSICAL person once
+                if (!seenDelegateIds.has(c.delegate_id)) {
+                    seenDelegateIds.add(c.delegate_id);
+                    
+                    // Update Chart Accumulators
+                    const r = d.rank || 'OTHER';
+                    const dist = d.district || 'UNKNOWN';
+                    rankCounts[r] = (rankCounts[r] || 0) + 1;
+                    districtCounts[dist] = (districtCounts[dist] || 0) + 1;
+
+                    // Update Recent Activity Feed (Limit to top 10)
+                    if (recentActivity.length < 10) {
+                        recentActivity.push({
+                            checkin_id: c.checkin_id, 
+                            event_id: c.event_id, 
+                            delegate_id: c.delegate_id, 
+                            session_id: c.session_id, 
+                            checked_in_at: c.checked_in_at, 
+                            checked_in_by: c.checked_in_by,
+                            delegate_name: `${d.first_name} ${d.last_name}`,
+                            district: d.district || 'Unknown', 
+                            rank: d.rank || '-', 
+                            office: d.office || '-'
+                        });
                     }
                 }
-                attendanceCount = uniqueCheckinIds.size;
-            }
-        } else {
-            // REGIONAL ADMIN SCOPE
-            const uniqueCheckinIds = new Set<string>();
-            let fromC = 0;
-            while (true) {
-                const { data } = await supabase.from('checkins').select('delegate_id').eq('event_id', eventId).range(fromC, fromC + 999);
-                if (!data || data.length === 0) break;
-                data.forEach(c => uniqueCheckinIds.add(c.delegate_id));
-                if (data.length < 1000) break;
-                fromC += 1000;
-            }
-            attendanceCount = uniqueCheckinIds.size;
+            });
+
+            if (data.length < 1000) break;
+            from += 1000;
+            // Safety break for extremely large databases
+            if (from > 50000) break;
         }
 
         // 3. Total Financials (Scoped)
@@ -273,45 +271,13 @@ export const db = {
             financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
         }
 
-        // 4. Activity Feed & Charts
-        // We fetch the most recent 10,000 to balance performance and chart accuracy
-        const { data: checkinsRaw } = await supabase.from('checkins')
-            .select('*, delegates(*)')
-            .eq('event_id', eventId)
-            .order('checked_in_at', { ascending: false })
-            .limit(10000); 
-
-        const rankCounts: Record<string, number> = {};
-        const districtCounts: Record<string, number> = {};
-        const seenDelegateIds = new Set<string>();
-        const deduplicatedLog: CheckIn[] = [];
-
-        (checkinsRaw || []).forEach(c => {
-            if (!c.delegates) return;
-            const d = c.delegates;
-            if (filter && normalize(d.district).toUpperCase() !== filter) return;
-            
-            if (!seenDelegateIds.has(c.delegate_id)) {
-                seenDelegateIds.add(c.delegate_id);
-                rankCounts[d.rank] = (rankCounts[d.rank] || 0) + 1;
-                districtCounts[d.district] = (districtCounts[d.district] || 0) + 1;
-                if (deduplicatedLog.length < 10) {
-                    deduplicatedLog.push({
-                        checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
-                        delegate_name: `${d.first_name} ${d.last_name}`,
-                        district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
-                    });
-                }
-            }
-        });
-
         return {
             totalDelegates: totalDelegatesCount || 0,
-            totalCheckIns: attendanceCount, 
+            totalCheckIns: seenDelegateIds.size, 
             totalFinancials: financialsSum,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
-            recentActivity: deduplicatedLog
+            recentActivity: recentActivity
         };
     },
 
