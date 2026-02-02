@@ -65,7 +65,6 @@ const ReportsPage = () => {
         if (!data || !settings) return null;
         const { delegates = [], checkins = [], financials = [], pledges = [] } = data;
         
-        // --- Calculate Dynamic Redemptions ---
         const calculatedPledges = pledges.map((p: Pledge) => {
             const redemptionsForThisPledge = financials.filter((f: FinancialEntry) => 
                 f.type === FinancialType.PLEDGE_REDEMPTION && f.pledge_id === p.id
@@ -92,7 +91,8 @@ const ReportsPage = () => {
             .map(d => d.trim())
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
             
-        const matrixColumns = Array.from(new Set([...settings.ranks, ...settings.offices])).sort();
+        const rankColumns = [...(settings.ranks || [])].sort();
+        const officeColumns = [...(settings.offices || [])].sort();
 
         return { 
             delegates, 
@@ -101,7 +101,8 @@ const ReportsPage = () => {
             pledges: calculatedPledges, 
             attendedDelegates, 
             officialDistricts, 
-            matrixColumns 
+            rankColumns,
+            officeColumns
         };
     }, [data, selectedSessionId, settings]);
 
@@ -110,7 +111,7 @@ const ReportsPage = () => {
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
     if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Attendance Matrix...</div>;
 
-    const { attendedDelegates, officialDistricts, matrixColumns, financials, pledges } = reportData;
+    const { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges } = reportData;
     const selectedSessionTitle = sessions.find(s => s.session_id === selectedSessionId)?.title;
 
     const renderAttendanceList = () => {
@@ -179,62 +180,73 @@ const ReportsPage = () => {
         );
     };
     
-    const renderAttendanceMatrix = () => {
+    const renderMatrixTable = (title: string, columns: string[], type: 'rank' | 'office') => {
         const rowLabels = [...officialDistricts, "Other Entities"];
         const colTotals: Record<string, number> = {};
-        matrixColumns.forEach(c => colTotals[c] = 0);
+        columns.forEach(c => colTotals[c] = 0);
         let grandTotal = 0;
 
         return (
-            <div className="overflow-x-auto w-full">
-                <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1200px]">
-                    <thead>
-                        <tr className="bg-slate-100 uppercase font-black text-slate-700">
-                            <th className="border p-3 text-left bg-slate-100 sticky left-0 z-10 w-48 shadow-sm whitespace-nowrap">District / Entity</th>
-                            {matrixColumns.map(col => <th key={col} className="border p-3 text-center whitespace-nowrap">{col}</th>)}
-                            <th className="border p-3 text-center bg-blue-100 text-blue-900 w-24 whitespace-nowrap">ROW TOTAL</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rowLabels.map(rowName => {
-                            const rowDelegates = attendedDelegates.filter((del: any) => {
-                                const dn = norm(del.district);
-                                if (rowName === "Other Entities") {
-                                    return dn === '' || !officialDistricts.some(od => norm(od) === dn);
-                                }
-                                return dn === norm(rowName);
-                            });
-                            
-                            if (rowDelegates.length === 0) return null;
-                            const rowHeadCount = rowDelegates.length;
-                            grandTotal += rowHeadCount;
+            <div className="mb-12 break-inside-avoid">
+                <h4 className="report-section-header bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-xl tracking-widest">{title}</h4>
+                <div className="overflow-x-auto w-full">
+                    <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1200px]">
+                        <thead>
+                            <tr className="bg-slate-100 uppercase font-black text-slate-700">
+                                <th className="border p-3 text-left bg-slate-100 sticky left-0 z-10 w-48 shadow-sm whitespace-nowrap">District / Entity</th>
+                                {columns.map(col => <th key={col} className="border p-3 text-center whitespace-nowrap">{col}</th>)}
+                                <th className="border p-3 text-center bg-blue-100 text-blue-900 w-24 whitespace-nowrap uppercase">Row Headcount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rowLabels.map(rowName => {
+                                const rowDelegates = attendedDelegates.filter((del: any) => {
+                                    const dn = norm(del.district);
+                                    if (rowName === "Other Entities") {
+                                        return dn === '' || !officialDistricts.some(od => norm(od) === dn);
+                                    }
+                                    return dn === norm(rowName);
+                                });
+                                
+                                if (rowDelegates.length === 0) return null;
+                                const rowHeadCount = rowDelegates.length;
+                                grandTotal += rowHeadCount;
 
-                            return (
-                                <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
-                                    <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200 whitespace-nowrap">{rowName}</td>
-                                    {matrixColumns.map(col => {
-                                        const count = rowDelegates.filter(d => 
-                                            norm(d.rank) === norm(col) || norm(d.office) === norm(col)
-                                        ).length;
-                                        colTotals[col] = (colTotals[col] || 0) + count;
-                                        return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'} whitespace-nowrap`}>{count || '-'}</td>;
-                                    })}
-                                    <td className="border p-3 text-center font-black bg-blue-100/50 text-blue-900 text-xs shadow-inner whitespace-nowrap">{rowHeadCount}</td>
-                                </tr>
-                            )
-                        })}
-                        <tr className="bg-blue-900 text-white font-black uppercase shadow-2xl">
-                            <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl whitespace-nowrap">Grand Entity Totals</td>
-                            {matrixColumns.map(col => (
-                                <td key={col} className="border p-3 text-center bg-blue-800/80 whitespace-nowrap">{colTotals[col] || '0'}</td>
-                            ))}
-                            {/* RESTORED: Gold styling with custom print-gold priority class */}
-                            <td className="border p-3 text-center print-gold bg-yellow-400 text-blue-900 font-black text-sm shadow-xl whitespace-nowrap">
-                                {grandTotal}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                                return (
+                                    <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
+                                        <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200 whitespace-nowrap">{rowName}</td>
+                                        {columns.map(col => {
+                                            const count = rowDelegates.filter(d => 
+                                                type === 'rank' ? norm(d.rank) === norm(col) : norm(d.office) === norm(col)
+                                            ).length;
+                                            colTotals[col] = (colTotals[col] || 0) + count;
+                                            return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'} whitespace-nowrap`}>{count || '-'}</td>;
+                                        })}
+                                        <td className="border p-3 text-center font-black bg-blue-100/50 text-blue-900 text-xs shadow-inner whitespace-nowrap">{rowHeadCount}</td>
+                                    </tr>
+                                )
+                            })}
+                            <tr className="bg-blue-900 text-white font-black uppercase shadow-2xl">
+                                <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl whitespace-nowrap">Entity Totals</td>
+                                {columns.map(col => (
+                                    <td key={col} className="border p-3 text-center bg-blue-800/80 whitespace-nowrap">{colTotals[col] || '0'}</td>
+                                ))}
+                                <td className="border p-3 text-center print-gold bg-yellow-400 text-blue-900 font-black text-sm shadow-xl whitespace-nowrap">
+                                    {grandTotal}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    };
+
+    const renderAttendanceMatrix = () => {
+        return (
+            <div className="space-y-16">
+                {renderMatrixTable("Attendance Distribution By Rank", rankColumns, 'rank')}
+                {renderMatrixTable("Attendance Distribution By Office", officeColumns, 'office')}
             </div>
         );
     };
@@ -442,7 +454,6 @@ const ReportsPage = () => {
                     {activeTab === 'pledgeList' && renderPledgeList()}
                 </div>
                 
-                {/* RESTORED: certification provisions stacks vertically below the wide matrix content */}
                 <div className="print-only report-footer mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>Generated via FGBMFI Nigeria EMS</span>
                     <span>Date: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</span>
