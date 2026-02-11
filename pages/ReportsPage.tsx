@@ -81,11 +81,29 @@ const ReportsPage = () => {
             ? checkins.filter((c: any) => c.session_id === selectedSessionId)
             : checkins.filter((c: any, idx: number, self: any[]) => self.findIndex((t: any) => t.delegate_id === c.delegate_id) === idx);
 
-        const attendedDelegates = filteredCheckIns.map((c: any) => {
+        // --- IDENTITY-BASED DEDUPLICATION ---
+        // We create a Map where the key is the physical identity (Name + District + Rank)
+        // This ensures that even if a member has two different delegate IDs, they only count once.
+        const identityMap = new Map();
+
+        filteredCheckIns.forEach((c: any) => {
             const d = delegates.find((del: any) => del.delegate_id === c.delegate_id);
-            if (!d) return null;
-            return { ...d, district: (d.district || '').trim(), checked_in_at: c.checked_in_at };
-        }).filter(Boolean);
+            if (!d) return;
+
+            // Generate a Unique Identity Key
+            const identityKey = `${norm(d.first_name)}|${norm(d.last_name)}|${norm(d.district)}|${norm(d.rank)}`;
+            
+            // Only add if this "physical person" hasn't been seen yet in this context
+            if (!identityMap.has(identityKey)) {
+                identityMap.set(identityKey, { 
+                    ...d, 
+                    district: (d.district || '').trim(), 
+                    checked_in_at: c.checked_in_at 
+                });
+            }
+        });
+
+        const attendedDelegates = Array.from(identityMap.values());
 
         const officialDistricts = (settings.districts || [])
             .map(d => d.trim())
@@ -153,24 +171,34 @@ const ReportsPage = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {sortedDistrictDelegates.map((d: any, idx: number) => (
-                                        <tr key={d.delegate_id} className="hover:bg-gray-50 border-b last:border-b-0">
-                                            <td className="border p-2 text-center text-gray-400 font-bold">{idx + 1}</td>
-                                            <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">{d.title} {d.first_name} {d.last_name}</td>
-                                            <td className="border p-2 font-bold text-gray-600 uppercase whitespace-nowrap">{d.office || '-'}</td>
-                                            <td className="border p-2 font-bold text-blue-800 uppercase whitespace-nowrap">{d.rank}</td>
-                                            <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{d.chapter || 'Individual'}</td>
-                                            <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{d.phone}</td>
-                                            <td className="border p-2 text-center text-gray-400 whitespace-nowrap">
-                                                {d.checked_in_at ? (
-                                                    <>
-                                                        <span className="block font-black text-gray-500">{new Date(d.checked_in_at).toLocaleDateString([], {day:'2-digit', month:'short'})}</span>
-                                                        <span className="text-[9px]">{new Date(d.checked_in_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                                    </>
-                                                ) : '-'}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {sortedDistrictDelegates.map((d: any, idx: number) => {
+                                        // Robust Name Spacing: Filter out empty segments and join with single space
+                                        const fullName = [d.title, d.first_name, d.last_name]
+                                            .filter(segment => segment && segment.trim().length > 0)
+                                            .map(segment => segment.trim())
+                                            .join(' ');
+
+                                        return (
+                                            <tr key={d.delegate_id} className="hover:bg-gray-50 border-b last:border-b-0">
+                                                <td className="border p-2 text-center text-gray-400 font-bold">{idx + 1}</td>
+                                                <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">
+                                                    {fullName}
+                                                </td>
+                                                <td className="border p-2 font-bold text-gray-600 uppercase whitespace-nowrap">{d.office || '-'}</td>
+                                                <td className="border p-2 font-bold text-blue-800 uppercase whitespace-nowrap">{d.rank}</td>
+                                                <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{d.chapter || 'Individual'}</td>
+                                                <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{d.phone}</td>
+                                                <td className="border p-2 text-center text-gray-400 whitespace-nowrap">
+                                                    {d.checked_in_at ? (
+                                                        <>
+                                                            <span className="block font-black text-gray-500">{new Date(d.checked_in_at).toLocaleDateString([], {day:'2-digit', month:'short'})}</span>
+                                                            <span className="text-[9px]">{new Date(d.checked_in_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                                        </>
+                                                    ) : '-'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>

@@ -198,16 +198,16 @@ export const db = {
         const { count: totalDelegatesCount } = await delegatesQuery;
 
         // 2. EXHAUSTIVE PAGINATED SCAN for Attendance & Chart Data
-        // This ensures the charts match the Matrix reports exactly.
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
-        const seenDelegateIds = new Set<string>();
+        
+        // --- IDENTITY-BASED DEDUPLICATION (Aligned with Reports Matrix) ---
+        // Instead of delegate_id, we use Name+District+Rank to define a unique person.
+        const seenIdentities = new Set<string>();
         const recentActivity: CheckIn[] = [];
         let from = 0;
 
         while (true) {
-            // Fetch checkins with delegate details joined.
-            // We use ordering by checked_in_at to ensure the "Recent Activity" is accurate.
             const { data, error } = await supabase.from('checkins')
                 .select('*, delegates(*)')
                 .eq('event_id', eventId)
@@ -220,20 +220,23 @@ export const db = {
                 if (!c.delegates) return;
                 const d = c.delegates;
                 
-                // Apply security/district filtering if registrar scoped
+                // Security/District filtering
                 if (filter && normalize(d.district).toUpperCase() !== filter) return;
                 
-                // Deduplicate to ensure we only count each PHYSICAL person once
-                if (!seenDelegateIds.has(c.delegate_id)) {
-                    seenDelegateIds.add(c.delegate_id);
+                // Generate Physical Identity Key
+                const identityKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.district)}|${normalize(d.rank)}`.toUpperCase();
+                
+                // Only count the physical person once for headcounts and charts
+                if (!seenIdentities.has(identityKey)) {
+                    seenIdentities.add(identityKey);
                     
-                    // Update Chart Accumulators
+                    // Update Chart Accumulators based on the unique identity
                     const r = d.rank || 'OTHER';
                     const dist = d.district || 'UNKNOWN';
                     rankCounts[r] = (rankCounts[r] || 0) + 1;
                     districtCounts[dist] = (districtCounts[dist] || 0) + 1;
 
-                    // Update Recent Activity Feed (Limit to top 10)
+                    // Recent Activity (Individual Check-in transactions still appear here, but we limit to unique feed)
                     if (recentActivity.length < 10) {
                         recentActivity.push({
                             checkin_id: c.checkin_id, 
@@ -253,7 +256,6 @@ export const db = {
 
             if (data.length < 1000) break;
             from += 1000;
-            // Safety break for extremely large databases
             if (from > 50000) break;
         }
 
@@ -273,7 +275,7 @@ export const db = {
 
         return {
             totalDelegates: totalDelegatesCount || 0,
-            totalCheckIns: seenDelegateIds.size, 
+            totalCheckIns: seenIdentities.size, // This now matches the unique headcount in reports
             totalFinancials: financialsSum,
             checkInsByRank: rankCounts,
             checkInsByDistrict: districtCounts,
