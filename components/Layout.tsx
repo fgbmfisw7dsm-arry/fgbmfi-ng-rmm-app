@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { User, UserRole, Event } from '../types';
+import React, { useContext } from 'react';
+import { User, UserRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
-import { db } from '../services/supabaseService';
 import { FGBMFILogo } from '../components/Logos';
+import { AppContext } from '../context/AppContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -21,24 +21,13 @@ const MenuSection = ({ title, children }: { title: string, children?: React.Reac
 
 const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId, onEventChange }) => {
   const location = useLocation();
-  const [events, setEvents] = useState<Event[]>([]);
-
-  useEffect(() => {
-    const fetchEvents = async () => {
-        try {
-            const data = await db.getEvents();
-            setEvents(data);
-        } catch(e) {}
-    };
-    fetchEvents();
-  }, []);
+  const { activeEvent, events } = useContext(AppContext);
 
   const isActive = (path: string) => location.pathname === path 
     ? "bg-blue-600 text-white shadow-md" 
     : "text-gray-300 hover:bg-gray-800 hover:text-white";
 
   const getRoleLabel = () => {
-      // Handle potential case issues with role strings from database
       const role = (user.role || '').toLowerCase();
       switch(role) {
           case UserRole.ADMIN: return 'Regional Admin';
@@ -49,13 +38,8 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
       }
   };
 
-  // --- REFINED ACCESS CONTROL ---
   const role = (user.role || '').toLowerCase();
-  
-  // Operations: Admin, Registrar, Finance (Financial Admin)
   const showOperations = role === UserRole.ADMIN || role === UserRole.REGISTRAR || role === UserRole.FINANCE;
-  
-  // Administration: ONLY Regional Admin
   const showAdminTools = role === UserRole.ADMIN;
 
   return (
@@ -136,16 +120,24 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
         <header className="bg-white shadow-sm border-b border-gray-200 p-4 flex justify-between items-center no-print">
            <div className="flex items-center gap-4">
               <span className="text-sm font-medium text-gray-500 uppercase tracking-tighter">Event Context:</span>
-              <select 
-                className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-[220px] font-bold"
-                value={activeEventId}
-                onChange={e => onEventChange(e.target.value)}
-              >
-                <option value="" disabled>-- Select Event --</option>
-                {events.map(e => (
-                  <option key={e.event_id} value={e.event_id}>{e.name}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select 
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-[220px] font-bold"
+                    value={activeEventId}
+                    onChange={e => onEventChange(e.target.value)}
+                >
+                    <option value="">-- Select Event --</option>
+                    {events.map(e => (
+                    <option key={e.event_id} value={e.event_id}>{e.name}</option>
+                    ))}
+                </select>
+                {activeEvent && (
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase transition-all ${activeEvent.is_active ? 'bg-green-50 text-green-700 border-green-200 shadow-sm' : 'bg-red-50 text-red-700 border-red-200 shadow-sm'}`}>
+                        <span className={`w-2 h-2 rounded-full ${activeEvent.is_active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                        {activeEvent.is_active ? 'Live' : 'Locked'}
+                    </div>
+                )}
+              </div>
            </div>
            <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">

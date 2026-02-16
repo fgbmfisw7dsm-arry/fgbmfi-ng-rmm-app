@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { Delegate, SystemSettings, Rank, Office, UserRole } from '../types';
@@ -10,7 +9,8 @@ const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder
 const DEFAULT_DISTRICTS = ['Lagos Central', 'Abuja Central', 'Rivers', 'Kano', 'Kaduna', 'Enugu', 'Edo', 'Anambra'];
 
 const NewDelegatePage = () => {
-  const { activeEventId, user } = useContext(AppContext);
+  const { activeEventId, activeEvent, user } = useContext(AppContext);
+  const isLocked = activeEvent?.is_active === false;
   
   // Logic: Is this a District Registrar who should be locked to one district?
   const isDistrictScoped = (user?.role || '').toLowerCase() === UserRole.REGISTRAR && !!user?.district;
@@ -36,7 +36,6 @@ const NewDelegatePage = () => {
     checkInOk: boolean;
   } | null>(null);
 
-  // Synchronize form when user district changes (or on load)
   useEffect(() => {
     if (isDistrictScoped) {
         setForm(prev => ({ ...prev, district: user?.district }));
@@ -56,6 +55,7 @@ const NewDelegatePage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) return;
     if(!activeEventId || !user) {
         alert("Action Required: Please select an Active Event in the header.");
         return;
@@ -65,7 +65,6 @@ const NewDelegatePage = () => {
     setLoading(true);
     try {
         const payload = { ...form };
-        // Force the district for scoped registrars just in case of stale state
         if (isDistrictScoped) payload.district = user.district;
 
         const newDelegate = await db.registerDelegate(payload);
@@ -98,7 +97,6 @@ const NewDelegatePage = () => {
             checkInStatus: initialStatus
         });
 
-        // Clear form for next entry
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
             district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER' 
@@ -113,6 +111,7 @@ const NewDelegatePage = () => {
   };
 
   const handleManualCheckIn = async () => {
+    if (isLocked) return;
     if (!successData || !user || !activeEventId || loading) return;
     setLoading(true);
     try {
@@ -166,7 +165,7 @@ const NewDelegatePage = () => {
                 {successData.checkInStatus}
              </div>
 
-             {!successData.checkInOk && (
+             {!successData.checkInOk && !isLocked && (
                  <button 
                     onClick={handleManualCheckIn} 
                     disabled={loading} 
@@ -189,80 +188,89 @@ const NewDelegatePage = () => {
   }
 
   return (
-    <div className="max-w-4xl mx-auto bg-white p-10 md:p-14 rounded-[3rem] shadow-2xl border border-gray-50 animate-in fade-in pb-20">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-black text-blue-900 tracking-tighter uppercase leading-none">New Delegate Entry</h2>
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-2">Regional Master List Synchronization</p>
+    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 ${isLocked ? 'pointer-events-none opacity-80' : ''}`}>
+        {isLocked && (
+            <div className="bg-red-600 text-white p-4 rounded-3xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700">
+                <span className="text-xl">🔒</span>
+                <span className="text-xs font-black uppercase tracking-widest">Read-Only Mode: Registration Suspended</span>
+            </div>
+        )}
+
+        <div className="bg-white p-10 md:p-14 rounded-[3rem] shadow-2xl border border-gray-50">
+            <div className="text-center mb-12">
+            <h2 className="text-4xl font-black text-blue-900 tracking-tighter uppercase leading-none">New Delegate Entry</h2>
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-2">Regional Master List Synchronization</p>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Title</label>
+                    <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-bold outline-none" value={form.title} onChange={e => setForm({...form, title: e.target.value})}>
+                        {availableTitles.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">First Name *</label>
+                    <input required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="REQUIRED" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Last Name *</label>
+                    <input required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="REQUIRED" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} />
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                    {isDistrictScoped ? 'District (Auto-Assigned)' : 'District *'}
+                    </label>
+                    {isDistrictScoped ? (
+                    <div className="w-full p-4 border-2 border-blue-50 rounded-2xl bg-blue-50 flex items-center justify-between">
+                        <span className="font-black text-blue-900 uppercase">{user?.district}</span>
+                        <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                    </div>
+                    ) : (
+                    <select required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.district} onChange={e => setForm({...form, district: e.target.value})}>
+                        <option value="">-- SELECT DISTRICT --</option>
+                        {availableDistricts.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    )}
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Chapter</label>
+                    <input className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="CHAPTER NAME" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Phone *</label>
+                    <input required type="tel" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Email Address</label>
+                    <input type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rank</label>
+                    <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.rank} onChange={e => setForm({...form, rank: e.target.value})}>
+                        {availableRanks.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Office</label>
+                    <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.office} onChange={e => setForm({...form, office: e.target.value})}>
+                        {availableOffices.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                </div>
+
+                <div className="md:col-span-2 lg:col-span-3 pt-8">
+                    <button 
+                    type="submit" 
+                    disabled={loading || isLocked} 
+                    className="w-full py-6 bg-blue-600 hover:bg-blue-700 text-white font-black text-lg rounded-[2rem] transition-all shadow-2xl shadow-blue-200 disabled:opacity-50 uppercase tracking-[0.2em] transform active:scale-[0.98]"
+                    >
+                        {isLocked ? 'Event Locked' : (loading ? 'SYNCHRONIZING...' : 'Complete Registration & Verify Arrival')}
+                    </button>
+                </div>
+            </form>
         </div>
-        
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Title</label>
-                <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-bold outline-none" value={form.title} onChange={e => setForm({...form, title: e.target.value})}>
-                    {availableTitles.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">First Name *</label>
-                <input required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="REQUIRED" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} />
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Last Name *</label>
-                <input required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="REQUIRED" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} />
-             </div>
-
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                  {isDistrictScoped ? 'District (Auto-Assigned)' : 'District *'}
-                </label>
-                {isDistrictScoped ? (
-                  <div className="w-full p-4 border-2 border-blue-50 rounded-2xl bg-blue-50 flex items-center justify-between">
-                    <span className="font-black text-blue-900 uppercase">{user?.district}</span>
-                    <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
-                  </div>
-                ) : (
-                  <select required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.district} onChange={e => setForm({...form, district: e.target.value})}>
-                      <option value="">-- SELECT DISTRICT --</option>
-                      {availableDistricts.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                )}
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Chapter</label>
-                <input className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="CHAPTER NAME" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})} />
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Phone *</label>
-                <input required type="tel" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
-             </div>
-
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Email Address</label>
-                <input type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rank</label>
-                <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.rank} onChange={e => setForm({...form, rank: e.target.value})}>
-                    {availableRanks.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-             </div>
-             <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Office</label>
-                <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.office} onChange={e => setForm({...form, office: e.target.value})}>
-                    {availableOffices.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-             </div>
-
-             <div className="md:col-span-2 lg:col-span-3 pt-8">
-                <button 
-                  type="submit" 
-                  disabled={loading} 
-                  className="w-full py-6 bg-blue-600 hover:bg-blue-700 text-white font-black text-lg rounded-[2rem] transition-all shadow-2xl shadow-blue-200 disabled:opacity-50 uppercase tracking-[0.2em] transform active:scale-[0.98]"
-                >
-                    {loading ? 'SYNCHRONIZING...' : 'Complete Registration & Verify Arrival'}
-                </button>
-             </div>
-        </form>
     </div>
   );
 };

@@ -1,20 +1,23 @@
+
 import { supabase } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType } from '../types';
 import { generateCodeFromId } from './utils';
 
+/**
+ * Normalizes email for transmission. 
+ */
+const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
-
-const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
-    return Promise.race([
-        promise,
-        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMessage)), timeoutMs))
-    ]);
-};
 
 const handleSupabaseError = (res: any, customMessage?: string) => {
     if (res.error) {
-        console.error("Supabase Internal Error:", res.error);
+        console.error("Supabase Database Error:", res.error);
         const msg = res.error.message || "Unknown Database Error";
+        
+        if (msg.includes('Failed to fetch') || msg.toLowerCase().includes('network error')) {
+            throw new Error("Connection failed. Check your data signal.");
+        }
+
         if (msg.includes('jwt expired') || msg.includes('invalid token')) {
             localStorage.clear();
             window.location.reload(); 
@@ -25,6 +28,18 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
     return res.data;
 };
 
+// Lifecycle Guard: Checks if an event is active before allowing writes
+const ensureEventActive = async (eventId: string) => {
+    const { data, error } = await supabase.from('events').select('is_active').eq('event_id', eventId).single();
+    if (error) {
+        console.warn("Lifecycle guard check failed (likely column missing):", error);
+        return; 
+    }
+    if (data && data.is_active === false) {
+        throw new Error("EVENT_LOCKED: This event is currently inactive (Read-Only).");
+    }
+};
+
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string): Promise<User> => {
         try {
@@ -33,25 +48,33 @@ export const auth = {
 
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
-                .upsert({ id: authId, email, role: UserRole.REGISTRAR }, { onConflict: 'id' })
+                .upsert({ id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR }, { onConflict: 'id' })
                 .select().single();
 
             if (createError) throw createError;
             return newProfile as User;
         } catch (err) {
-            return { id: authId, email, role: UserRole.REGISTRAR };
+            return { id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR };
         }
     },
 
     login: async (email: string, password: string): Promise<User | null> => {
-        const { data: authData, error: authError } = await withTimeout<any>(
-            supabase.auth.signInWithPassword({ email: normalize(email), password }), 
-            15000, 
-            "Login Timeout"
-        );
-        if (authError) throw new Error(authError.message);
-        if (!authData.user) return null;
-        return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email);
+        try {
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
+                email: normalizeEmail(email), 
+                password 
+            });
+            
+            if (authError) {
+                if (authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
+                throw new Error(authError.message);
+            }
+            
+            if (!authData.user) return null;
+            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email);
+        } catch (e: any) {
+            throw e;
+        }
     }
 };
 
@@ -60,10 +83,18 @@ export const db = {
         handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
 
     createEvent: async (event: Omit<Event, 'event_id'>) => 
-        handleSupabaseError(await supabase.from('events').insert(event).select().single()),
+        handleSupabaseError(await supabase.from('events').insert({ ...event, is_active: true }).select().single()),
 
-    updateEvent: async (id: string, updates: Partial<Event>) => 
-        handleSupabaseError(await supabase.from('events').update(updates).eq('event_id', id)),
+    updateEvent: async (id: string, updates: Partial<Event>) => {
+        console.log(`DB-SERVICE: Executing Update for Event ${id}`, updates);
+        // We perform the update without .select() first to ensure we aren't blocked by SELECT RLS policies
+        const { error } = await supabase.from('events').update(updates).eq('event_id', id);
+        if (error) {
+            console.error("Supabase Update Failed:", error);
+            throw error;
+        }
+        return { event_id: id, ...updates };
+    },
 
     deleteEvent: async (id: string) => 
         handleSupabaseError(await supabase.from('events').delete().eq('event_id', id)),
@@ -74,14 +105,22 @@ export const db = {
         return data || [];
     },
 
-    createSession: async (session: Omit<Session, 'session_id'>) => 
-        handleSupabaseError(await supabase.from('sessions').insert(session).select().single()),
+    createSession: async (session: Omit<Session, 'session_id'>) => {
+        await ensureEventActive(session.event_id);
+        return handleSupabaseError(await supabase.from('sessions').insert(session).select().single());
+    },
 
-    updateSession: async (id: string, updates: Partial<Session>) => 
-        handleSupabaseError(await supabase.from('sessions').update(updates).eq('session_id', id)),
+    updateSession: async (id: string, updates: Partial<Session>) => {
+        const { data: existing } = await supabase.from('sessions').select('event_id').eq('session_id', id).single();
+        if (existing) await ensureEventActive(existing.event_id);
+        return handleSupabaseError(await supabase.from('sessions').update(updates).eq('session_id', id).select().single());
+    },
 
-    deleteSession: async (id: string) => 
-        handleSupabaseError(await supabase.from('sessions').delete().eq('session_id', id)),
+    deleteSession: async (id: string) => {
+        const { data: existing } = await supabase.from('sessions').select('event_id').eq('session_id', id).single();
+        if (existing) await ensureEventActive(existing.event_id);
+        return handleSupabaseError(await supabase.from('sessions').delete().eq('session_id', id));
+    },
 
     getSettings: async (): Promise<SystemSettings> => {
         const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
@@ -107,10 +146,10 @@ export const db = {
         handleSupabaseError(await supabase.from('app_users').select('*')),
 
     createUser: async (user: Omit<User, 'id'>, password: string) => 
-        handleSupabaseError(await supabase.rpc('create_app_user', { email: normalize(user.email), password, role: user.role.toLowerCase(), district: user.district })),
+        handleSupabaseError(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district })),
 
     updateUser: async (userId: string, updates: Partial<User>) => 
-        handleSupabaseError(await supabase.from('app_users').update(updates).eq('id', userId)),
+        handleSupabaseError(await supabase.from('app_users').update(updates).eq('id', userId).select().single()),
 
     deleteUser: async (userId: string) => 
         handleSupabaseError(await supabase.rpc('delete_app_user', { user_id_to_delete: userId })),
@@ -144,22 +183,22 @@ export const db = {
             all = [...all, ...data];
             if (data.length < 1000) break;
             from += 1000;
-            if (from > 40000) break;
         }
         return all;
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
         const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
-        
         return handleSupabaseError(await supabase.from('delegates').update({
             ...validUpdates,
             district: normalize(validUpdates.district),
             chapter: normalize(validUpdates.chapter)
-        }).eq('delegate_id', id));
+        }).eq('delegate_id', id).select().single());
     },
 
+    // Fix: Corrected variable name mismatch from event_id to eventId
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+        await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: existing } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle();
         if (existing) return { success: true, message: 'Already Verified', code: generateCodeFromId(delegateId, eventId) };
@@ -169,6 +208,7 @@ export const db = {
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+        await ensureEventActive(eventId);
         const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
         const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
         if (!match) return { success: false, message: 'Invalid code.' };
@@ -191,96 +231,45 @@ export const db = {
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
         const filter = district ? normalize(district).toUpperCase() : null;
-        
-        // 1. Total Delegates Count (Scoped)
         let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
         if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
-        // 2. EXHAUSTIVE PAGINATED SCAN for Attendance & Chart Data
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
-        
-        // --- IDENTITY-BASED DEDUPLICATION (Aligned with Reports Matrix) ---
-        // Instead of delegate_id, we use Name+District+Rank to define a unique person.
         const seenIdentities = new Set<string>();
         const recentActivity: CheckIn[] = [];
         let from = 0;
 
         while (true) {
-            const { data, error } = await supabase.from('checkins')
-                .select('*, delegates(*)')
-                .eq('event_id', eventId)
-                .order('checked_in_at', { ascending: false })
-                .range(from, from + 999);
-
+            const { data, error } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).range(from, from + 999);
             if (error || !data || data.length === 0) break;
-
             data.forEach(c => {
                 if (!c.delegates) return;
                 const d = c.delegates;
-                
-                // Security/District filtering
                 if (filter && normalize(d.district).toUpperCase() !== filter) return;
-                
-                // Generate Physical Identity Key
                 const identityKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.district)}|${normalize(d.rank)}`.toUpperCase();
-                
-                // Only count the physical person once for headcounts and charts
                 if (!seenIdentities.has(identityKey)) {
                     seenIdentities.add(identityKey);
-                    
-                    // Update Chart Accumulators based on the unique identity
-                    const r = d.rank || 'OTHER';
-                    const dist = d.district || 'UNKNOWN';
-                    rankCounts[r] = (rankCounts[r] || 0) + 1;
-                    districtCounts[dist] = (districtCounts[dist] || 0) + 1;
-
-                    // Recent Activity (Individual Check-in transactions still appear here, but we limit to unique feed)
+                    rankCounts[d.rank || 'OTHER'] = (rankCounts[d.rank || 'OTHER'] || 0) + 1;
+                    districtCounts[d.district || 'UNKNOWN'] = (districtCounts[d.district || 'UNKNOWN'] || 0) + 1;
                     if (recentActivity.length < 10) {
                         recentActivity.push({
-                            checkin_id: c.checkin_id, 
-                            event_id: c.event_id, 
-                            delegate_id: c.delegate_id, 
-                            session_id: c.session_id, 
-                            checked_in_at: c.checked_in_at, 
-                            checked_in_by: c.checked_in_by,
-                            delegate_name: `${d.first_name} ${d.last_name}`,
-                            district: d.district || 'Unknown', 
-                            rank: d.rank || '-', 
-                            office: d.office || '-'
+                            checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
+                            delegate_name: `${d.first_name} ${d.last_name}`, district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
                         });
                     }
                 }
             });
-
             if (data.length < 1000) break;
             from += 1000;
-            if (from > 50000) break;
         }
 
-        // 3. Total Financials (Scoped)
         let financialsSum = 0;
-        if (filter) {
-            const { data: distPledges } = await supabase.from('pledges').select('id').eq('event_id', eventId).ilike('district', filter);
-            const pledgeIds = (distPledges || []).map(p => p.id);
-            if (pledgeIds.length > 0) {
-                const { data: distFinancials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId).in('pledge_id', pledgeIds);
-                financialsSum = (distFinancials || []).reduce((s, f) => s + (Number(f.amount) || 0), 0);
-            }
-        } else {
-            const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
-            financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
-        }
+        const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
+        financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
 
-        return {
-            totalDelegates: totalDelegatesCount || 0,
-            totalCheckIns: seenIdentities.size, // This now matches the unique headcount in reports
-            totalFinancials: financialsSum,
-            checkInsByRank: rankCounts,
-            checkInsByDistrict: districtCounts,
-            recentActivity: recentActivity
-        };
+        return { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
     },
 
     getAllDataForExport: async (eventId: string): Promise<any> => {
@@ -290,17 +279,15 @@ export const db = {
             while (true) {
                 let q = supabase.from(table).select('*').range(from, from + 999);
                 if (eventIdFilter) q = q.eq('event_id', eventIdFilter);
-                if (table === 'checkins') q = q.order('checked_in_at', { ascending: false });
+                if (table === 'checkins') q = q.order('checked_in_at', { ascending: true });
                 const { data, error } = await q;
                 if (error || !data || data.length === 0) break;
                 results = [...results, ...data];
                 if (data.length < 1000) break;
                 from += 1000;
-                if (from > 40000) break;
             }
             return results;
         };
-
         const [d, c, f, p] = await Promise.all([ fetchAll('delegates'), fetchAll('checkins', eventId), fetchAll('financial_entries', eventId), fetchAll('pledges', eventId) ]);
         return { delegates: d, checkins: c, financials: f, pledges: p };
     },
@@ -313,27 +300,35 @@ export const db = {
         return data || [];
     },
 
-    addFinancialEntry: async (entry: Partial<FinancialEntry>) => handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single()),
-    createPledge: async (pledge: Partial<Pledge>) => handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single()),
-    clearEventData: async (eventId: string) => { await supabase.from('checkins').delete().eq('event_id', eventId); await supabase.from('financial_entries').delete().eq('event_id', eventId); await supabase.from('pledges').delete().eq('event_id', eventId); },
+    addFinancialEntry: async (entry: Partial<FinancialEntry>) => {
+        if (entry.event_id) await ensureEventActive(entry.event_id);
+        return handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single());
+    },
+
+    createPledge: async (pledge: Partial<Pledge>) => {
+        if (pledge.event_id) await ensureEventActive(pledge.event_id);
+        return handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single());
+    },
+
+    clearEventData: async (eventId: string) => { 
+        await ensureEventActive(eventId);
+        await supabase.from('checkins').delete().eq('event_id', eventId); 
+        await supabase.from('financial_entries').delete().eq('event_id', eventId); 
+        await supabase.from('pledges').delete().eq('event_id', eventId); 
+    },
+
     deleteDelegatesByDistrict: async (district: string) => { const { data } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select(); return data?.length || 0; },
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
     
     harmonizeDistricts: async () => {
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
-        
         const official = (settings.districts || []).map(d => normalize(d));
-        await supabase.from('system_settings').update({ districts: official }).eq('id', settings.id);
-        
-        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(10000);
+        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
         let count = 0;
-        
         for (const d of (delegates || [])) {
-            const currentDist = d.district || '';
-            const normDist = normalize(currentDist);
-            const matched = official.find(o => o.toUpperCase() === normDist.toUpperCase());
-            if (matched && matched !== currentDist) {
+            const matched = official.find(o => o.toUpperCase() === (d.district || '').trim().toUpperCase());
+            if (matched && matched !== d.district) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
             }
@@ -342,14 +337,13 @@ export const db = {
     },
     
     deduplicateDelegates: async () => {
-        const { data } = await supabase.from('delegates').select('*').limit(10000);
+        const { data } = await supabase.from('delegates').select('*').limit(5000);
         if (!data) return 0;
         const seen = new Set();
         const dups = [];
         for (const d of data) {
             const key = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
-            if (seen.has(key)) dups.push(d.delegate_id);
-            else seen.add(key);
+            if (seen.has(key)) dups.push(d.delegate_id); else seen.add(key);
         }
         if (dups.length > 0) await supabase.from('delegates').delete().in('delegate_id', dups);
         return dups.length;

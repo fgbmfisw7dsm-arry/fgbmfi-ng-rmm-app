@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { auth } from '../services/supabaseService';
-import { supabase } from '../services/supabaseClient';
+import { supabase, isStripeKeyDetected } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { FGBMFILogo } from '../components/Logos';
 
@@ -28,12 +28,23 @@ const LoginPage = () => {
       if (user) {
         login(user);
       } else {
-        setError('Verification rejected: Invalid credentials.');
+        setError('Verification rejected: User profile not found.');
       }
     } catch (e: any) {
       console.error("Login component caught error:", e);
-      const msg = e.message || 'System error. Check your connection.';
-      setError(msg);
+      
+      // PRIORITY 1: Handle Typos/Invalid Credentials
+      if (e.message === 'INVALID_CREDENTIALS') {
+        setError('Login Failed: Invalid username or password. Please check for typos and try again.');
+      } 
+      // PRIORITY 2: Diagnostics for developers (Stripe key check)
+      else if (isStripeKeyDetected) {
+         setError('CRITICAL CONFIGURATION ERROR: A Stripe API key was detected in your configuration. Authentication requires a valid Supabase Anon Key.');
+      } 
+      // PRIORITY 3: General errors
+      else {
+        setError(e.message || 'System error. Check your data signal or network connection.');
+      }
     } finally {
       setLoading(false);
     }
@@ -41,18 +52,11 @@ const LoginPage = () => {
 
   const handleDeepReset = () => {
     if (window.confirm("This will clear all system connection data and refresh the login page for a clean start. Proceed?")) {
-      // 1. Immediately clear storage to guarantee it happens even if network/auth hangs
       localStorage.clear();
       sessionStorage.clear();
-
       try {
-        // 2. Fire and forget local signout (no await to prevent hanging the reload logic)
         supabase.auth.signOut({ scope: 'local' });
-      } catch (e) {
-        console.warn("Local signout failed during reset:", e);
-      }
-
-      // 3. Force a hard reload to the root URL (base origin) to reset the entire JS memory state
+      } catch (e) {}
       window.location.href = window.location.origin + window.location.pathname;
     }
   };
@@ -69,6 +73,11 @@ const LoginPage = () => {
         {error && (
             <div className="p-5 rounded-2xl mb-6 text-xs font-bold border text-center leading-relaxed bg-red-50 text-red-600 border-red-100 animate-in slide-in-from-top-2">
                 <span>{error}</span>
+                {isStripeKeyDetected && error.includes('CONFIGURATION ERROR') && (
+                  <div className="mt-3 text-[10px] text-red-800 bg-red-100 p-2 rounded-lg font-medium">
+                    The current key starts with 'sb_'. Supabase keys must start with 'eyJ...'. Update services/supabaseClient.ts.
+                  </div>
+                )}
             </div>
         )}
 

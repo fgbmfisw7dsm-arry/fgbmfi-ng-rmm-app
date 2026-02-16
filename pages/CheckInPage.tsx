@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
 import { Session, Delegate, UserRole } from '../types';
@@ -6,7 +5,7 @@ import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 
 const CheckInPage = () => {
-  const { activeEventId, user } = useContext(AppContext);
+  const { activeEventId, activeEvent, user } = useContext(AppContext);
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
   const [results, setResults] = useState<(Delegate & { checkedIn: boolean, code?: string })[]>([]);
@@ -16,6 +15,7 @@ const CheckInPage = () => {
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
+  const isLocked = activeEvent?.is_active === false;
 
   useEffect(() => {
     return () => {
@@ -70,6 +70,7 @@ const CheckInPage = () => {
   }, [performSearch]);
 
   const handleManualCheckIn = async (delegateId: string) => {
+    if (isLocked) return;
     if (!activeEventId || !user) {
         alert("Action Blocked: Log in and select an event first.");
         return;
@@ -100,6 +101,7 @@ const CheckInPage = () => {
   };
 
   const handleCodeSubmit = async (codeVal: string) => {
+    if (isLocked) return;
     if(!user || !activeEventId) return;
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
@@ -119,6 +121,7 @@ const CheckInPage = () => {
   };
 
   const onCodeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isLocked) return;
     const val = e.target.value.replace(/[^0-9]/g, '');
     if (feedback?.type === 'error') setFeedback(null);
     if (val.length <= 4) {
@@ -142,7 +145,14 @@ const CheckInPage = () => {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4">
+    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4 ${isLocked ? 'opacity-80' : ''}`}>
+       {isLocked && (
+            <div className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700 animate-in slide-in-from-top-4">
+                <span className="text-xl">🔒</span>
+                <span className="text-xs font-black uppercase tracking-widest">Event Locked: Read-Only Mode Active</span>
+            </div>
+       )}
+
        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h2 className="text-[10px] font-black text-gray-400 uppercase mb-3 tracking-[0.2em]">1. Target Verification Scope</h2>
             <select 
@@ -156,7 +166,7 @@ const CheckInPage = () => {
        </div>
        
        {selectedSessionId && (
-           <div className="bg-white p-8 rounded-3xl shadow-xl border-t-8 border-blue-600 animate-in slide-in-from-top-4">
+           <div className={`bg-white p-8 rounded-3xl shadow-xl border-t-8 border-blue-600 animate-in slide-in-from-top-4 ${isLocked ? 'pointer-events-none grayscale opacity-60' : ''}`}>
                 <h2 className="text-lg font-black mb-4 text-blue-900 uppercase tracking-tighter">2. 4-Digit Fast Check-in</h2>
                 <input 
                   className="w-full p-6 text-center text-6xl md:text-8xl font-black tracking-[0.5em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-100 font-mono" 
@@ -164,7 +174,8 @@ const CheckInPage = () => {
                   maxLength={4} 
                   value={code} 
                   onChange={onCodeInput} 
-                  autoFocus 
+                  autoFocus={!isLocked}
+                  readOnly={isLocked}
                 />
                 <div className={`h-8 mt-4 text-center font-black uppercase text-xs tracking-widest ${feedback?.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                     {feedback?.msg}
@@ -202,7 +213,6 @@ const CheckInPage = () => {
               <div className="flex-1 w-full text-left">
                 <div className="flex items-center flex-wrap gap-2">
                     <h3 className="font-black text-blue-900 uppercase text-lg leading-tight">{d.title} {d.first_name} {d.last_name}</h3>
-                    {/* RESTORED: Rank Badge */}
                     <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>
                 </div>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT • {d.chapter || 'INDIVIDUAL'} • {d.office}</p>
@@ -217,20 +227,14 @@ const CheckInPage = () => {
                              {d.code || generateCodeFromId(d.delegate_id, activeEventId)}
                            </span>
                         </div>
-                        <button 
-                          onClick={clearSearch}
-                          className="text-[10px] font-black text-blue-600 uppercase border-b border-blue-200 pb-0.5 mt-1 hover:text-blue-800 transition-colors"
-                        >
-                          Done & Clear Results
-                        </button>
                     </div>
                   ) : (
                     <button 
                       onClick={() => handleManualCheckIn(d.delegate_id)} 
-                      disabled={!!processingId}
+                      disabled={!!processingId || isLocked}
                       className="w-full md:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-xl shadow-blue-100 transition-all active:scale-95"
                     >
-                        {processingId === d.delegate_id ? 'WAIT...' : 'VERIFY ENTRY'}
+                        {isLocked ? 'LOCKED' : (processingId === d.delegate_id ? 'WAIT...' : 'VERIFY ENTRY')}
                     </button>
                   )}
               </div>

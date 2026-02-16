@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
@@ -7,7 +6,8 @@ import { AppContext } from '../context/AppContext';
 import { formatCurrency } from '../services/utils';
 
 const FinancialsPage = () => {
-    const { activeEventId, user } = useContext(AppContext);
+    const { activeEventId, activeEvent, user } = useContext(AppContext);
+    const isLocked = activeEvent?.is_active === false;
     const [entries, setEntries] = useState<FinancialEntry[]>([]);
     const [pledges, setPledges] = useState<Pledge[]>([]);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -87,6 +87,7 @@ const FinancialsPage = () => {
 
     const submitTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isLocked) return;
         if (!activeEventId) return;
         if ((tForm.amount || 0) <= 0) return alert("Enter valid amount.");
         setLoading(true);
@@ -100,6 +101,7 @@ const FinancialsPage = () => {
 
     const submitPledge = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isLocked) return;
         if (!activeEventId) return;
         if (!pForm.donor_name || !pForm.district || (pForm.amount_pledged || 0) <= 0) return alert("Donor Name, District, and Amount are required.");
         setLoading(true);
@@ -113,6 +115,7 @@ const FinancialsPage = () => {
 
     const submitRedemption = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isLocked) return;
         if (!activeEventId || !selectedPledge || rForm.amount <= 0) return alert("Invalid entry.");
         setLoading(true);
         try {
@@ -133,7 +136,14 @@ const FinancialsPage = () => {
     if(!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Active Event</div>;
 
     return (
-        <div className="space-y-6">
+        <div className={`space-y-6 ${isLocked ? 'opacity-80' : ''}`}>
+            {isLocked && (
+                <div className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700">
+                    <span className="text-xl">🔒</span>
+                    <span className="text-xs font-black uppercase tracking-widest">Read-Only Mode: Financial Ledger Locked</span>
+                </div>
+            )}
+
             <div className="bg-white p-2 rounded-xl shadow-sm border inline-flex gap-2 no-print">
                 <button onClick={() => setActiveTab('transactions')} className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase transition-all ${activeTab === 'transactions' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>Offerings</button>
                 <button onClick={() => setActiveTab('redemptions')} className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase transition-all ${activeTab === 'redemptions' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>Redemption</button>
@@ -142,7 +152,7 @@ const FinancialsPage = () => {
 
             {activeTab === 'transactions' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="bg-white p-8 rounded-2xl shadow-sm border h-fit">
+                    <div className={`bg-white p-8 rounded-2xl shadow-sm border h-fit ${isLocked ? 'pointer-events-none grayscale opacity-40' : ''}`}>
                         <h3 className="font-black mb-6 text-blue-900 uppercase text-xs tracking-widest border-b pb-2">Record Offering</h3>
                         <form onSubmit={submitTransaction} className="space-y-5">
                             <div className="space-y-1">
@@ -160,8 +170,8 @@ const FinancialsPage = () => {
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Amount (NGN)</label>
                                 <input type="number" className="w-full p-3 border rounded-xl font-black text-2xl text-blue-600 bg-blue-50/30" placeholder="0.00" value={tForm.amount || ''} onChange={e => setTForm({...tForm, amount: parseFloat(e.target.value)})} />
                             </div>
-                            <button type="submit" disabled={loading} className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl shadow-xl transition-all disabled:opacity-50 uppercase text-sm tracking-widest">
-                                {loading ? 'SAVING...' : 'RECORD OFFERING'}
+                            <button type="submit" disabled={loading || isLocked} className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl shadow-xl transition-all disabled:opacity-50 uppercase text-sm tracking-widest">
+                                {isLocked ? 'LOCKED' : (loading ? 'SAVING...' : 'RECORD OFFERING')}
                             </button>
                         </form>
                     </div>
@@ -189,7 +199,7 @@ const FinancialsPage = () => {
 
             {activeTab === 'redemptions' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="bg-white p-8 rounded-2xl shadow-sm border h-fit">
+                    <div className={`bg-white p-8 rounded-2xl shadow-sm border h-fit ${isLocked ? 'pointer-events-none grayscale opacity-40' : ''}`}>
                         <h3 className="font-black mb-6 text-blue-900 uppercase text-xs tracking-widest border-b pb-2">Process Redemption</h3>
                         {!selectedPledge ? (
                             <div className="relative mb-4">
@@ -225,8 +235,8 @@ const FinancialsPage = () => {
                                     <input type="number" className="w-full p-4 border rounded-xl font-black text-2xl text-green-700 bg-green-50/30" value={rForm.amount} onChange={e => setRForm({...rForm, amount: parseFloat(e.target.value)})} />
                                     <div className="text-[10px] text-red-600 font-black text-right mt-1">Bal: {formatCurrency(selectedPledge.amount_pledged - selectedPledge.amount_redeemed)}</div>
                                 </div>
-                                <button type="submit" disabled={loading} className="w-full py-5 bg-blue-600 text-white font-black rounded-xl shadow-xl disabled:opacity-50 uppercase tracking-widest text-xs">
-                                    {loading ? 'PROCESSING...' : 'RECORD REDEMPTION'}
+                                <button type="submit" disabled={loading || isLocked} className="w-full py-5 bg-blue-600 text-white font-black rounded-xl shadow-xl disabled:opacity-50 uppercase tracking-widest text-xs">
+                                    {isLocked ? 'LOCKED' : (loading ? 'PROCESSING...' : 'RECORD REDEMPTION')}
                                 </button>
                             </form>
                         )}
@@ -252,7 +262,7 @@ const FinancialsPage = () => {
 
             {activeTab === 'pledges' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="bg-white p-8 rounded-2xl shadow-sm border h-fit">
+                    <div className={`bg-white p-8 rounded-2xl shadow-sm border h-fit ${isLocked ? 'pointer-events-none grayscale opacity-40' : ''}`}>
                         <h3 className="font-black mb-6 text-blue-900 uppercase text-xs tracking-widest border-b pb-2">New Pledge Entry</h3>
                         <div className="relative mb-6">
                             <label className="text-[10px] font-black text-gray-400 block mb-2 uppercase tracking-wider">Donor Lookup</label>
@@ -280,8 +290,8 @@ const FinancialsPage = () => {
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Pledge Amount (NGN)</label>
                                 <input type="number" className="w-full p-3 border rounded-xl font-black text-2xl text-blue-600 bg-blue-50/30" placeholder="0.00" value={pForm.amount_pledged || ''} onChange={e => setPForm({...pForm, amount_pledged: parseFloat(e.target.value)})} />
                             </div>
-                            <button type="submit" disabled={loading} className="w-full py-4 bg-blue-900 text-white font-black rounded-xl shadow-xl transition-all disabled:opacity-50 uppercase tracking-widest text-sm">
-                                {loading ? 'SAVING...' : 'RECORD PLEDGE'}
+                            <button type="submit" disabled={loading || isLocked} className="w-full py-4 bg-blue-900 text-white font-black rounded-xl shadow-xl transition-all disabled:opacity-50 uppercase tracking-widest text-sm">
+                                {isLocked ? 'LOCKED' : (loading ? 'SAVING...' : 'RECORD PLEDGE')}
                             </button>
                         </form>
                     </div>

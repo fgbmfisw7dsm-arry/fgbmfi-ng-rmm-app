@@ -1,13 +1,12 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User } from './types';
+import { User, Event } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
 import Layout from './components/Layout';
-import { auth } from './services/supabaseService';
+import { auth, db } from './services/supabaseService';
 
 // Modules
 import LoginPage from './pages/LoginPage';
@@ -26,71 +25,88 @@ import UserManualModule from './pages/UserManualModule';
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [events, setEvents] = useState<Event[]>([]);
   const [activeEventId, setActiveEventId] = useState<string>(() => localStorage.getItem('fgbmfi_active_event_id') || '');
+  const [activeEvent, setActiveEvent] = useState<Event | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Use a ref to track current user ID for comparison during auth state changes
   const userIdRef = useRef<string | null>(null);
 
+  const fetchEvents = useCallback(async () => {
+    try {
+      const data = await db.getEvents();
+      setEvents(data || []);
+      
+      if (activeEventId && !data.some(e => e.event_id === activeEventId)) {
+        setActiveEventId('');
+        setActiveEvent(null);
+        localStorage.removeItem('fgbmfi_active_event_id');
+      } else if (activeEventId) {
+        const match = data.find(e => e.event_id === activeEventId);
+        setActiveEvent(match || null);
+      }
+    } catch (e) {
+      console.error("Failed to fetch events:", e);
+    }
+  }, [activeEventId, user?.id]);
+
   useEffect(() => {
-    if (activeEventId) localStorage.setItem('fgbmfi_active_event_id', activeEventId);
-    else localStorage.removeItem('fgbmfi_active_event_id');
-  }, [activeEventId]);
+    if (user?.id) {
+        fetchEvents();
+    }
+  }, [fetchEvents, user?.id]);
+
+  useEffect(() => {
+    if (activeEventId) {
+        localStorage.setItem('fgbmfi_active_event_id', activeEventId);
+        const match = events.find(e => e.event_id === activeEventId);
+        setActiveEvent(match || null);
+    } else {
+        localStorage.removeItem('fgbmfi_active_event_id');
+        setActiveEvent(null);
+    }
+  }, [activeEventId, events]);
+
+  const refreshActiveEvent = useCallback(async () => {
+    await fetchEvents();
+  }, [fetchEvents]);
 
   const logout = useCallback(async () => {
     userIdRef.current = null;
     setUser(null);
-    setIsLoading(false);
     try {
       await supabase.auth.signOut();
       localStorage.clear();
       window.location.hash = "/login";
     } catch (e) {
-      console.warn("Signout failed:", e);
       localStorage.clear();
       window.location.reload();
     }
   }, []);
 
-  const refreshSession = useCallback(async () => {
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error || !session) {
-        if (userIdRef.current) await logout();
-        return;
-      }
-    } catch (e) {
-      console.warn("Heartbeat refresh failed:", e);
-    }
-  }, [logout]);
-
   useEffect(() => {
     let mounted = true;
-    
-    const watchdog = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.warn("Auth Performance Watchdog: State resolution forced.");
-        setIsLoading(false);
-      }
-    }, 4000);
 
     const initAuth = async () => {
+      if (!isSupabaseConfigured) {
+        if (mounted) setIsLoading(false);
+        return;
+      }
+
+      // Safety Timeout: 5 seconds max for session check
+      const timeoutId = setTimeout(() => {
+        if (mounted && isLoading) {
+          console.warn("Auth initialization timed out. Forcing ready state.");
+          setIsLoading(false);
+        }
+      }, 5000);
+
       try {
-        if (!isSupabaseConfigured) {
-          if (mounted) setIsLoading(false);
-          return;
-        }
+        const { data: { session }, error } = await supabase.auth.getSession();
         
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error("Session corruption detected:", sessionError);
-          await logout();
-          return;
-        }
+        if (error) throw error;
 
         if (session?.user && mounted) {
-           // Use repair logic to ensure profile exists
            const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
            if (appUser && mounted) {
              userIdRef.current = appUser.id;
@@ -98,90 +114,68 @@ const AppContent = () => {
            }
         }
       } catch (err) {
-        console.error("Critical Auth Boot failure:", err);
+        console.error("Auth initialization failed:", err);
       } finally {
-        if (mounted) {
-          setIsLoading(false);
-          clearTimeout(watchdog);
-        }
+        clearTimeout(timeoutId);
+        if (mounted) setIsLoading(false);
       }
     };
 
     initAuth();
-    
-    const heartbeat = setInterval(refreshSession, 60000);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshSession();
-      }
-    };
-    window.addEventListener('visibilitychange', handleVisibility);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (!mounted) return;
-        
-        console.log(`Auth Transition: ${event}`);
-
         if (event === 'SIGNED_OUT') {
           userIdRef.current = null;
-          setUser(null);
-          setIsLoading(false);
-        } 
-        else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-          if (session?.user) {
-             // Only update if the user is different or profile is missing to avoid loops
-             if (userIdRef.current !== session.user.id) {
-                try {
-                  const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
-                  if (appUser && mounted) {
-                    userIdRef.current = appUser.id;
-                    setUser(appUser as User);
-                  }
-                } catch (e) {
-                  console.error("Auth profile fetch error:", e);
-                }
-             }
-             setIsLoading(false);
+          if (mounted) setUser(null);
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          if (userIdRef.current !== session.user.id) {
+            const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
+            if (mounted) {
+              userIdRef.current = appUser.id;
+              setUser(appUser as User);
+            }
           }
         }
     });
 
     return () => { 
       mounted = false;
-      clearTimeout(watchdog);
-      clearInterval(heartbeat);
-      window.removeEventListener('visibilitychange', handleVisibility);
       subscription.unsubscribe(); 
     };
-  }, [logout, refreshSession]);
+  }, []);
 
   if (!isSupabaseConfigured) return <ConfigurationError />;
   
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6">
-        <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6"></div>
-        <div className="text-center space-y-4">
-            <p className="text-blue-900 font-black uppercase tracking-widest text-sm">System Secure Link</p>
-            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest animate-pulse">Establishing Handshake...</p>
-            <button 
-              onClick={() => { 
-                localStorage.clear(); 
-                sessionStorage.clear(); 
-                window.location.href = window.location.origin + window.location.pathname; 
-              }} 
-              className="mt-4 px-6 py-3 bg-red-50 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all shadow-sm border border-red-100"
-            >
-              Reset Stuck Session
-            </button>
+        <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6 shadow-xl"></div>
+        <div className="text-center space-y-2">
+            <p className="text-blue-900 text-xs font-black uppercase tracking-[0.2em] animate-pulse">Verifying Session...</p>
+            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Securing Cloud Link</p>
         </div>
+        <button 
+            onClick={() => setIsLoading(false)}
+            className="mt-12 text-[9px] font-black text-gray-400 uppercase hover:text-blue-600 transition-colors border border-gray-200 px-6 py-3 rounded-full hover:bg-white hover:shadow-sm"
+        >
+            Skip Waiting
+        </button>
       </div>
     );
   }
 
   return (
-    <AppContext.Provider value={{ user, activeEventId, login: setUser, logout, onEventChange: setActiveEventId }}>
+    <AppContext.Provider value={{ 
+      user, 
+      activeEventId, 
+      activeEvent, 
+      events,
+      login: setUser, 
+      logout, 
+      onEventChange: setActiveEventId, 
+      refreshActiveEvent,
+      refreshEvents: fetchEvents 
+    }}>
       <HashRouter>
         <Routes>
           {!user ? (

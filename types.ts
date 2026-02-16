@@ -62,6 +62,7 @@ export interface Event {
   region: string;
   start_date: string;
   end_date: string;
+  is_active: boolean; // Lifecycle Status
 }
 
 export interface Session {

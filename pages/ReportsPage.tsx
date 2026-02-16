@@ -5,7 +5,8 @@ import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF } from '../services/utils';
 
 const ReportsPage = () => {
-    const { activeEventId, user } = useContext(AppContext);
+    const { activeEventId, activeEvent, user } = useContext(AppContext);
+    const isLocked = activeEvent?.is_active === false;
     const [data, setData] = useState<any>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
     const [events, setEvents] = useState<Event[]>([]);
@@ -70,135 +71,91 @@ const ReportsPage = () => {
                 f.type === FinancialType.PLEDGE_REDEMPTION && f.pledge_id === p.id
             );
             const totalRedeemed = redemptionsForThisPledge.reduce((sum: number, f: FinancialEntry) => sum + (Number(f.amount) || 0), 0);
-            
-            return {
-                ...p,
-                amount_redeemed: totalRedeemed 
-            };
+            return { ...p, amount_redeemed: totalRedeemed };
         });
 
-        const filteredCheckIns = selectedSessionId 
-            ? checkins.filter((c: any) => c.session_id === selectedSessionId)
-            : checkins.filter((c: any, idx: number, self: any[]) => self.findIndex((t: any) => t.delegate_id === c.delegate_id) === idx);
+        let filteredCheckIns = [];
+        if (selectedSessionId) {
+            filteredCheckIns = checkins.filter((c: any) => c.session_id === selectedSessionId);
+        } else {
+            const masterMap = new Map();
+            checkins.forEach((c: any) => {
+                if (!masterMap.has(c.delegate_id)) {
+                    masterMap.set(c.delegate_id, c);
+                } else {
+                    const existing = masterMap.get(c.delegate_id);
+                    if (!existing.session_id && c.session_id) return; 
+                    if (existing.session_id && !c.session_id) masterMap.set(c.delegate_id, c); 
+                }
+            });
+            filteredCheckIns = Array.from(masterMap.values());
+        }
 
-        // --- IDENTITY-BASED DEDUPLICATION ---
-        // We create a Map where the key is the physical identity (Name + District + Rank)
-        // This ensures that even if a member has two different delegate IDs, they only count once.
         const identityMap = new Map();
-
         filteredCheckIns.forEach((c: any) => {
             const d = delegates.find((del: any) => del.delegate_id === c.delegate_id);
             if (!d) return;
-
-            // Generate a Unique Identity Key
             const identityKey = `${norm(d.first_name)}|${norm(d.last_name)}|${norm(d.district)}|${norm(d.rank)}`;
-            
-            // Only add if this "physical person" hasn't been seen yet in this context
             if (!identityMap.has(identityKey)) {
-                identityMap.set(identityKey, { 
-                    ...d, 
-                    district: (d.district || '').trim(), 
-                    checked_in_at: c.checked_in_at 
-                });
+                identityMap.set(identityKey, { ...d, checked_in_at: c.checked_in_at });
             }
         });
 
         const attendedDelegates = Array.from(identityMap.values());
+        const officialDistricts = (settings.districts || []).map(d => d.trim()).sort((a, b) => 
+            a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+        );
+        const rankColumns = (settings.ranks || []).sort();
+        const officeColumns = (settings.offices || []).sort();
 
-        const officialDistricts = (settings.districts || [])
-            .map(d => d.trim())
-            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
-            
-        const rankColumns = [...(settings.ranks || [])].sort();
-        const officeColumns = [...(settings.offices || [])].sort();
-
-        return { 
-            delegates, 
-            checkins, 
-            financials, 
-            pledges: calculatedPledges, 
-            attendedDelegates, 
-            officialDistricts, 
-            rankColumns,
-            officeColumns
-        };
+        return { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges: calculatedPledges };
     }, [data, selectedSessionId, settings]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
-    if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Attendance Matrix...</div>;
+    if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Data...</div>;
 
     const { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges } = reportData;
-    const selectedSessionTitle = sessions.find(s => s.session_id === selectedSessionId)?.title;
 
     const renderAttendanceList = () => {
-        const districtGroups = [...officialDistricts, "Legacy / Uncategorized"];
-        
+        const rows = [...officialDistricts, "Legacy / Uncategorized"];
         return (
             <div className="overflow-x-auto w-full">
-                {districtGroups.map(districtName => {
-                    const districtDelegates = attendedDelegates.filter((d: any) => {
-                        const dNorm = norm(d.district);
-                        if (districtName === "Legacy / Uncategorized") {
-                            return dNorm === '' || !officialDistricts.some(od => norm(od) === dNorm);
-                        }
-                        return dNorm === norm(districtName);
+                {rows.map(distName => {
+                    const group = attendedDelegates.filter(d => {
+                        const dn = norm(d.district);
+                        return distName === "Legacy / Uncategorized" ? (dn === '' || !officialDistricts.some(od => norm(od) === dn)) : (dn === norm(distName));
                     });
-
-                    if (districtDelegates.length === 0) return null;
-
-                    const sortedDistrictDelegates = [...districtDelegates].sort((a, b) => 
-                        `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
-                    );
-
+                    if (group.length === 0) return null;
                     return (
-                        <div key={districtName} className="mb-8 break-inside-avoid">
-                            <div className="bg-blue-900 text-white p-2 font-black uppercase text-xs border border-blue-800 flex justify-between rounded-t-lg">
-                                <span>{districtName}</span>
-                                <span className="bg-white/20 px-2 rounded">Total: {districtDelegates.length}</span>
+                        <div key={distName} className="mb-8">
+                            <div className="bg-blue-900 text-white p-2 font-black uppercase text-xs rounded-t-lg flex justify-between">
+                                <span>{distName}</span>
+                                <span className="opacity-70">Total: {group.length}</span>
                             </div>
-                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
-                                <thead>
-                                    <tr className="bg-gray-50 font-black uppercase text-gray-400">
-                                        <th className="border p-2 w-8 text-center whitespace-nowrap">S/N</th>
-                                        <th className="border p-2 whitespace-nowrap">Full Name</th>
-                                        <th className="border p-2 whitespace-nowrap">Office</th>
-                                        <th className="border p-2 whitespace-nowrap">Rank</th>
-                                        <th className="border p-2 whitespace-nowrap">Chapter</th>
-                                        <th className="border p-2 whitespace-nowrap">Phone</th>
-                                        <th className="border p-2 text-center whitespace-nowrap">Verification Time</th>
-                                    </tr>
+                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300">
+                                <thead className="bg-gray-50 uppercase text-gray-400 font-black">
+                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Office</th><th className="border p-2">Rank</th><th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
                                 </thead>
                                 <tbody>
-                                    {sortedDistrictDelegates.map((d: any, idx: number) => {
-                                        // Robust Name Spacing: Filter out empty segments and join with single space
-                                        const fullName = [d.title, d.first_name, d.last_name]
-                                            .filter(segment => segment && segment.trim().length > 0)
-                                            .map(segment => segment.trim())
-                                            .join(' ');
-
-                                        return (
-                                            <tr key={d.delegate_id} className="hover:bg-gray-50 border-b last:border-b-0">
-                                                <td className="border p-2 text-center text-gray-400 font-bold">{idx + 1}</td>
-                                                <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">
-                                                    {fullName}
-                                                </td>
-                                                <td className="border p-2 font-bold text-gray-600 uppercase whitespace-nowrap">{d.office || '-'}</td>
-                                                <td className="border p-2 font-bold text-blue-800 uppercase whitespace-nowrap">{d.rank}</td>
-                                                <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{d.chapter || 'Individual'}</td>
-                                                <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{d.phone}</td>
-                                                <td className="border p-2 text-center text-gray-400 whitespace-nowrap">
-                                                    {d.checked_in_at ? (
-                                                        <>
-                                                            <span className="block font-black text-gray-500">{new Date(d.checked_in_at).toLocaleDateString([], {day:'2-digit', month:'short'})}</span>
-                                                            <span className="text-[9px]">{new Date(d.checked_in_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                                        </>
-                                                    ) : '-'}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    {group.map((d, i) => (
+                                        <tr key={i} className="hover:bg-gray-50 border-b">
+                                            <td className="border p-2 text-center">{i + 1}</td>
+                                            <td className="border p-2 font-black uppercase text-blue-900">{d.title} {d.first_name} {d.last_name}</td>
+                                            <td className="border p-2 font-bold uppercase">{d.office}</td>
+                                            <td className="border p-2 uppercase">{d.rank}</td>
+                                            <td className="border p-2 font-mono">{d.phone}</td>
+                                            <td className="border p-2 text-center text-gray-400 uppercase leading-tight font-black">
+                                                {d.checked_in_at ? (
+                                                    <>
+                                                        <div className="text-[8px] opacity-70 mb-0.5">{new Date(d.checked_in_at).toLocaleDateString([], {day:'2-digit', month:'short'})}</div>
+                                                        <div className="text-blue-900">{new Date(d.checked_in_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                                                    </>
+                                                ) : '-'}
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
@@ -207,61 +164,45 @@ const ReportsPage = () => {
             </div>
         );
     };
-    
+
     const renderMatrixTable = (title: string, columns: string[], type: 'rank' | 'office') => {
-        const rowLabels = [...officialDistricts, "Other Entities"];
+        const rows = [...officialDistricts, "Other Entities"];
+        let grandTotal = 0;
         const colTotals: Record<string, number> = {};
         columns.forEach(c => colTotals[c] = 0);
-        let grandTotal = 0;
 
         return (
-            <div className="mb-12 break-inside-avoid">
-                <h4 className="report-section-header bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-xl tracking-widest">{title}</h4>
-                <div className="overflow-x-auto w-full">
-                    <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[1200px]">
-                        <thead>
-                            <tr className="bg-slate-100 uppercase font-black text-slate-700">
-                                <th className="border p-3 text-left bg-slate-100 sticky left-0 z-10 w-48 shadow-sm whitespace-nowrap">District / Entity</th>
-                                {columns.map(col => <th key={col} className="border p-3 text-center whitespace-nowrap">{col}</th>)}
-                                <th className="border p-3 text-center bg-blue-100 text-blue-900 w-24 whitespace-nowrap uppercase">Row Headcount</th>
-                            </tr>
+            <div className="mb-12">
+                <h4 className="report-section-header bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-xl">{title}</h4>
+                <div className="overflow-x-auto w-full custom-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-max">
+                        <thead className="bg-slate-100 uppercase font-black">
+                            <tr><th className="border p-2 sticky left-0 bg-slate-100 z-10">District</th>{columns.map(c => <th key={c} className="border p-2 text-center">{c}</th>)}<th className="border p-2 text-center bg-blue-100 sticky right-0 z-10">Total</th></tr>
                         </thead>
                         <tbody>
-                            {rowLabels.map(rowName => {
-                                const rowDelegates = attendedDelegates.filter((del: any) => {
-                                    const dn = norm(del.district);
-                                    if (rowName === "Other Entities") {
-                                        return dn === '' || !officialDistricts.some(od => norm(od) === dn);
-                                    }
-                                    return dn === norm(rowName);
+                            {rows.map(rName => {
+                                const dels = attendedDelegates.filter(d => {
+                                    const dn = norm(d.district);
+                                    return rName === "Other Entities" ? (dn === '' || !officialDistricts.some(od => norm(od) === dn)) : (dn === norm(rName));
                                 });
-                                
-                                if (rowDelegates.length === 0) return null;
-                                const rowHeadCount = rowDelegates.length;
-                                grandTotal += rowHeadCount;
-
+                                if (dels.length === 0) return null;
+                                grandTotal += dels.length;
                                 return (
-                                    <tr key={rowName} className="hover:bg-blue-50/30 border-b group transition-colors">
-                                        <td className="border p-3 font-black uppercase bg-gray-50 group-hover:bg-blue-50 sticky left-0 z-10 text-[9px] border-r-2 border-gray-200 whitespace-nowrap">{rowName}</td>
+                                    <tr key={rName} className="hover:bg-blue-50 border-b">
+                                        <td className="border p-2 font-black uppercase bg-gray-50 sticky left-0 z-10">{rName}</td>
                                         {columns.map(col => {
-                                            const count = rowDelegates.filter(d => 
-                                                type === 'rank' ? norm(d.rank) === norm(col) : norm(d.office) === norm(col)
-                                            ).length;
+                                            const count = dels.filter(d => norm(type === 'rank' ? d.rank : d.office) === norm(col)).length;
                                             colTotals[col] = (colTotals[col] || 0) + count;
-                                            return <td key={col} className={`border p-3 text-center font-bold ${count > 0 ? 'text-blue-900' : 'text-gray-300'} whitespace-nowrap`}>{count || '-'}</td>;
+                                            return <td key={col} className="border p-2 text-center font-bold">{count || '-'}</td>;
                                         })}
-                                        <td className="border p-3 text-center font-black bg-blue-100/50 text-blue-900 text-xs shadow-inner whitespace-nowrap">{rowHeadCount}</td>
+                                        <td className="border p-2 text-center font-black bg-blue-50 text-blue-900 sticky right-0 z-10">{dels.length}</td>
                                     </tr>
-                                )
+                                );
                             })}
-                            <tr className="bg-blue-900 text-white font-black uppercase shadow-2xl">
-                                <td className="border p-3 sticky left-0 z-10 bg-blue-900 text-white shadow-xl whitespace-nowrap">Entity Totals</td>
-                                {columns.map(col => (
-                                    <td key={col} className="border p-3 text-center bg-blue-800/80 whitespace-nowrap">{colTotals[col] || '0'}</td>
-                                ))}
-                                <td className="border p-3 text-center print-gold bg-yellow-400 text-blue-900 font-black text-sm shadow-xl whitespace-nowrap">
-                                    {grandTotal}
-                                </td>
+                            <tr className="bg-blue-900 text-white font-black">
+                                <td className="border p-2 uppercase sticky left-0 bg-blue-900 z-10">Entity Totals</td>
+                                {columns.map(col => <td key={col} className="border p-2 text-center">{colTotals[col] || 0}</td>)}
+                                <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900 sticky right-0 z-10">{grandTotal}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -270,224 +211,148 @@ const ReportsPage = () => {
         );
     };
 
-    const renderAttendanceMatrix = () => {
-        return (
-            <div className="space-y-16">
-                {renderMatrixTable("Attendance Distribution By Rank", rankColumns, 'rank')}
-                {renderMatrixTable("Attendance Distribution By Office", officeColumns, 'office')}
-            </div>
-        );
-    };
-
-    const renderFinancialMatrix = () => {
-        const sessionCols = [...sessions, { session_id: 'FULL_EVENT', title: 'Full Event (Master)' }];
-        const getAmount = (type: FinancialType, sid: string | null) => financials.filter((f: any) => f.type === type && (f.session_id || 'FULL_EVENT') === (sid || 'FULL_EVENT')).reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0);
-        const types = [{ id: FinancialType.OFFERING, label: 'Offerings' }, { id: FinancialType.PLEDGE_REDEMPTION, label: 'Pledge Redemptions' }];
-
-        return (
-            <div className="overflow-x-auto w-full">
-                <table className="w-full text-sm text-left border border-gray-300 min-w-[950px] rounded-lg overflow-hidden">
-                    <thead className="bg-slate-100 font-black uppercase text-[10px] text-slate-700">
-                        <tr><th className="p-3 border sticky left-0 bg-slate-100 z-10 whitespace-nowrap">Financial Category</th>{sessionCols.map(s => <th key={s.session_id} className="p-3 border text-right whitespace-nowrap">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50 whitespace-nowrap">Grand Total</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-300">
-                        {types.map(t => {
-                            let rowTotal = 0;
-                            return (
-                                <tr key={t.id} className="hover:bg-gray-50">
-                                    <td className="p-3 border font-black uppercase text-[11px] sticky left-0 bg-white group-hover:bg-gray-50 whitespace-nowrap">{t.label}</td>
-                                    {sessionCols.map(s => { const amt = getAmount(t.id as any, s.session_id); rowTotal += amt; return <td key={s.session_id} className="p-3 border text-right font-bold text-slate-600 whitespace-nowrap">{formatCurrency(amt)}</td>; })}
-                                    <td className="p-3 border text-right font-black bg-blue-50 text-blue-900 whitespace-nowrap">{formatCurrency(rowTotal)}</td>
-                                </tr>
-                            );
-                        })}
-                        <tr className="bg-blue-900 text-white font-black uppercase text-[11px]">
-                            <td className="p-3 border sticky left-0 bg-blue-900 whitespace-nowrap">Financial Session Totals</td>
-                            {sessionCols.map(s => <td key={s.session_id} className="p-3 border text-right whitespace-nowrap">{formatCurrency(getAmount(FinancialType.OFFERING, s.session_id) + getAmount(FinancialType.PLEDGE_REDEMPTION, s.session_id))}</td>)}
-                            <td className="p-3 border text-right bg-blue-950 whitespace-nowrap">{formatCurrency(financials.reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0))}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        );
-    };
-
-    const renderPledgeSummary = () => {
-        const rows = [...officialDistricts, "Other Entities"];
-        const districtSummary = rows.map(dName => {
-            const distPledges = pledges.filter((p: any) => {
-                const dn = norm(p.district);
-                if (dName === "Other Entities") {
-                    return dn === '' || !officialDistricts.some(od => norm(od) === dn);
-                }
-                return dn === norm(dName);
-            });
-            return {
-                district: dName,
-                pledged: distPledges.reduce((s: number, p: any) => s + (Number(p.amount_pledged) || 0), 0),
-                redeemed: distPledges.reduce((s: number, p: any) => s + (Number(p.amount_redeemed) || 0), 0)
-            };
-        }).filter(d => d.pledged > 0);
-
-        const totalPledged = districtSummary.reduce((s, d) => s + d.pledged, 0);
-        const totalRedeemed = districtSummary.reduce((s, d) => s + d.redeemed, 0);
-        return (
-             <div className="overflow-x-auto w-full">
-                 <table className="w-full text-sm text-left border-collapse border border-gray-300 min-w-[950px] rounded-lg">
-                    <thead className="bg-slate-100 uppercase text-[10px] font-black text-slate-700">
-                        <tr><th className="border p-3 whitespace-nowrap">District Entity</th><th className="border p-3 text-right whitespace-nowrap">Amount Pledged</th><th className="border p-3 text-right whitespace-nowrap">Amount Redeemed</th><th className="border p-3 text-right whitespace-nowrap">Balance Outstanding</th></tr>
-                    </thead>
-                    <tbody>
-                        {districtSummary.map((d: any) => (
-                            <tr key={d.district} className="hover:bg-gray-50 transition-colors">
-                                <td className="border p-3 font-black uppercase text-slate-800 whitespace-nowrap">{d.district}</td>
-                                <td className="border p-3 text-right font-bold whitespace-nowrap">{formatCurrency(d.pledged)}</td>
-                                <td className="border p-3 text-right text-green-700 font-bold whitespace-nowrap">{formatCurrency(d.redeemed)}</td>
-                                <td className="border p-3 text-right text-red-600 font-black whitespace-nowrap">{formatCurrency(d.pledged - d.redeemed)}</td>
-                            </tr>
+    return (
+        <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border no-print flex flex-wrap justify-between items-center gap-4">
+                <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                        <h2 className="text-xl font-black uppercase text-blue-900">Regional Reports</h2>
+                        {isLocked && (
+                            <span className="bg-red-600 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase shadow-sm">FINALIZED</span>
+                        )}
+                    </div>
+                    <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
+                        {['attendanceList', 'attendanceMatrix', 'financialMatrix', 'pledgeSummary', 'pledgeList'].map(tab => (
+                            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{tab.replace(/([A-Z])/g, ' $1')}</button>
                         ))}
-                        <tr className="bg-blue-900 text-white font-black uppercase text-xs">
-                            <td className="border p-3 whitespace-nowrap">Global Pledge Totals</td>
-                            <td className="border p-3 text-right whitespace-nowrap">{formatCurrency(totalPledged)}</td>
-                            <td className="border p-3 text-right whitespace-nowrap">{formatCurrency(totalRedeemed)}</td>
-                            <td className="border p-3 text-right bg-red-800 whitespace-nowrap">{formatCurrency(totalPledged - totalRedeemed)}</td>
-                        </tr>
-                    </tbody>
-                </table>
-             </div>
-        );
-    }
+                    </div>
+                </div>
+                <div className="flex gap-4 items-center">
+                    <select className="p-2 border rounded-xl text-xs font-black uppercase text-blue-900" value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
+                        <option value="">Master Attendance</option>
+                        {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
+                    </select>
+                    <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
+                </div>
+            </div>
 
-    const renderPledgeList = () => {
-        const sortedPledges = [...pledges];
-        const totalPledged = sortedPledges.reduce((s: number, p: any) => s + (Number(p.amount_pledged) || 0), 0);
-        const totalRedeemed = sortedPledges.reduce((s: number, p: any) => s + (Number(p.amount_redeemed) || 0), 0);
-        const rows = [...officialDistricts, "Other Entities"];
+            <div ref={reportRef} className="bg-white p-12 rounded-[2.5rem] shadow-sm border min-h-screen relative overflow-hidden">
+                {isLocked && (
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.03] pointer-events-none select-none text-[20vw] font-black uppercase -rotate-45 z-0 whitespace-nowrap">
+                        Finalized Report
+                    </div>
+                )}
 
-        return (
-            <div className="overflow-x-auto w-full space-y-8">
-                {rows.map(districtName => {
-                    const distPledges = sortedPledges.filter((p: any) => {
-                        const dn = norm(p.district);
-                        if (districtName === "Other Entities") {
-                            return dn === '' || !officialDistricts.some(od => norm(od) === dn);
-                        }
-                        return dn === norm(districtName);
-                    });
-
-                    if (distPledges.length === 0) return null;
-                    const sortedDistPledges = [...distPledges].sort((a, b) => a.donor_name.localeCompare(b.donor_name));
-                    const dPledged = sortedDistPledges.reduce((s, p) => s + Number(p.amount_pledged), 0);
-                    const dRedeemed = sortedDistPledges.reduce((s, p) => s + Number(p.amount_redeemed), 0);
+                <div className="text-center mb-8 border-b-4 border-blue-900 pb-6 relative z-10">
+                    <h1 className="text-2xl font-black uppercase text-blue-900">{events.find(e => e.event_id === activeEventId)?.name}</h1>
+                    <div className="flex justify-center items-center gap-3 mt-2">
+                        <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">{activeTab.replace(/([A-Z])/g, ' $1')}</h3>
+                        {isLocked && (
+                            <span className="text-[8px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">Locked / Final Copy</span>
+                        )}
+                    </div>
+                    {selectedSessionId && <div className="text-xs font-black text-blue-700 uppercase mt-2">● Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}</div>}
+                </div>
+                
+                <div className="relative z-10">
+                    {activeTab === 'attendanceList' && renderAttendanceList()}
                     
-                    return (
-                        <div key={districtName} className="mb-8 break-inside-avoid">
-                            <div className="bg-slate-800 text-white p-2 font-black uppercase text-xs rounded-t-lg">{districtName} Detailed Pledges</div>
-                            <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-[950px]">
-                                <thead className="bg-gray-50 font-black uppercase text-slate-500">
-                                    <tr><th className="border p-2 whitespace-nowrap">Donor Identity</th><th className="border p-2 whitespace-nowrap">Chapter</th><th className="border p-2 whitespace-nowrap">Contact</th><th className="border p-2 text-right whitespace-nowrap">Pledged (NGN)</th><th className="border p-2 text-right whitespace-nowrap">Redeemed (NGN)</th><th className="border p-2 text-right whitespace-nowrap">Balance (NGN)</th></tr>
+                    {activeTab === 'attendanceMatrix' && (
+                        <div className="space-y-12">
+                            {renderMatrixTable("Attendance By Rank", rankColumns, 'rank')}
+                            {renderMatrixTable("Attendance By Office", officeColumns, 'office')}
+                        </div>
+                    )}
+                    
+                    {activeTab === 'financialMatrix' && (
+                        <div className="overflow-x-auto w-full">
+                            <table className="w-full text-sm border min-w-max">
+                                <thead className="bg-slate-100 uppercase font-black text-[10px]">
+                                    <tr><th className="p-3 border text-left">Category</th>{sessions.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50">Total</th></tr>
                                 </thead>
-                                <tbody>
-                                    {sortedDistPledges.map((p: any) => (
-                                        <tr key={p.id} className="hover:bg-gray-50 border-b last:border-b-0">
-                                            <td className="border p-2 font-black uppercase text-blue-900 whitespace-nowrap">{p.donor_name}</td>
-                                            <td className="border p-2 uppercase text-gray-500 font-medium whitespace-nowrap">{p.chapter || '-'}</td>
-                                            <td className="border p-2 font-mono text-gray-600 whitespace-nowrap">{p.phone || '-'}</td>
-                                            <td className="border p-2 text-right font-bold text-slate-700 whitespace-nowrap">{formatCurrency(p.amount_pledged)}</td>
-                                            <td className="border p-2 text-right text-green-700 font-bold whitespace-nowrap">{formatCurrency(p.amount_redeemed)}</td>
-                                            <td className="border p-2 text-right text-red-600 font-black whitespace-nowrap">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>
-                                        </tr>
-                                    ))}
-                                    <tr className="bg-slate-50 font-black uppercase text-slate-900">
-                                        <td colSpan={3} className="border p-2 text-right whitespace-nowrap">Sub-Total for {districtName}:</td>
-                                        <td className="border p-2 text-right whitespace-nowrap">{formatCurrency(dPledged)}</td>
-                                        <td className="border p-2 text-right text-green-700 whitespace-nowrap">{formatCurrency(dRedeemed)}</td>
-                                        <td className="border p-2 text-right text-red-600 whitespace-nowrap">{formatCurrency(dPledged - dRedeemed)}</td>
-                                    </tr>
+                                <tbody className="divide-y">
+                                    {[FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
+                                        let rowSum = 0;
+                                        return (
+                                            <tr key={type} className="hover:bg-gray-50">
+                                                <td className="p-3 border font-black uppercase text-xs">{type.replace('_', ' ')}</td>
+                                                {sessions.map(s => {
+                                                    const amt = financials.filter((f:any) => f.type === type && f.session_id === s.session_id).reduce((s:number, f:any) => s + (Number(f.amount)||0), 0);
+                                                    rowSum += amt;
+                                                    return <td key={s.session_id} className="p-3 border text-right font-bold">{formatCurrency(amt)}</td>;
+                                                })}
+                                                <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(rowSum)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
-                    );
-                })}
-                <div className="p-6 bg-blue-900 text-white font-black text-right flex justify-between items-center rounded-2xl min-w-[950px] uppercase text-xs shadow-xl">
-                    <span>Global Cumulative Pledge Ledger</span>
-                    <div className="flex gap-10">
-                        <span>Pledged: {formatCurrency(totalPledged)}</span>
-                        <span>Redeemed: {formatCurrency(totalRedeemed)}</span>
-                        <span className="bg-red-800 px-4 py-1 rounded">Net Balance: {formatCurrency(totalPledged - totalRedeemed)}</span>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
-    return (
-        <div className="space-y-6">
-             <div className="bg-white p-6 rounded-2xl shadow-sm border no-print space-y-6">
-                <div className="flex flex-wrap gap-4 justify-between items-center">
-                    <div>
-                        <h2 className="text-2xl font-black uppercase tracking-tighter text-blue-900 leading-none">Reports & Analytics</h2>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Regional Performance Data Matrix</p>
-                    </div>
-                    <button onClick={handleExportPDF} className="px-8 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all hover:bg-black hover:scale-105 active:scale-95 shadow-xl">Export Master PDF</button>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-6 border-t pt-6">
-                     <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Scope:</span>
-                        <select className="p-3 border rounded-xl min-w-[250px] font-black uppercase text-xs text-blue-900 bg-blue-50/50 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all" value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
-                            <option value="">Master Attendance Scope</option>
-                            {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
-                        </select>
-                     </div>
-                </div>
-
-                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide border-b">
-                    {[
-                        { id: 'attendanceList', label: 'Detailed List' },
-                        { id: 'attendanceMatrix', label: 'Attendance Matrix' },
-                        { id: 'financialMatrix', label: 'Financial Matrix' },
-                        { id: 'pledgeSummary', label: 'Pledge Summary' },
-                        { id: 'pledgeList', label: 'Pledge Ledger' }
-                    ].map(tab => (
-                        <button 
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)} 
-                            className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-             </div>
-
-             <div ref={reportRef} className="bg-white p-12 rounded-[2.5rem] shadow-sm border min-h-screen">
-                <div className="text-center mb-10 border-b-4 border-blue-900 pb-8">
-                    <h1 className="text-3xl font-black uppercase mb-1 tracking-tight text-blue-900 leading-none">{events.find(e => e.event_id === activeEventId)?.name}</h1>
-                    <h3 className="text-[11px] font-black uppercase text-gray-400 tracking-[0.4em] mt-3">
-                        {activeTab.replace(/([A-Z])/g, ' $1').trim()}
-                    </h3>
-                    {selectedSessionId && (
-                        <div className="text-sm font-black text-blue-700 uppercase mt-4 tracking-widest animate-in fade-in duration-700">
-                           ● Context: {selectedSessionTitle}
+                    )}
+                    {activeTab === 'pledgeSummary' && (
+                        <div className="overflow-x-auto w-full">
+                            <table className="w-full text-sm border min-w-max">
+                                <thead className="bg-slate-100 uppercase font-black text-[10px]">
+                                    <tr><th className="p-3 border">District</th><th className="p-3 border text-right">Pledged</th><th className="p-3 border text-right">Redeemed</th><th className="p-3 border text-right">Balance</th></tr>
+                                </thead>
+                                <tbody>
+                                    {officialDistricts.map(dist => {
+                                        const ps = pledges.filter((p:any) => norm(p.district) === norm(dist));
+                                        const pld = ps.reduce((s,p) => s + Number(p.amount_pledged), 0);
+                                        const red = ps.reduce((s,p) => s + Number(p.amount_redeemed), 0);
+                                        if (pld === 0) return null;
+                                        return (
+                                            <tr key={dist} className="hover:bg-gray-50 border-b">
+                                                <td className="p-3 border font-black uppercase">{dist}</td>
+                                                <td className="p-3 border text-right">{formatCurrency(pld)}</td>
+                                                <td className="p-3 border text-right text-green-700">{formatCurrency(red)}</td>
+                                                <td className="p-3 border text-right text-red-600 font-black">{formatCurrency(pld - red)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    {activeTab === 'pledgeList' && (
+                        <div className="space-y-4">
+                            {officialDistricts.map(dist => {
+                                const ps = pledges.filter((p:any) => norm(p.district) === norm(dist)).sort((a,b) => a.donor_name.localeCompare(b.donor_name));
+                                if (ps.length === 0) return null;
+                                return (
+                                    <div key={dist} className="mb-6">
+                                        <div className="bg-slate-800 text-white p-2 font-black uppercase text-[10px] rounded-t-lg">{dist} Detailed Pledges</div>
+                                        <table className="w-full text-[10px] border">
+                                            <thead className="bg-gray-50 uppercase font-black">
+                                                <tr><th className="p-2 border">Donor</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {ps.map(p => (
+                                                    <tr key={p.id} className="border-b">
+                                                        <td className="p-2 border font-bold uppercase">{p.donor_name}</td>
+                                                        <td className="p-2 border text-right">{formatCurrency(p.amount_pledged)}</td>
+                                                        <td className="p-2 border text-right text-green-700">{formatCurrency(p.amount_redeemed)}</td>
+                                                        <td className="p-2 border text-right text-red-600 font-bold">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
 
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    {activeTab === 'attendanceList' && renderAttendanceList()}
-                    {activeTab === 'attendanceMatrix' && renderAttendanceMatrix()}
-                    {activeTab === 'financialMatrix' && renderFinancialMatrix()}
-                    {activeTab === 'pledgeSummary' && renderPledgeSummary()}
-                    {activeTab === 'pledgeList' && renderPledgeList()}
-                </div>
-                
-                <div className="print-only report-footer mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
-                    <span>Generated via FGBMFI Nigeria EMS</span>
-                    <span>Date: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</span>
+                <div className="report-footer print-only mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest relative z-10">
+                    <div className="space-y-1">
+                        <span>Generated via FGBMFI Nigeria EMS</span>
+                        {isLocked && <span className="block text-red-600">Event Locked: Historical Data Integrity Sealed</span>}
+                    </div>
+                    <span>Date: {new Date().toLocaleDateString()}</span>
                     <span>Authorized Signature: _______________________</span>
                 </div>
-             </div>
+            </div>
         </div>
     );
 };
