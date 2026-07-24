@@ -4,6 +4,7 @@ import { Session, Delegate, UserRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
+import QRScanner from '../components/QRScanner';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -18,6 +19,7 @@ const CheckInPage = () => {
   const [badgeQrDataUrl, setBadgeQrDataUrl] = useState<string>('');
   const [badgeCode, setBadgeCode] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -205,6 +207,14 @@ const CheckInPage = () => {
     setFeedback(null);
   };
 
+  const handleScan = (code: string) => {
+    setShowScanner(false);
+    if (code) {
+      setCode(code);
+      handleCodeSubmit(code);
+    }
+  };
+
   if(!activeEventId) return (
     <div className="p-20 text-center flex flex-col items-center gap-6 opacity-60">
         <div className="text-6xl">📍</div>
@@ -236,15 +246,26 @@ const CheckInPage = () => {
        
        <div className={`bg-white p-8 rounded-3xl shadow-xl border-t-8 border-blue-600 animate-in slide-in-from-top-4 ${isLocked ? 'pointer-events-none grayscale opacity-60' : ''}`}>
             <h2 className="text-lg font-black mb-4 text-blue-900 uppercase tracking-tighter">2. Fast Check-in (QR Code / 4-Digit)</h2>
-            <input 
-              className="w-full p-6 text-center text-4xl md:text-6xl font-black tracking-[0.15em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-200 font-mono" 
-              placeholder="Paste QR code or enter 4-digit code" 
-              maxLength={36} 
-              value={code} 
-              onChange={onCodeInput} 
-              autoFocus={!isLocked}
-              readOnly={isLocked}
-            />
+            <div className="flex gap-3 items-stretch">
+              <input 
+                className="flex-1 p-6 text-center text-4xl md:text-6xl font-black tracking-[0.15em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-200 font-mono" 
+                placeholder="Paste QR code or enter 4-digit code" 
+                maxLength={36} 
+                value={code} 
+                onChange={onCodeInput} 
+                autoFocus={!isLocked}
+                readOnly={isLocked}
+              />
+              <button 
+                onClick={() => setShowScanner(true)}
+                disabled={isLocked}
+                className="px-6 py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
+                title="Scan QR code with camera"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9V7a2 2 0 012-2h2M3 15v2a2 2 0 002 2h2M21 9V7a2 2 0 00-2-2h-2M21 15v2a2 2 0 01-2 2h-2M7 12h.01M12 12h.01M17 12h.01M7 16h10" /></svg>
+                <span className="text-[8px]">SCAN QR</span>
+              </button>
+            </div>
             <div className={`h-8 mt-4 text-center font-black uppercase text-xs tracking-widest ${feedback?.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                 {feedback?.msg}
             </div>
@@ -387,7 +408,11 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                <div className="text-[10px] font-black text-gray-400 uppercase">Code: <span className="text-blue-900 text-lg tracking-[0.3em]">{badgeCode}</span></div>
              </div>
            </div>
-         </>
+          </>
+        )}
+
+       {showScanner && (
+         <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />
        )}
     </div>
   );
