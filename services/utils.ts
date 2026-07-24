@@ -6,7 +6,18 @@ export const formatCurrency = (amount: number) => {
 };
 
 /**
+ * Generates a UUID v4 for QR hash (primary identifier).
+ * Used when creating new delegates or regenerating lost badges.
+ */
+export const generateQrHash = (): string => {
+    return crypto.randomUUID();
+};
+
+/**
  * Generates a deterministic 4-digit code from a Delegate ID and Event ID.
+ * This is a backward-compatible offline fallback for environments
+ * where QR scanning is not available. 10K code slots — not suitable
+ * as primary identifier above 10K delegates.
  */
 export const generateCodeFromId = (delegateId: string, eventId: string): string => {
     if (!delegateId || !eventId) return "0000";

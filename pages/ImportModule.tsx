@@ -5,7 +5,8 @@ import { db } from '../services/supabaseService';
 const ImportModule = () => {
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, count?: number} | null>(null);
+    const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, skipped?: number} | null>(null);
 
     const handleImport = async () => {
         if (!csv.trim()) {
@@ -14,19 +15,23 @@ const ImportModule = () => {
         }
 
         setLoading(true);
+        setProgress({ current: 0, total: csv.trim().split('\n').length });
         setFeedback(null);
 
         try {
-            // Processing import through the service
-            const count = await db.importDelegates(csv);
+            const result = await db.importDelegates(csv, (inserted, skipped, total) => {
+                setProgress({ current: inserted + skipped, total });
+            });
             
-            if (count > 0) {
+            if (result.inserted > 0 || result.skipped > 0) {
                 setFeedback({ 
                     type: 'success', 
-                    msg: 'Import Successful!', 
-                    count: count 
+                    msg: 'Import Complete!', 
+                    inserted: result.inserted,
+                    skipped: result.skipped
                 });
-                setCsv(''); // Clear the text area on success
+                setProgress(null);
+                setCsv('');
             } else {
                 setFeedback({ 
                     type: 'error', 
@@ -38,6 +43,7 @@ const ImportModule = () => {
             setFeedback({ type: 'error', msg: `System Error: ${e.message || 'Unknown error during processing'}` });
         } finally {
             setLoading(false);
+            setProgress(null);
         }
     };
 
@@ -50,9 +56,21 @@ const ImportModule = () => {
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Upload multiple records to the Regional Master List</p>
                     </div>
                     {loading && (
-                        <div className="flex items-center gap-2 text-blue-600">
-                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-[10px] font-black uppercase tracking-widest">Processing...</span>
+                        <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center gap-2 text-blue-600">
+                                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                <span className="text-[10px] font-black uppercase tracking-widest">
+                                    {progress ? `Processing ${progress.current}/${progress.total}` : 'Processing...'}
+                                </span>
+                            </div>
+                            {progress && progress.total > 0 && (
+                                <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                                        style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -91,10 +109,17 @@ const ImportModule = () => {
                             </div>
                             <div>
                                 <p className="font-black uppercase text-sm tracking-widest">{feedback.msg}</p>
-                                {feedback.count && (
-                                    <p className="text-[10px] font-bold opacity-75 uppercase mt-1">
-                                        Successfully imported {feedback.count} delegate records.
-                                    </p>
+                                {feedback.inserted !== undefined && (
+                                    <div className="mt-1 space-y-0.5">
+                                        <p className="text-[10px] font-bold text-green-700 uppercase">
+                                            ✅ {feedback.inserted} records imported
+                                        </p>
+                                        {feedback.skipped !== undefined && feedback.skipped > 0 && (
+                                            <p className="text-[10px] font-bold text-amber-600 uppercase">
+                                                ⏭️ {feedback.skipped} duplicates skipped
+                                            </p>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>

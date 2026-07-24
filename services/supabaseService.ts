@@ -1,7 +1,7 @@
 
 import { supabase } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType } from '../types';
-import { generateCodeFromId } from './utils';
+import { generateCodeFromId, generateQrHash } from './utils';
 
 /**
  * Normalizes email for transmission. 
@@ -171,7 +171,7 @@ export const db = {
         else cq = cq.is('session_id', null);
         const { data: checkins } = await cq;
         const checkedInSet = new Set(checkins?.map(c => c.delegate_id) || []);
-        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
+        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '', code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
     },
 
     getAllDelegates: async (): Promise<Delegate[]> => {
@@ -201,14 +201,25 @@ export const db = {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: existing } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle();
-        if (existing) return { success: true, message: 'Already Verified', code: generateCodeFromId(delegateId, eventId) };
+        if (existing) {
+            // Fetch the delegate's qr_hash for the response
+            const { data: del } = await supabase.from('delegates').select('qr_hash').eq('delegate_id', delegateId).maybeSingle();
+            return { success: true, message: 'Already Verified', code: generateCodeFromId(delegateId, eventId), delegate: { qr_hash: del?.qr_hash || '' } as any };
+        }
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
         if (error) throw error;
-        return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId) };
+        const { data: del } = await supabase.from('delegates').select('qr_hash').eq('delegate_id', delegateId).maybeSingle();
+        return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { qr_hash: del?.qr_hash || '' } as any };
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         await ensureEventActive(eventId);
+        // Try 1: UUID QR hash lookup (exact match, fast, unique)
+        if (code.length > 10) {
+            const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
+            if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+        }
+        // Try 2: 4-digit deterministic code fallback (backward compatible)
         const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
         const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
         if (!match) return { success: false, message: 'Invalid code.' };
@@ -216,17 +227,67 @@ export const db = {
     },
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
-        const { data, error } = await supabase.from('delegates').insert(delegate).select().single();
+        const { data, error } = await supabase.from('delegates').insert({
+            ...delegate,
+            qr_hash: delegate.qr_hash || generateQrHash()
+        }).select().single();
         if (error) throw error;
         return data;
     },
 
-    importDelegates: async (csv: string): Promise<number> => {
+    importDelegates: async (csv: string, onProgress?: (inserted: number, skipped: number, total: number) => void): Promise<{ inserted: number; skipped: number }> => {
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
-        const payload = lines.map(p => ({ title: p[0], first_name: p[1], last_name: p[2], district: p[3], chapter: p[4], phone: p[5], email: p[6], rank: p[7] || 'CP', office: p[8] || 'OTHER' }));
-        const { data, error } = await supabase.from('delegates').insert(payload).select();
-        if (error) throw error;
-        return data?.length || 0;
+        const BATCH_SIZE = 500;
+        let inserted = 0;
+        let skipped = 0;
+
+        for (let i = 0; i < lines.length; i += BATCH_SIZE) {
+            const batch = lines.slice(i, i + BATCH_SIZE);
+            const payload = batch.map(p => ({
+                title: p[0],
+                first_name: p[1],
+                last_name: p[2],
+                district: p[3],
+                chapter: p[4],
+                phone: p[5],
+                email: p[6],
+                rank: p[7] || 'CP',
+                office: p[8] || 'OTHER',
+                qr_hash: generateQrHash()
+            }));
+
+            // Try the RPC first (server-side dedup, faster)
+            try {
+                const { data, error } = await supabase.rpc('import_delegates_batch', {
+                    p_delegates: JSON.parse(JSON.stringify(payload))
+                });
+                if (error) throw error;
+                inserted += data?.inserted || 0;
+                skipped += data?.skipped || 0;
+            } catch {
+                // Fallback: direct insert with individual error handling
+                for (const rec of payload) {
+                    try {
+                        const { error } = await supabase.from('delegates').insert(rec);
+                        if (error) {
+                            if (error.message?.includes('duplicate')) {
+                                skipped++;
+                            } else {
+                                throw error;
+                            }
+                        } else {
+                            inserted++;
+                        }
+                    } catch {
+                        skipped++;
+                    }
+                }
+            }
+
+            if (onProgress) onProgress(inserted, skipped, lines.length);
+        }
+
+        return { inserted, skipped };
     },
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
@@ -347,5 +408,12 @@ export const db = {
         }
         if (dups.length > 0) await supabase.from('delegates').delete().in('delegate_id', dups);
         return dups.length;
+    },
+
+    regenerateQrHash: async (delegateId: string): Promise<string> => {
+        const newHash = generateQrHash();
+        const { error } = await supabase.from('delegates').update({ qr_hash: newHash }).eq('delegate_id', delegateId);
+        if (error) throw error;
+        return newHash;
     }
 };

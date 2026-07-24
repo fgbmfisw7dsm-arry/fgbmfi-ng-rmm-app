@@ -46,6 +46,7 @@ export interface Delegate {
   rank: string;
   office: string;
   room_number: string;
+  qr_hash: string;
   created_at: string;
 }
 
