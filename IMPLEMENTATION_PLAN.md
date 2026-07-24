@@ -46,7 +46,7 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 | Sprint | Focus | Deliverables | Effort | Status |
 |--------|-------|-------------|--------|--------|
 | **Sprint 1** | Database & Search | pg_trgm indexes, pagination infra, scoped realtime, aggregate RPCs | 8 hrs | ✅ Done |
-| **Sprint 2** | QR & Import | UUID-based QR migration, chunked bulk import, deduplication at insert | 24 hrs | ⬜ Next |
+| **Sprint 2** | QR & Import | UUID-based QR migration, chunked bulk import, deduplication at insert | 24 hrs | ✅ Done | | ✅ Done |
 | **Sprint 3** | Check-in Performance | TanStack Query integration, connection health UI, offline queue | 28 hrs | ⬜ |
 | **Sprint 4** | Dashboard & Reports | Summary PDF only, CSV/JSON export, RPC-based dashboard | 20 hrs | ⬜ |
 | **Sprint 5** | Hardening & Deployment | 50-concurrent-user load test, error recovery, operator training | 24 hrs | ⬜ |
@@ -96,15 +96,15 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 
 ### Tasks
 
-| # | Task | Effort | Dependencies |
-|---|------|--------|-------------|
-| 2.1 | Add `qr_hash TEXT UNIQUE` column to delegates table | 1 hr | Sprint 1 (done) |
-| 2.2 | Generate UUID-based QR hashes for all existing delegates | 2 hrs | 2.1 |
-| 2.3 | Rewrite `generateCodeFromId()` in utils.ts to use UUID + keep 4-digit fallback | 4 hrs | 2.2 |
-| 2.4 | Update CheckInPage to scan/paste UUID QR codes | 6 hrs | 2.3 |
-| 2.5 | Add badge reprint + lost badge replacement UI | 4 hrs | 2.4 |
-| 2.6 | Chunk `importDelegates()` into 500-row batches with progress bar | 4 hrs | — |
-| 2.7 | Use `import_delegates_batch` RPC for server-side dedup | 3 hrs | 2.6 |
+| # | Task | Effort | Dependencies | Status |
+|---|------|--------|-------------|--------|
+| 2.1 | Add `qr_hash TEXT UNIQUE` column to delegates table | 1 hr | Sprint 1 (done) | ✅ Done |
+| 2.2 | Generate UUID-based QR hashes for all existing delegates | 2 hrs | 2.1 | ✅ Done |
+| 2.3 | Rewrite `generateCodeFromId()` in utils.ts to use UUID + keep 4-digit fallback | 4 hrs | 2.2 | ✅ Done |
+| 2.4 | Update CheckInPage to scan/paste UUID QR codes | 6 hrs | 2.3 | ✅ Done |
+| 2.5 | Add badge reprint + lost badge replacement UI | 4 hrs | 2.4 | ✅ Done |
+| 2.6 | Chunk `importDelegates()` into 500-row batches with progress bar | 4 hrs | — | ✅ Done |
+| 2.7 | Use `import_delegates_batch` RPC for server-side dedup | 3 hrs | 2.6 | ✅ Done |
 
 ### Acceptance Criteria
 - No two delegates share the same QR hash
