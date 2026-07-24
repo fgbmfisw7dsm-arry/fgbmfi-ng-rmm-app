@@ -80,10 +80,10 @@ BEGIN
   -- Rank breakdown
   SELECT JSONB_OBJECT_AGG(rank_key, rank_count) INTO v_rank_breakdown
   FROM (
-    SELECT COALESCE(NULLIF(TRIM(d.rank), ''), 'OTHER') AS rank_key, COUNT(*) AS rank_count
+    SELECT COALESCE(NULLIF(TRIM(deduped.rank_col), ''), 'OTHER') AS rank_key, COUNT(*) AS rank_count
     FROM (
       SELECT DISTINCT ON (UPPER(TRIM(d.first_name)), UPPER(TRIM(d.last_name)), UPPER(TRIM(d.district)), UPPER(TRIM(d.rank)))
-        d.rank
+        d.rank AS rank_col
       FROM checkins c
       JOIN delegates d ON d.delegate_id = c.delegate_id
       WHERE c.event_id = p_event_id
@@ -95,10 +95,10 @@ BEGIN
   -- District breakdown
   SELECT JSONB_OBJECT_AGG(dist_key, dist_count) INTO v_district_breakdown
   FROM (
-    SELECT COALESCE(NULLIF(TRIM(d.district), ''), 'UNKNOWN') AS dist_key, COUNT(*) AS dist_count
+    SELECT COALESCE(NULLIF(TRIM(deduped.dist_col), ''), 'UNKNOWN') AS dist_key, COUNT(*) AS dist_count
     FROM (
       SELECT DISTINCT ON (UPPER(TRIM(d.first_name)), UPPER(TRIM(d.last_name)), UPPER(TRIM(d.district)), UPPER(TRIM(d.rank)))
-        d.district
+        d.district AS dist_col
       FROM checkins c
       JOIN delegates d ON d.delegate_id = c.delegate_id
       WHERE c.event_id = p_event_id
