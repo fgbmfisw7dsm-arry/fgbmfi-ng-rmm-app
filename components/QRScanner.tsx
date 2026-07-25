@@ -8,8 +8,8 @@ interface QRScannerProps {
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [error, setError] = useState<string>('');
   const [scanning, setScanning] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const scannerRef = useRef<any>(null);
+  const [useHtml5Fallback, setUseHtml5Fallback] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
   const onScanRef = useRef(onScan);
 
@@ -19,25 +19,35 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (scanned) return;
+    let stream: MediaStream | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
-    const startScanner = async () => {
+    const tryHtml5Qrcode = async () => {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
-        if (scannerRef.current) {
-          await scannerRef.current.stop().catch(() => {});
+        const cameras = await Html5Qrcode.getCameras();
+        if (!mountedRef.current) return;
+        if (cameras.length === 0) {
+          setError('No camera detected.');
+          return;
         }
-        scannerRef.current = new Html5Qrcode('qr-scanner-view');
+        const rear = cameras.find((c: { id: string; label: string }) =>
+          c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment')
+        );
+        const cameraId = rear?.id || cameras[0].id;
+        setUseHtml5Fallback(true);
         setScanning(true);
         setError('');
 
-        await scannerRef.current.start(
-          { facingMode: 'environment' },
+        await new Promise(r => setTimeout(r, 100));
+
+        const scanner = new Html5Qrcode('qr-scanner-view');
+        await scanner.start(
+          cameraId,
           { fps: 10, qrbox: 250 },
           (decodedText: string) => {
-            setScanned(true);
             setScanning(false);
-            scannerRef.current?.stop().catch(() => {});
+            scanner.stop().catch(() => {});
             onScanRef.current(decodedText.trim());
           },
           () => {}
@@ -50,14 +60,64 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       }
     };
 
-    startScanner();
+    const startBarcodeDetector = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        });
+        if (!mountedRef.current || !videoRef.current) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+        setScanning(true);
+        setError('');
 
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+
+        intervalId = setInterval(async () => {
+          if (!mountedRef.current || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes && codes.length > 0) {
+              if (intervalId) clearInterval(intervalId);
+              if (stream) stream.getTracks().forEach(t => t.stop());
+              setScanning(false);
+              onScanRef.current(codes[0].rawValue);
+            }
+          } catch (_e) {}
+        }, 120);
+      } catch (e: any) {
+        if (mountedRef.current) {
+          const msg = e.message || '';
+          if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+            setError('Camera access denied. Grant camera permission in settings.');
+          } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
+            setError('No camera detected on this device.');
+          } else {
+            setError(msg || 'Failed to start camera.');
+          }
+          setScanning(false);
+        }
       }
     };
-  }, [scanned]);
+
+    if ('BarcodeDetector' in window) {
+      startBarcodeDetector();
+    } else {
+      tryHtml5Qrcode();
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -73,18 +133,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
         </div>
         <div className="p-4">
-          <div id="qr-scanner-view" className="w-full bg-black rounded-2xl overflow-hidden" style={{ minHeight: 280 }} />
+          {useHtml5Fallback ? (
+            <div id="qr-scanner-view" className="w-full bg-black rounded-2xl overflow-hidden" style={{ minHeight: 280 }} />
+          ) : (
+            <video ref={videoRef} className="w-full bg-black rounded-2xl" style={{ minHeight: 280, objectFit: 'cover' }} playsInline autoPlay muted />
+          )}
           {error && (
             <div className="mt-3 p-3 bg-red-50 rounded-xl text-xs font-bold text-red-600 text-center">
               {error}
             </div>
           )}
-          {scanned && (
-            <div className="mt-3 p-3 bg-green-50 rounded-xl text-xs font-bold text-green-600 text-center animate-in zoom-in">
-              Code detected! Processing...
-            </div>
-          )}
-          {scanning && !scanned && (
+          {scanning && !error && (
             <div className="mt-3 text-center">
               <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
               <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Scanning...</span>
