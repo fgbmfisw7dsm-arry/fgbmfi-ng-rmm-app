@@ -21,6 +21,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [torchOn, setTorchOn] = useState(false);
   const scannerRef = useRef<any>(null);
   const mountedRef = useRef(true);
+  const onScanRef = useRef(onScan);
+
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -56,15 +61,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(true);
         await scannerRef.current.start(
           selectedCamera,
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0, formatsToScan: [ Html5QrcodeSupportedFormats.QR_CODE ] },
+          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0, formatsToScan: [ Html5QrcodeSupportedFormats.QR_CODE ], experimentalFeatures: { useBarCodeDetectorIfSupported: true } },
           (text: string) => {
             if (scanned) return;
             setScanned(true);
             setScanning(false);
             scannerRef.current?.stop().catch(() => {});
-            setTimeout(() => onScan(text.trim()), 150);
+            setTimeout(() => onScanRef.current(text.trim()), 150);
           },
-          () => {}
+          (err: any) => {
+            if (err && mountedRef.current) {
+              console.log('QR scan attempt:', err.length > 100 ? err.substring(0, 100) + '...' : err);
+            }
+          }
         );
       } catch (e: any) {
         if (mountedRef.current) {
@@ -79,7 +88,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [selectedCamera, scanned, onScan]);
+  }, [selectedCamera, scanned]);
 
   const toggleCamera = () => {
     if (cameras.length < 2) return;
