@@ -279,6 +279,44 @@ export const db = {
                     return Object.keys(result).length > 0 ? result : null;
                 }
             } catch {}
+            
+            const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length < 4) return null;
+            
+            const lastIdx = <T>(arr: T[], fn: (item: T, i: number) => boolean): number => {
+                for (let i = arr.length - 1; i >= 0; i--) { if (fn(arr[i], i)) return i; }
+                return -1;
+            };
+            const idIdx = lastIdx(lines, (l: string) => l.length >= 20);
+            const typeIdx = lastIdx(lines, (l: string) => /^[A-Z][A-Z_]{3,}$/.test(l));
+            
+            if (idIdx < 0) return null;
+            
+            const result: Record<string, string> = {};
+            result['delegate_id'] = lines[idIdx];
+            if (typeIdx >= 0) result['delegate_type'] = lines[typeIdx];
+            
+            const others = lines.filter((_: string, i: number) => i !== idIdx && i !== typeIdx);
+            
+            const nameIdx = others.findIndex((l: string) => /\.\s/.test(l) || l.split(/\s+/).length >= 2);
+            if (nameIdx >= 0) {
+                const parts = others[nameIdx].split(/\s+/);
+                if (parts[0].endsWith('.')) {
+                    result['title'] = parts.shift()!;
+                }
+                if (parts.length >= 2) {
+                    result['first_name'] = parts.slice(0, -1).join(' ');
+                    result['last_name'] = parts[parts.length - 1];
+                }
+                others.splice(nameIdx, 1);
+            }
+            
+            if (others.length >= 1) result['district'] = others[0];
+            if (others.length >= 2) result['chapter'] = others[1];
+            
+            if (result['delegate_id'] && result['first_name'] && result['last_name'] && result['district']) {
+                return result;
+            }
             return null;
         };
         
