@@ -92,10 +92,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       const videoElement = document.getElementById('qr-scanner-view')?.querySelector('video');
       if (!videoElement?.srcObject) return;
       const track = (videoElement.srcObject as MediaStream).getVideoTracks()[0];
-      if (!track || !track.getCapabilities?.().torch) {
-        setError('Flashlight not available on this camera.');
-        return;
-      }
+      if (!track) return;
       await track.applyConstraints({ advanced: [{ torch: !torchOn } as any] });
       setTorchOn(prev => !prev);
     } catch {
