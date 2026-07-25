@@ -5,13 +5,15 @@ import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
 import QRScanner from '../components/QRScanner';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { enqueueCheckIn } from '../services/offlineQueue';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
   const [results, setResults] = useState<(Delegate & { checkedIn: boolean, code?: string })[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -26,6 +28,22 @@ const CheckInPage = () => {
   const isLocked = activeEvent?.is_active === false;
   const isAdmin = user?.role === UserRole.ADMIN;
 
+  const { data: sessions = [] } = useQuery({
+    queryKey: ['sessions', activeEventId],
+    queryFn: () => db.getSessions(activeEventId),
+    enabled: !!activeEventId,
+    staleTime: 300000,
+  });
+
+  const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) ? user.district : undefined;
+
+  const { data: searchResults } = useQuery({
+    queryKey: ['delegates', activeEventId, query, selectedSessionId, districtFilter],
+    queryFn: () => db.searchDelegates(query, activeEventId, districtFilter, selectedSessionId),
+    enabled: query.trim().length > 1 && !!activeEventId,
+    staleTime: 15000,
+  });
+
   useEffect(() => {
     return () => {
       setQuery('');
@@ -38,48 +56,23 @@ const CheckInPage = () => {
     };
   }, []);
 
-  const loadSessions = useCallback(async () => {
-    if(activeEventId) {
-        try {
-            const data = await db.getSessions(activeEventId);
-            setSessions(data || []);
-        } catch (e) {
-            console.error("Session load failed:", e);
-        }
-    }
-  }, [activeEventId]);
-
-  useEffect(() => { loadSessions(); }, [loadSessions]);
-
-  const performSearch = useCallback(async () => {
-    if (query.trim().length > 1 && activeEventId) {
-        try {
-            const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) ? user.district : undefined;
-            const data = await db.searchDelegates(query, activeEventId, districtFilter, selectedSessionId);
-            
-            const reconciledData = data.map(d => {
-                const key = `${d.delegate_id}_${selectedSessionId || 'arrival'}`;
-                const isVerifiedLocally = localVerifiedIds.current.has(key);
-                return {
-                    ...d,
-                    checkedIn: d.checkedIn || isVerifiedLocally,
-                    code: d.code || generateCodeFromId(d.delegate_id, activeEventId)
-                };
-            });
-            
-            setResults(reconciledData);
-        } catch(e: any) { 
-            console.error("Search failed:", e); 
-        }
-    } else if (query.trim().length === 0) { 
-        setResults([]); 
-    }
-  }, [query, activeEventId, selectedSessionId, user]);
-
   useEffect(() => {
-    const timer = setTimeout(performSearch, 400);
-    return () => clearTimeout(timer);
-  }, [performSearch]);
+    if (!searchResults) return;
+    if (query.trim().length === 0) {
+      setResults([]);
+      return;
+    }
+    const reconciledData = searchResults.map(d => {
+      const key = `${d.delegate_id}_${selectedSessionId || 'arrival'}`;
+      const isVerifiedLocally = localVerifiedIds.current.has(key);
+      return {
+        ...d,
+        checkedIn: d.checkedIn || isVerifiedLocally,
+        code: d.code || generateCodeFromId(d.delegate_id, activeEventId)
+      };
+    });
+    setResults(reconciledData);
+  }, [searchResults, query, selectedSessionId, activeEventId]);
 
   const renderQrToCanvas = useCallback((delegateId: string, qrHash: string) => {
     const canvas = qrCanvasRefs.current[delegateId];

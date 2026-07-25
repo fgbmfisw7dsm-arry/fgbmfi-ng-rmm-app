@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { UserRole, DashboardStats } from '../types';
@@ -7,33 +7,36 @@ import { AppContext } from '../context/AppContext';
 import StatCard from '../components/StatCard';
 import { formatCurrency } from '../services/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const AdminDashboard = () => {
   const { activeEventId, user } = useContext(AppContext);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  const fetchStats = useCallback(() => {
-    if (activeEventId) {
-        // Scoping Logic: REGISTRAR gets district-scoped view.
-        const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) 
-            ? user.district.trim() 
-            : undefined;
-            
-        db.getStats(activeEventId, districtFilter)
-          .then(setStats)
-          .catch(err => console.error("Stats fetch error", err))
-          .finally(() => setLoading(false));
-    }
-  }, [activeEventId, user?.id, user?.district, user?.role]);
+  const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) 
+    ? user.district.trim() 
+    : undefined;
+
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['stats', activeEventId, districtFilter],
+    queryFn: () => db.getStats(activeEventId, districtFilter),
+    enabled: !!activeEventId,
+    staleTime: 30000,
+    refetchOnWindowFocus: false,
+  });
 
   useEffect(() => {
-    fetchStats();
-    const sub = supabase.channel('dashboard_sync').on('postgres_changes', { event: '*', table: 'checkins' }, () => fetchStats()).subscribe();
-    return () => { sub.unsubscribe(); };
-  }, [fetchStats]);
+    if (!activeEventId) return;
+    const channel = supabase.channel(`dashboard_${activeEventId}`)
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'checkins', filter: `event_id=eq.${activeEventId}` },
+        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeEventId, queryClient]);
 
-  if (loading && !stats) return <div className="p-8 text-center text-gray-500 font-bold animate-pulse">Loading Regional Analytics...</div>;
+  if (isLoading && !stats) return <div className="p-8 text-center text-gray-500 font-bold animate-pulse">Loading Regional Analytics...</div>;
   if (!activeEventId || !stats) return <div className="p-8 text-center text-gray-500 font-bold uppercase tracking-widest opacity-50">Select Event to view Regional Dashboard</div>;
 
   // Ensure rankData doesn't contain empty names and Recharts gets a clean array

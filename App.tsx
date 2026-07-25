@@ -7,6 +7,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
 import Layout from './components/Layout';
 import { auth, db } from './services/supabaseService';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './hooks/useQueryClient';
+import { flushQueueOnConnect } from './services/offlineQueue';
 
 // Modules
 import LoginPage from './pages/LoginPage';
@@ -144,6 +147,12 @@ const AppContent = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (user?.id && activeEventId) {
+      flushQueueOnConnect();
+    }
+  }, [user?.id, activeEventId]);
+
   if (!isSupabaseConfigured) return <ConfigurationError />;
   
   if (isLoading) {
@@ -165,6 +174,7 @@ const AppContent = () => {
   }
 
   return (
+    <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={{ 
       user, 
       activeEventId, 
@@ -207,6 +217,7 @@ const AppContent = () => {
         </Routes>
       </HashRouter>
     </AppContext.Provider>
+    </QueryClientProvider>
   );
 };
 

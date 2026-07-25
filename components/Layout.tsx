@@ -3,6 +3,7 @@ import { User, UserRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { FGBMFILogo } from '../components/Logos';
 import { AppContext } from '../context/AppContext';
+import ConnectionStatus from './ConnectionStatus';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -139,8 +140,9 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
                 )}
               </div>
            </div>
-           <div className="flex items-center gap-2">
-              <div className="text-right hidden sm:block">
+            <div className="flex items-center gap-2">
+               <ConnectionStatus />
+               <div className="text-right hidden sm:block">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{user.email}</p>
                   <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">{getRoleLabel()}</p>
               </div>
