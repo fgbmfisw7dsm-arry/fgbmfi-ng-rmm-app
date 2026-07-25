@@ -280,7 +280,7 @@ export const db = {
                 }
             } catch {}
             
-            const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            const lines = raw.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
             if (lines.length < 4) return null;
             
             const lastIdx = <T>(arr: T[], fn: (item: T, i: number) => boolean): number => {

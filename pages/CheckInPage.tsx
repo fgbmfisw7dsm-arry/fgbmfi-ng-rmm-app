@@ -135,6 +135,7 @@ const CheckInPage = () => {
           setPendingReg(null);
         } else if (res.needsRegistration) {
           setFeedback(null);
+          setCode(res.scannedCode || '');
           setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
           if (res.parsedData) {
             setRegForm({
@@ -225,6 +226,7 @@ const CheckInPage = () => {
   const handleScan = (code: string) => {
     setShowScanner(false);
     if (code) {
+      setCode(code);
       handleCodeSubmit(code);
     }
   };
