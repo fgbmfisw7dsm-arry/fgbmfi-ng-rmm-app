@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 interface QRScannerProps {
   onScan: (code: string) => void;
@@ -18,6 +18,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [error, setError] = useState<string>('');
   const [scanning, setScanning] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
   const scannerRef = useRef<any>(null);
   const mountedRef = useRef(true);
 
@@ -55,13 +56,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(true);
         await scannerRef.current.start(
           selectedCamera,
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+          { fps: 15, qrbox: { width: 150, height: 150 }, aspectRatio: 0.75 },
           (text: string) => {
             if (scanned) return;
             setScanned(true);
             setScanning(false);
             scannerRef.current?.stop().catch(() => {});
-            onScan(text.trim());
+            setTimeout(() => onScan(text.trim()), 150);
           },
           () => {}
         );
@@ -85,6 +86,22 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     const idx = cameras.findIndex(c => c.id === selectedCamera);
     setSelectedCamera(cameras[(idx + 1) % cameras.length].id);
   };
+
+  const toggleTorch = useCallback(async () => {
+    try {
+      const videoElement = document.getElementById('qr-scanner-view')?.querySelector('video');
+      if (!videoElement?.srcObject) return;
+      const track = (videoElement.srcObject as MediaStream).getVideoTracks()[0];
+      if (!track || !track.getCapabilities?.().torch) {
+        setError('Flashlight not available on this camera.');
+        return;
+      }
+      await track.applyConstraints({ advanced: [{ torch: !torchOn } as any] });
+      setTorchOn(prev => !prev);
+    } catch {
+      setError('Could not toggle flashlight.');
+    }
+  }, [torchOn]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -118,6 +135,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               Switch Camera
             </button>
           )}
+          <button onClick={toggleTorch} disabled={scanned} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-600 font-black rounded-xl text-[10px] uppercase tracking-widest transition-all">
+            {torchOn ? 'Torch ON' : 'Torch'}
+          </button>
           <button onClick={onClose} className="flex-1 py-3 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest transition-all">
             Cancel
           </button>

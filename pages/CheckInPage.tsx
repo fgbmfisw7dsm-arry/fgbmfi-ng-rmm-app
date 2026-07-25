@@ -246,7 +246,7 @@ const CheckInPage = () => {
        
        <div className={`bg-white p-8 rounded-3xl shadow-xl border-t-8 border-blue-600 animate-in slide-in-from-top-4 ${isLocked ? 'pointer-events-none grayscale opacity-60' : ''}`}>
             <h2 className="text-lg font-black mb-4 text-blue-900 uppercase tracking-tighter">2. Fast Check-in (QR Code / 4-Digit)</h2>
-            <div className="flex gap-3 items-stretch">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
               <input 
                 className="flex-1 p-6 text-center text-4xl md:text-6xl font-black tracking-[0.15em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-200 font-mono" 
                 placeholder="Paste QR code or enter 4-digit code" 
