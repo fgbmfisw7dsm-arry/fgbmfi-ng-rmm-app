@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, SystemSettings, Rank, Office, UserRole } from '../types';
+import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 
@@ -13,7 +13,7 @@ const NewDelegatePage = () => {
   const isLocked = activeEvent?.is_active === false;
   
   // Logic: Is this a District Registrar who should be locked to one district?
-  const isDistrictScoped = (user?.role || '').toLowerCase() === UserRole.REGISTRAR && !!user?.district;
+  const isDistrictScoped = isRegistrarRole((user?.role || '').toLowerCase()) && !!user?.district;
   const initialDistrict = isDistrictScoped ? (user?.district || '') : '';
 
   const [form, setForm] = useState<Partial<Delegate>>({ 

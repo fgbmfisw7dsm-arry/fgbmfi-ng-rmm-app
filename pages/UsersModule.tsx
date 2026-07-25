@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../services/supabaseService';
-import { User, UserRole, SystemSettings } from '../types';
+import { User, UserRole, SystemSettings, isRegistrarRole } from '../types';
 
 const UsersModule = () => {
     const [users, setUsers] = useState<User[]>([]);
@@ -39,7 +39,13 @@ const UsersModule = () => {
             return;
         }
 
-        if ((form.role === UserRole.REGISTRAR || form.role === UserRole.DISTRICT_ADMIN) && !form.district) {
+        const needsDistrict = (r: string) => r === UserRole.DISTRICT_ADMIN || r === UserRole.DISTRICT_REGISTRAR || r === UserRole.REGISTRAR;
+
+    if (!form.email) {
+        alert("Please enter an email address.");
+        return;
+    }
+    if (needsDistrict(form.role) && !form.district) {
             setStatus({ type: 'error', msg: "Registrar accounts must be assigned to a district." });
             return;
         }
@@ -56,7 +62,7 @@ const UsersModule = () => {
             if (editingUserId) {
                 await db.updateUser(editingUserId, { 
                     role: form.role, 
-                    district: (form.role === UserRole.REGISTRAR || form.role === UserRole.DISTRICT_ADMIN) ? form.district : '' 
+                    district: needsDistrict(form.role) ? form.district : '' 
                 });
                 setStatus({ type: 'success', msg: "Account updated successfully." });
             } else {
@@ -185,18 +191,20 @@ const UsersModule = () => {
                         <select 
                             className="w-full p-4 border-2 border-gray-100 rounded-2xl bg-gray-50 font-black text-sm uppercase outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
                             value={form.role} 
-                            onChange={e => setForm({...form, role: e.target.value as any, district: (e.target.value === UserRole.REGISTRAR || e.target.value === UserRole.DISTRICT_ADMIN) ? form.district : ''})}
+                            onChange={e => setForm({...form, role: e.target.value as any, district: needsDistrict(e.target.value) ? form.district : ''})}
                             disabled={loading}
                         >
                             <option value={UserRole.NATIONAL_ADMIN}>National Admin</option>
                             <option value={UserRole.REGIONAL_ADMIN}>Regional Admin</option>
                             <option value={UserRole.DISTRICT_ADMIN}>District Admin</option>
-                            <option value={UserRole.REGISTRAR}>District Registrar</option>
+                            <option value={UserRole.NATIONAL_REGISTRAR}>National Registrar</option>
+                            <option value={UserRole.REGIONAL_REGISTRAR}>Regional Registrar</option>
+                            <option value={UserRole.DISTRICT_REGISTRAR}>District Registrar</option>
                             <option value={UserRole.FINANCE}>Finance Admin</option>
                         </select>
                     </div>
 
-                    {(form.role === UserRole.REGISTRAR || form.role === UserRole.DISTRICT_ADMIN) && (
+                    {needsDistrict(form.role) && (
                         <div className="space-y-1 animate-in slide-in-from-top-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">District Scope</label>
                             <select 
@@ -261,7 +269,7 @@ const UsersModule = () => {
                                     <div className="flex items-center gap-3 mb-1">
                                         <span className="font-black text-blue-900 uppercase text-lg tracking-tight">{u.email}</span>
                                         <span className={`px-2.5 py-1 rounded-lg font-black uppercase text-[8px] tracking-widest shadow-sm ${u.role === UserRole.NATIONAL_ADMIN ? 'bg-blue-900 text-white' : u.role === UserRole.REGIONAL_ADMIN ? 'bg-blue-700 text-white' : u.role === UserRole.DISTRICT_ADMIN ? 'bg-blue-500 text-white' : u.role === 'admin' ? 'bg-blue-900 text-white' : u.role === 'finance' ? 'bg-purple-600 text-white' : 'bg-slate-500 text-white'}`}>
-                                            {u.role === UserRole.NATIONAL_ADMIN ? 'Nat. Admin' : u.role === UserRole.REGIONAL_ADMIN ? 'Reg. Admin' : u.role === UserRole.DISTRICT_ADMIN ? 'Dist. Admin' : u.role === UserRole.ADMIN ? 'Sys Admin' : u.role.toUpperCase()}
+                                            {u.role === UserRole.NATIONAL_ADMIN ? 'Nat. Admin' : u.role === UserRole.REGIONAL_ADMIN ? 'Reg. Admin' : u.role === UserRole.DISTRICT_ADMIN ? 'Dist. Admin' : u.role === UserRole.NATIONAL_REGISTRAR ? 'Nat. Reg' : u.role === UserRole.REGIONAL_REGISTRAR ? 'Reg. Reg' : u.role === UserRole.DISTRICT_REGISTRAR ? 'Dist. Reg' : u.role === UserRole.ADMIN ? 'Sys Admin' : u.role === UserRole.REGISTRAR ? 'Registrar' : u.role.toUpperCase()}
                                         </span>
                                     </div>
                                     {u.district && (

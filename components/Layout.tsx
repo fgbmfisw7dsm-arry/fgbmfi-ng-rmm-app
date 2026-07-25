@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { User, UserRole } from '../types';
+import { User, UserRole, isAdminRole, isRegistrarRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { FGBMFILogo } from '../components/Logos';
 import { AppContext } from '../context/AppContext';
@@ -34,17 +34,20 @@ const getRoleLabel = () => {
            case UserRole.NATIONAL_ADMIN: return 'National Admin';
            case UserRole.REGIONAL_ADMIN: return 'Regional Admin';
            case UserRole.DISTRICT_ADMIN: return 'District Admin';
+           case UserRole.NATIONAL_REGISTRAR: return 'National Registrar';
+           case UserRole.REGIONAL_REGISTRAR: return 'Regional Registrar';
+           case UserRole.DISTRICT_REGISTRAR: return 'District Registrar';
            case UserRole.ADMIN: return 'System Admin';
-           case UserRole.FINANCE: return 'Financial Admin';
-           case UserRole.REGISTRAR: 
-             return user.district ? 'District Registrar' : 'Regional Registrar';
+           case UserRole.REGISTRAR: return user.district ? 'District Registrar' : 'Regional Registrar';
+           case UserRole.FINANCE: return 'Finance Admin';
            default: return 'User';
        }
    };
 
    const role = (user.role || '').toLowerCase();
-   const isAdminRole = role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN;
-   const showOperations = isAdminRole || role === UserRole.REGISTRAR || role === UserRole.FINANCE;
+   const adminRole = isAdminRole(role);
+   const registrarRole = isRegistrarRole(role);
+   const showOperations = adminRole || registrarRole || role === UserRole.FINANCE;
    const showAdminTools = role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.ADMIN;
 
   return (

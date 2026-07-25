@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Session, Delegate, UserRole } from '../types';
+import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
@@ -26,7 +26,8 @@ const CheckInPage = () => {
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const isLocked = activeEvent?.is_active === false;
-  const isAdmin = user?.role === UserRole.NATIONAL_ADMIN || user?.role === UserRole.REGIONAL_ADMIN || user?.role === UserRole.DISTRICT_ADMIN || user?.role === UserRole.ADMIN;
+  const isAdmin = isAdminRole(user?.role || '');
+  const isRegistrar = isRegistrarRole(user?.role || '');
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeEventId],
@@ -35,7 +36,7 @@ const CheckInPage = () => {
     staleTime: 300000,
   });
 
-  const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) ? user.district : undefined;
+  const districtFilter = (isRegistrar && user.district) ? user.district : undefined;
 
   const { data: searchResults } = useQuery({
     queryKey: ['delegates', activeEventId, query, selectedSessionId, districtFilter],
@@ -324,7 +325,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                                >
                                  Reprint Badge
                                </button>
-                               {(isAdmin || user?.role === UserRole.REGISTRAR) && (
+                               {(isAdmin || isRegistrar) && (
                                  <button 
                                    onClick={() => handleLostBadge(d.delegate_id)}
                                    disabled={regeneratingId === d.delegate_id || isLocked}

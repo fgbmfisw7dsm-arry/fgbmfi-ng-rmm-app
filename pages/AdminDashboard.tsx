@@ -2,7 +2,7 @@
 import React, { useContext, useEffect } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { UserRole, DashboardStats } from '../types';
+import { UserRole, DashboardStats, isRegistrarRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import StatCard from '../components/StatCard';
 import { formatCurrency } from '../services/utils';
@@ -13,7 +13,7 @@ const AdminDashboard = () => {
   const { activeEventId, user } = useContext(AppContext);
   const queryClient = useQueryClient();
 
-  const districtFilter = (user?.role === UserRole.REGISTRAR && user.district) 
+  const districtFilter = (isRegistrarRole(user?.role || '') && user?.district) 
     ? user.district.trim() 
     : undefined;
 

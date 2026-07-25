@@ -30,10 +30,19 @@ export enum UserRole {
   NATIONAL_ADMIN = 'national_admin',
   REGIONAL_ADMIN = 'regional_admin',
   DISTRICT_ADMIN = 'district_admin',
+  NATIONAL_REGISTRAR = 'national_registrar',
+  REGIONAL_REGISTRAR = 'regional_registrar',
+  DISTRICT_REGISTRAR = 'district_registrar',
   ADMIN = 'admin',
   REGISTRAR = 'registrar',
   FINANCE = 'finance'
 }
+
+export const isAdminRole = (role: string): boolean =>
+  role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN;
+
+export const isRegistrarRole = (role: string): boolean =>
+  role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR;
 
 // Database Models
 export interface Delegate {

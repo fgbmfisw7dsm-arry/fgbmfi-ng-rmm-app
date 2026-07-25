@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
-import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry } from '../types';
+import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF } from '../services/utils';
 
@@ -35,7 +35,7 @@ const ReportsPage = () => {
                 if (!mounted) return;
 
                 const userDistrictNorm = user?.district ? norm(user.district) : null;
-                if (user?.role === UserRole.REGISTRAR && userDistrictNorm) {
+                if (isRegistrarRole(user?.role || '') && userDistrictNorm) {
                     exportData.delegates = (exportData.delegates || []).filter((d: any) => 
                         norm(d.district) === userDistrictNorm
                     );
