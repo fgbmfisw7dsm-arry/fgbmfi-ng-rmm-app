@@ -119,14 +119,18 @@ const ReportsPage = () => {
     const { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges } = reportData;
 
     const renderAttendanceList = () => {
-        const rows = [...officialDistricts, "Legacy / Uncategorized"];
+        const unrecognizedDists: string[] = [];
+        attendedDelegates.forEach(d => {
+            const dn = norm(d.district);
+            if (dn && !officialDistricts.some(od => norm(od) === dn) && !unrecognizedDists.some(u => norm(u) === dn)) {
+                unrecognizedDists.push(d.district);
+            }
+        });
+        const rows = [...officialDistricts, ...unrecognizedDists.sort()];
         return (
             <div className="overflow-x-auto w-full">
                 {rows.map(distName => {
-                    const group = attendedDelegates.filter(d => {
-                        const dn = norm(d.district);
-                        return distName === "Legacy / Uncategorized" ? (dn === '' || !officialDistricts.some(od => norm(od) === dn)) : (dn === norm(distName));
-                    });
+                    const group = attendedDelegates.filter(d => norm(d.district) === norm(distName));
                     if (group.length === 0) return null;
                     return (
                         <div key={distName} className="mb-8">
@@ -166,7 +170,13 @@ const ReportsPage = () => {
     };
 
     const renderMatrixTable = (title: string, columns: string[], type: 'rank' | 'office') => {
-        const rows = [...officialDistricts, "Other Entities"];
+        const allDists: string[] = [...officialDistricts];
+        attendedDelegates.forEach(d => {
+            const dn = norm(d.district);
+            if (dn && !allDists.some(od => norm(od) === dn)) {
+                allDists.push(d.district);
+            }
+        });
         let grandTotal = 0;
         const colTotals: Record<string, number> = {};
         columns.forEach(c => colTotals[c] = 0);
@@ -180,11 +190,8 @@ const ReportsPage = () => {
                             <tr><th className="border p-2 sticky left-0 bg-slate-100 z-10">District</th>{columns.map(c => <th key={c} className="border p-2 text-center">{c}</th>)}<th className="border p-2 text-center bg-blue-100 sticky right-0 z-10">Total</th></tr>
                         </thead>
                         <tbody>
-                            {rows.map(rName => {
-                                const dels = attendedDelegates.filter(d => {
-                                    const dn = norm(d.district);
-                                    return rName === "Other Entities" ? (dn === '' || !officialDistricts.some(od => norm(od) === dn)) : (dn === norm(rName));
-                                });
+                            {allDists.map(rName => {
+                                const dels = attendedDelegates.filter(d => norm(d.district) === norm(rName));
                                 if (dels.length === 0) return null;
                                 grandTotal += dels.length;
                                 return (

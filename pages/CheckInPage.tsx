@@ -242,6 +242,7 @@ const CheckInPage = () => {
       const newDelegate = await db.registerDelegateFromQR(activeEventId, pendingReg.scannedCode, { ...regForm });
       const res = await db.checkInDelegate(activeEventId, newDelegate.delegate_id, user, selectedSessionId);
       setPendingReg(null);
+      setCode('');
       setFeedback({ type: 'success', msg: res.success ? 'Registered & Verified!' : 'Registered but check-in failed.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
