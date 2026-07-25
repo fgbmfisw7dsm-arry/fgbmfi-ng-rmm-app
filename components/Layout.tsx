@@ -57,6 +57,10 @@ const getRoleLabel = () => {
           <h1 className="text-xl font-black tracking-tight text-white leading-tight uppercase">FGBMFI Nigeria</h1>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Event Management System</p>
           {user.district && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}
+          <button onClick={onLogout} className="mt-4 flex items-center gap-1.5 text-gray-400 hover:text-red-400 transition-colors text-[10px] font-bold uppercase tracking-wider" title="Sign Out">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            Sign Out
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4">
