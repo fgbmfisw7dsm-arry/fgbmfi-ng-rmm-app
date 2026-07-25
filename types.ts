@@ -59,6 +59,9 @@ export interface Delegate {
   office: string;
   room_number: string;
   qr_hash: string;
+  external_id: string;
+  event_id: string;
+  registration_source: 'import' | 'manual' | 'qr_scan';
   created_at: string;
 }
 
@@ -104,6 +107,9 @@ export interface CheckInResult {
   message?: string;
   code?: string;
   delegate?: Delegate;
+  needsRegistration?: boolean;
+  scannedCode?: string;
+  parsedData?: Record<string, string> | null;
 }
 
 export interface Pledge {

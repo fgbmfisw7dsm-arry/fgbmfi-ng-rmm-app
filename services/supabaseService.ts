@@ -267,28 +267,101 @@ export const db = {
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         await ensureEventActive(eventId);
-        // Try 1: UUID QR hash lookup (exact match, fast, unique)
+        
+        const parseQRData = (raw: string): Record<string, string> | null => {
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    const result: Record<string, string> = {};
+                    for (const [k, v] of Object.entries(parsed)) {
+                        if (typeof v === 'string') result[k] = v;
+                    }
+                    return Object.keys(result).length > 0 ? result : null;
+                }
+            } catch {}
+            return null;
+        };
+        
+        // Pass 1: UUID QR hash lookup (internal QR codes)
         if (code.length > 10) {
             const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
             if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
-        // Try 2: 4-digit deterministic code fallback (backward compatible)
-        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
-        const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
-        if (!match) return { success: false, message: 'Invalid code.' };
-        return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+        
+        // Pass 2: External ID lookup (badges from other portals, e.g. CON26...)
+        if (code.length > 4) {
+            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('external_id', code).maybeSingle();
+            if (extMatch) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
+        }
+        
+        // Pass 3: Delegate ID lookup (fallback for direct ID match)
+        if (code.length > 4) {
+            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('delegate_id', code).maybeSingle();
+            if (idMatch) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
+        }
+        
+        // Pass 4: 4-digit deterministic code fallback (legacy)
+        if (code.length <= 10) {
+            const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
+            const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
+            if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+        }
+        
+        // Not found — try to parse QR data for auto-registration
+        const parsedData = parseQRData(code);
+        
+        if (parsedData && parsedData['first_name'] && parsedData['last_name'] && parsedData['district']) {
+            // Auto-register: QR contains enough data to create a delegate record
+            try {
+                const newDelegate = await db.registerDelegateFromQR(eventId, code, parsedData);
+                const result = await db.checkInDelegate(eventId, newDelegate.delegate_id, registrar, sessionId);
+                return { ...result, message: 'Auto-registered & ' + (result.message || 'Verified') };
+            } catch (regErr: any) {
+                return { success: false, message: regErr.message || 'Auto-registration failed.', needsRegistration: true, scannedCode: code, parsedData };
+            }
+        }
+        
+        if (code.length > 4) {
+            return { success: false, message: 'Delegate not found.', needsRegistration: true, scannedCode: code, parsedData };
+        }
+        
+        return { success: false, message: 'Invalid code.' };
     },
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
         const { data, error } = await supabase.from('delegates').insert({
             ...delegate,
-            qr_hash: delegate.qr_hash || generateQrHash()
+            qr_hash: delegate.qr_hash || generateQrHash(),
+            external_id: delegate.external_id || delegate.delegate_id,
+            registration_source: delegate.registration_source || 'manual'
         }).select().single();
         if (error) throw error;
         return data;
     },
 
-    importDelegates: async (csv: string, onProgress?: (inserted: number, skipped: number, total: number) => void): Promise<{ inserted: number; skipped: number }> => {
+    registerDelegateFromQR: async (eventId: string, scannedCode: string, parsedData: Record<string, string>): Promise<Delegate> => {
+        const record = {
+            title: parsedData['title'] || '',
+            first_name: parsedData['first_name'] || '',
+            last_name: parsedData['last_name'] || '',
+            district: parsedData['district'] || '',
+            chapter: parsedData['chapter'] || '',
+            phone: parsedData['phone'] || '',
+            email: parsedData['email'] || '',
+            rank: parsedData['rank'] || 'CP',
+            office: parsedData['office'] || 'OTHER',
+            room_number: parsedData['room_number'] || '',
+            event_id: eventId,
+            external_id: parsedData['delegate_id'] || parsedData['external_id'] || scannedCode,
+            qr_hash: generateQrHash(),
+            registration_source: 'qr_scan' as const
+        };
+        const { data, error } = await supabase.from('delegates').insert(record).select().single();
+        if (error) throw error;
+        return data;
+    },
+
+    importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, skipped: number, total: number) => void): Promise<{ inserted: number; skipped: number }> => {
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
         const BATCH_SIZE = 500;
         let inserted = 0;
@@ -306,7 +379,9 @@ export const db = {
                 email: p[6],
                 rank: p[7] || 'CP',
                 office: p[8] || 'OTHER',
-                qr_hash: generateQrHash()
+                qr_hash: generateQrHash(),
+                event_id: eventId || null,
+                registration_source: 'import'
             }));
 
             // Try the RPC first (server-side dedup, faster)

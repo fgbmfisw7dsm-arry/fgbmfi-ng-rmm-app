@@ -5,12 +5,11 @@ import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
 import QRScanner from '../components/QRScanner';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { enqueueCheckIn } from '../services/offlineQueue';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
-  const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
   const [results, setResults] = useState<(Delegate & { checkedIn: boolean, code?: string })[]>([]);
@@ -22,6 +21,8 @@ const CheckInPage = () => {
   const [badgeCode, setBadgeCode] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
+  const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -54,6 +55,7 @@ const CheckInPage = () => {
       setBadgeDelegate(null);
       setBadgeQrDataUrl('');
       setBadgeCode('');
+      setPendingReg(null);
     };
   }, []);
 
@@ -128,11 +130,28 @@ const CheckInPage = () => {
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
         if(res && res.success) { 
-          setFeedback({ type: 'success', msg: 'Verified!' }); 
+          setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
           setCode(''); 
-          performSearch();
+          setPendingReg(null);
+        } else if (res.needsRegistration) {
+          setFeedback(null);
+          setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
+          if (res.parsedData) {
+            setRegForm({
+              title: res.parsedData['title'] || '',
+              first_name: res.parsedData['first_name'] || '',
+              last_name: res.parsedData['last_name'] || '',
+              district: res.parsedData['district'] || '',
+              chapter: res.parsedData['chapter'] || '',
+              phone: res.parsedData['phone'] || '',
+              email: res.parsedData['email'] || '',
+              rank: res.parsedData['rank'] || 'CP',
+              office: res.parsedData['office'] || 'OTHER'
+            });
+          }
         } else { 
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
+          setPendingReg(null);
         }
         setTimeout(() => setFeedback(null), 3000);
     } catch(e: any) { 
@@ -144,10 +163,11 @@ const CheckInPage = () => {
   const onCodeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isLocked) return;
     const val = e.target.value;
-    const cleaned = val.replace(/[^0-9a-fA-F-]/g, '');
+    const cleaned = val.replace(/[^a-zA-Z0-9_-]/g, '');
     setCode(cleaned);
     if (feedback?.type === 'error') setFeedback(null);
-    if (cleaned.length === 4 || cleaned.length === 36) {
+    setPendingReg(null);
+    if (cleaned.length === 4 || cleaned.length === 24 || cleaned.length === 36) {
       handleCodeSubmit(cleaned);
     }
   };
@@ -199,13 +219,31 @@ const CheckInPage = () => {
     setQuery('');
     setResults([]);
     setFeedback(null);
+    setPendingReg(null);
   };
 
   const handleScan = (code: string) => {
     setShowScanner(false);
     if (code) {
-      setCode(code);
       handleCodeSubmit(code);
+    }
+  };
+
+  const handleQuickRegister = async () => {
+    if (!activeEventId || !user || !pendingReg) return;
+    if (!regForm.first_name || !regForm.last_name || !regForm.district) {
+      setFeedback({ type: 'error', msg: 'First name, last name, and district are required.' });
+      return;
+    }
+    setFeedback({ type: 'success', msg: 'Registering...' });
+    try {
+      const newDelegate = await db.registerDelegateFromQR(activeEventId, pendingReg.scannedCode, { ...regForm });
+      const res = await db.checkInDelegate(activeEventId, newDelegate.delegate_id, user, selectedSessionId);
+      setPendingReg(null);
+      setFeedback({ type: 'success', msg: res.success ? 'Registered & Verified!' : 'Registered but check-in failed.' });
+      setTimeout(() => setFeedback(null), 3000);
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: e.message || 'Registration failed.' });
     }
   };
 
@@ -243,8 +281,8 @@ const CheckInPage = () => {
             <div className="flex flex-col sm:flex-row gap-3 items-stretch">
               <input 
                 className="flex-1 p-6 text-center text-4xl md:text-6xl font-black tracking-[0.15em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-200 font-mono" 
-                placeholder="Paste QR code or enter 4-digit code" 
-                maxLength={36} 
+                placeholder="Scan QR code or enter delegate ID" 
+                maxLength={64} 
                 value={code} 
                 onChange={onCodeInput} 
                 autoFocus={!isLocked}
@@ -263,19 +301,78 @@ const CheckInPage = () => {
             <div className={`h-8 mt-4 text-center font-black uppercase text-xs tracking-widest ${feedback?.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                 {feedback?.msg}
             </div>
-       </div>
+        </div>
 
-       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+        {pendingReg && (
+          <div className="bg-white p-8 rounded-3xl shadow-xl border-t-8 border-amber-500 animate-in slide-in-from-top-4">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-lg font-black text-amber-700 uppercase tracking-tighter">Register Delegate</h2>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Delegate not in database</p>
+              </div>
+              <button onClick={() => { setPendingReg(null); setFeedback(null); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Title</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.title} onChange={e => setRegForm(f => ({...f, title: e.target.value}))} placeholder="Mr/Mrs/Dr" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">First Name *</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.first_name} onChange={e => setRegForm(f => ({...f, first_name: e.target.value}))} placeholder="First name" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Last Name *</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.last_name} onChange={e => setRegForm(f => ({...f, last_name: e.target.value}))} placeholder="Last name" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">District *</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.district} onChange={e => setRegForm(f => ({...f, district: e.target.value}))} placeholder="District" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Chapter</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.chapter} onChange={e => setRegForm(f => ({...f, chapter: e.target.value}))} placeholder="Chapter" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Phone</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.phone} onChange={e => setRegForm(f => ({...f, phone: e.target.value}))} placeholder="Phone" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Email</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.email} onChange={e => setRegForm(f => ({...f, email: e.target.value}))} placeholder="Email" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Rank</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.rank} onChange={e => setRegForm(f => ({...f, rank: e.target.value}))} placeholder="CP" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Office</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.office} onChange={e => setRegForm(f => ({...f, office: e.target.value}))} placeholder="Office" />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={handleQuickRegister} className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
+                Register & Check In
+              </button>
+              <button onClick={() => { setPendingReg(null); setFeedback(null); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
          <h2 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-[0.2em]">3. Database Lookup & Manual Verify</h2>
          <div className="relative">
              <input 
                className="w-full p-5 pr-14 text-xl border-2 border-gray-50 rounded-2xl bg-gray-50 focus:bg-white focus:border-blue-500 outline-none font-bold transition-all" 
                placeholder="Search delegate by name or phone..." 
                value={query} 
-               onChange={e => {
-                 setQuery(e.target.value);
-                 if (feedback?.type === 'error') setFeedback(null);
-               }} 
+                onChange={e => {
+                  setQuery(e.target.value);
+                  if (feedback?.type === 'error') setFeedback(null);
+                  setPendingReg(null);
+                }} 
              />
              {query && (
                  <button 
