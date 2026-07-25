@@ -1,39 +1,44 @@
 # FGBMFI Nigeria EMS — Implementation Plan
 
 **Project:** FGBMFI Nigeria Events Management System
-**Version:** 1.5 (Phase 1) → 2.0 (Target)
-**Last Updated:** July 25, 2026 (Phase 1 Complete)
+**Version:** 1.6 (Phase 1) → 2.0 (Target)
+**Last Updated:** July 25, 2026 (Convention Accreditation Complete)
 
 ---
 
-## Session Summary (July 24, 2026)
+## Session Summary (July 25, 2026) — Convention Accreditation
 
 ### What Was Delivered
 
-| Item | Type | Status |
-|------|------|--------|
-| `AGENTS.md` | AI operational context | ✅ Committed |
-| `ARCHITECTURE-v2.md` | Target architecture & roadmap | ✅ Committed |
-| `supabase_migration_sprint1.sql` | DB indexes + RPCs | ✅ Committed + Run |
-| `sprint1_fix_function.sql` | RPC bug fix | ✅ Committed + Run |
+| # | Item | Type | Commit |
+|---|------|------|--------|
+| 1 | Native BarcodeDetector API scanner (replaces html5-qrcode) | Component | `1e97fc4` → `f902600` |
+| 2 | Event-scoped delegates (`event_id`, `external_id`, `registration_source`) | Schema | `e3e0da7` |
+| 3 | 4-pass QR code resolution (qr_hash → external_id → delegate_id → 4-digit) | Service | `e3e0da7` |
+| 4 | Multi-format QR parser (JSON, CSV, multi-line text) | Service | `deaec03` |
+| 5 | Auto-registration flow with confirmation form | UI + Service | `e3e0da7` |
+| 6 | Event-scoped queries (search, master list, dashboard, reports, import) | Service + Pages | `f6fad49` |
+| 7 | Dashboard delegates count scoped to current event only | Service | `61c0f74` |
+| 8 | Reports — actual district names instead of "Legacy / Uncategorized" | Page | `5cfde00` |
+| 9 | Master list — renamed + district grouping fix | Page | `c56c25e` |
+| 10 | Backfill SQL for orphan delegates → legacy event | Migration | `61c0f74` |
 
-### Database Migration Results
+### Database Migration Results (User Ran)
 
-| Object | Status |
-|--------|--------|
-| pg_trgm extension | ✅ Created |
-| Indexes (6): delegates GIN, phone, checkins composite x2, financials, pledges | ✅ Created |
-| `get_event_dashboard_stats()` RPC | ✅ Created + Fixed |
-| `search_delegates()` RPC | ✅ Created |
-| `import_delegates_batch()` RPC | ✅ Created |
+| Migration | Content | Status |
+|-----------|---------|--------|
+| `supabase_migration_sprint2.sql` | `qr_hash` UUID column, backfill, unique index | ✅ Run |
+| `supabase_migration_convention.sql` | `event_id`, `external_id`, `registration_source` columns + indexes | ✅ Run |
+| `supabase_backfill_legacy.sql` | Reassigns orphan delegates to Legacy/Past Events | ✅ Run |
 
-### Pending (Needs User Action)
+### Architecture Decisions
 
-| Action | Details |
-|--------|---------|
-| Push to GitHub | ✅ Done |
-| Upgrade Supabase to Pro tier | For 50 concurrent officers (60 connections) |
-| Apply Sprint 2+3 optimizations | QR UUID migration + TanStack Query |
+| Decision | Rationale |
+|----------|-----------|
+| BarcodeDetector API over html5-qrcode | Native Chrome API, same tech as dedicated scanner apps. No canvas-based JS decoder issues on Android |
+| `event_id` on delegates | Independent per event. Clean archiving by event. QR codes carry delegate identity across events |
+| 4-pass QR resolution | Backward compatible (4-digit + UUID) + external badge support (external_id) |
+| `needsRegistration` instead of silent auto-register | Operator confirms data before creating records — prevents phantom delegates |
 
 ---
 
@@ -50,7 +55,8 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 | **Sprint 3** | Check-in Performance | TanStack Query integration, connection health UI, offline queue | 28 hrs | ✅ Done |
 | **Sprint 4** | Dashboard & Reports | Summary PDF only, CSV/JSON export, RPC-based dashboard | 20 hrs | ✅ Done |
 | **Sprint 5** | Hardening & Deployment | 50-concurrent-user load test, error recovery, operator training | 24 hrs | ✅ Done |
-| **Total** | | | **~104 hrs** | |
+| **Sprint 6** | Convention Accreditation | Native QR scanner, event-scoped delegates, 4-pass code resolution, multi-format QR parser, auto-registration flow, event isolation queries, report/master list fixes | 32 hrs | ✅ Done |
+| **Total** | | | **~136 hrs** | |
 
 ### Phase 2 — Finance & Communications (4–6 weeks)
 
@@ -182,6 +188,50 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 
 ---
 
+## Sprint 6 — Detailed Plan (Convention Accreditation)
+
+**Goal:** Enable QR-based check-in for conventions with badges from external portals. Isolate delegates per event.
+
+### Tasks
+
+| # | Task | Effort | Dependencies | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | Replace html5-qrcode with native BarcodeDetector API scanner | 6 hrs | — | ✅ Done |
+| 6.2 | Full-screen scanner UI with high camera resolution (1080p) | 2 hrs | 6.1 | ✅ Done |
+| 6.3 | Add `event_id`, `external_id`, `registration_source` to delegates | 3 hrs | — | ✅ Done |
+| 6.4 | 4-pass QR code resolution (qr_hash → external_id → delegate_id → 4-digit) | 4 hrs | 6.3 | ✅ Done |
+| 6.5 | Multi-format QR parser (JSON, CSV, multi-line text) with `nullnull` stripping | 5 hrs | 6.4 | ✅ Done |
+| 6.6 | Auto-registration flow: parsed QR data → confirmation form → register + check-in | 4 hrs | 6.5 | ✅ Done |
+| 6.7 | Event-scoped queries everywhere (search, master list, dashboard, reports, import) | 4 hrs | 6.3 | ✅ Done |
+| 6.8 | Dashboard delegate count strictly scoped to current event | 1 hr | 6.7 | ✅ Done |
+| 6.9 | Fix Reports + MasterList district grouping (remove "Legacy / Uncategorized") | 2 hrs | — | ✅ Done |
+| 6.10 | SQL backfill script for orphan delegates → legacy event | 1 hr | 6.3 | ✅ Done |
+
+### Acceptance Criteria
+- QR scanning via native BarcodeDetector API on Android Chrome (zero library issues)
+- External badge QR codes (CSV format with `CON26...` IDs) parse automatically from BarcodeDetector.rawValue
+- Unknown delegates auto-register with operator confirmation (single-click)
+- Second scan of same badge matches instantly via `external_id` (no duplicate records)
+- Each event's delegates are scoped — past event data does not pollute current event
+- Districts not in official list appear under their actual name in reports and master list
+- 4-digit legacy codes still work as fallback
+
+### Key Files Changed
+
+| File | Changes |
+|------|---------|
+| `components/QRScanner.tsx` | Full rewrite: native BarcodeDetector API, full-screen, 1080p, debug overlay |
+| `services/supabaseService.ts` | 4-pass checkInByCode, parseQRData (JSON/CSV/text), registerDelegateFromQR, event-scoped queries |
+| `pages/CheckInPage.tsx` | Registration form, code display, auto-submit at 24 chars, sessionId wiring |
+| `pages/ReportsPage.tsx` | District grouping: actual names instead of "Legacy / Uncategorized" |
+| `pages/MasterListModule.tsx` | Renamed heading, identical district grouping fix, event-scoped pagination |
+| `pages/ImportModule.tsx` | Passes `activeEventId` to importDelegates |
+| `types.ts` | Added `event_id`, `external_id`, `registration_source` to Delegate; `needsRegistration`, `scannedCode`, `parsedData` to CheckInResult |
+| `supabase_migration_convention.sql` | event_id, external_id, registration_source columns + indexes + backfill notes |
+| `supabase_backfill_legacy.sql` | Creates legacy event + reassigns orphan delegates |
+
+---
+
 ## Critical Path Dependencies
 
 ```
@@ -195,7 +245,9 @@ Sprint 4 (Dashboard + Reports) ✅ Done
         ↓
 Sprint 5 (Load Test + Hardening) ✅ Done
         ↓
-       READY FOR 25K Delegate Event ✅
+Sprint 6 (Convention Accreditation) ✅ Done
+        ↓
+        READY FOR CONVENTION ✅
 ```
 
 ## Infrastructure Requirements
