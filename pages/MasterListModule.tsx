@@ -62,14 +62,23 @@ const MasterListModule = () => {
     }, [settings]);
 
     const displayGroups = useMemo(() => {
-        const groups = [...officialDistricts];
-        const hasUncategorizedData = delegates.some(d => {
-            const dNorm = (d.district || '').trim().toUpperCase();
-            return dNorm === '' || !groups.some(g => g.toUpperCase() === dNorm);
+        const groups: string[] = [];
+        const seen = new Set<string>();
+        const officialSet = new Set(officialDistricts.map(d => d.trim().toUpperCase()));
+        
+        officialDistricts.forEach(d => {
+            groups.push(d);
+            seen.add(d.trim().toUpperCase());
         });
-        if (hasUncategorizedData) {
-            groups.push("Legacy / Uncategorized");
-        }
+        
+        delegates.forEach(d => {
+            const dNorm = (d.district || '').trim();
+            if (dNorm && !seen.has(dNorm.toUpperCase())) {
+                seen.add(dNorm.toUpperCase());
+                groups.push(dNorm);
+            }
+        });
+        
         return groups;
     }, [delegates, officialDistricts]);
 
@@ -180,12 +189,11 @@ const MasterListModule = () => {
             )}
 
             <div className="bg-white p-6 rounded-xl shadow-sm border flex flex-col md:flex-row gap-4 justify-between items-center no-print">
-                <h2 className="text-xl font-black uppercase tracking-widest text-blue-900">Regional Master List</h2>
+                <h2 className="text-xl font-black uppercase tracking-widest text-blue-900">Delegates Master List</h2>
                 <div className="flex flex-1 flex-wrap gap-2 justify-end w-full md:w-auto">
                     <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={selectedDistrict} onChange={e => setSelectedDistrict(e.target.value)}>
                         <option value="">All Official Districts</option>
                         {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
-                        <option value="Legacy / Uncategorized">Legacy / Uncategorized</option>
                     </select>
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest">Export PDF</button>
@@ -197,7 +205,7 @@ const MasterListModule = () => {
             <div ref={listRef} className="bg-white rounded-xl shadow-sm border p-6 min-h-screen">
                 <div className="print-only mb-8 text-center border-b pb-6">
                     <h1 className="text-2xl font-black uppercase tracking-tight text-blue-900">FGBMFI Nigeria</h1>
-                    <h3 className="text-sm font-bold uppercase text-gray-400">Regional Delegate Master List</h3>
+                    <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
                 {loading ? (
@@ -208,21 +216,15 @@ const MasterListModule = () => {
                         <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No records found matching your filter.</div>
                     </div>
                 ) : displayGroups.map(groupName => {
-                    const distDelegates = delegates.filter(d => {
-                        const dNorm = (d.district || '').trim().toUpperCase();
-                        if (groupName === "Legacy / Uncategorized") {
-                             return dNorm === '' || !officialDistricts.some(od => od.trim().toUpperCase() === dNorm);
-                        }
-                        return dNorm === groupName.toUpperCase();
-                    });
+                    const distDelegates = delegates.filter(d => (d.district || '').trim().toUpperCase() === groupName.toUpperCase());
 
                     if (distDelegates.length === 0) return null;
-                    const isLegacyGroup = groupName === "Legacy / Uncategorized";
+                    const isOfficial = officialDistricts.some(od => od.trim().toUpperCase() === groupName.toUpperCase());
 
                     return (
-                        <div key={groupName} className={`mb-8 border rounded-xl overflow-hidden shadow-sm break-inside-avoid ${isLegacyGroup ? 'border-orange-200 bg-orange-50/20' : ''}`}>
-                            <div className={`${isLegacyGroup ? 'bg-orange-600' : 'bg-slate-900'} text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest`}>
-                                <span>{groupName} {isLegacyGroup ? '' : 'DISTRICT'}</span>
+                        <div key={groupName} className={`mb-8 border rounded-xl overflow-hidden shadow-sm break-inside-avoid ${!isOfficial ? 'border-orange-200 bg-orange-50/20' : ''}`}>
+                            <div className={`${!isOfficial ? 'bg-orange-600' : 'bg-slate-900'} text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest`}>
+                                <span>{groupName} {isOfficial ? 'DISTRICT' : ''}</span>
                                 <span className="bg-white/10 px-3 py-1 rounded-full">{distDelegates.length} RECORDS</span>
                             </div>
                             <div className="overflow-x-auto">
