@@ -19,3 +19,12 @@ UPDATE delegates SET external_id = delegate_id WHERE external_id IS NULL;
 
 -- Note: The searchDelegates function should be updated to filter by event_id
 -- This migration adds the column; the application code handles the query changes
+
+-- Phase 5: Optional - Backfill old delegates to isolate from current events
+-- Create a "Legacy / Past Events" event in the Events module first, then run:
+-- UPDATE delegates SET event_id = '<legacy_event_uuid>' WHERE event_id IS NULL;
+
+-- Phase 6: Optional - Remove old delegates no longer needed
+-- After exporting/archiving, delete old event-specific data:
+-- DELETE FROM checkins WHERE event_id = '<old_event_uuid>';
+-- DELETE FROM delegates WHERE event_id = '<old_event_uuid>';

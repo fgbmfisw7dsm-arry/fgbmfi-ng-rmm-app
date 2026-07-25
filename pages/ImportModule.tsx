@@ -1,8 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { db } from '../services/supabaseService';
+import { AppContext } from '../context/AppContext';
 
 const ImportModule = () => {
+    const { activeEventId } = useContext(AppContext);
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
@@ -19,7 +21,7 @@ const ImportModule = () => {
         setFeedback(null);
 
         try {
-            const result = await db.importDelegates(csv, (inserted, skipped, total) => {
+            const result = await db.importDelegates(csv, activeEventId, (inserted, skipped, total) => {
                 setProgress({ current: inserted + skipped, total });
             });
             

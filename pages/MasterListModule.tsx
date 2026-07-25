@@ -1,13 +1,15 @@
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings } from '../types';
 import { exportToPDF, exportToCSV } from '../services/utils';
+import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 50;
 
 const MasterListModule = () => {
+    const { activeEventId } = useContext(AppContext);
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
@@ -27,7 +29,7 @@ const MasterListModule = () => {
         setLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, activeEventId),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);

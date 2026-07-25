@@ -181,7 +181,7 @@ export const db = {
 
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
         if (!eventId) return [];
-        let q = supabase.from('delegates').select('*');
+        let q = supabase.from('delegates').select('*').or(`event_id.eq.${eventId},event_id.is.null`);
         if (district) q = q.ilike('district', normalize(district));
         if (query.length > 1) q = q.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,phone.ilike.%${query}%`);
         const { data: delegates, error } = await q.limit(100);
@@ -214,7 +214,7 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         try {
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
@@ -224,6 +224,7 @@ export const db = {
         } catch {}
 
         let q = supabase.from('delegates').select('*', { count: 'exact' });
+        if (eventId) q = q.or(`event_id.eq.${eventId},event_id.is.null`);
         if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
         if (district) q = q.ilike('district', normalize(district));
         const from = (page - 1) * pageSize;
@@ -471,7 +472,7 @@ export const db = {
         } catch {}
 
         const filter = district ? normalize(district).toUpperCase() : null;
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
+        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).or(`event_id.eq.${eventId},event_id.is.null`);
         if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
@@ -523,7 +524,13 @@ export const db = {
             let from = 0;
             while (true) {
                 let q = supabase.from(table).select('*').range(from, from + 999);
-                if (eventIdFilter) q = q.eq('event_id', eventIdFilter);
+                if (eventIdFilter) {
+                    if (table === 'delegates') {
+                        q = q.or(`event_id.eq.${eventIdFilter},event_id.is.null`);
+                    } else {
+                        q = q.eq('event_id', eventIdFilter);
+                    }
+                }
                 if (table === 'checkins') q = q.order('checked_in_at', { ascending: true });
                 const { data, error } = await q;
                 if (error || !data || data.length === 0) break;
@@ -533,7 +540,7 @@ export const db = {
             }
             return results;
         };
-        const [d, c, f, p] = await Promise.all([ fetchAll('delegates'), fetchAll('checkins', eventId), fetchAll('financial_entries', eventId), fetchAll('pledges', eventId) ]);
+        const [d, c, f, p] = await Promise.all([ fetchAll('delegates', eventId), fetchAll('checkins', eventId), fetchAll('financial_entries', eventId), fetchAll('pledges', eventId) ]);
         return { delegates: d, checkins: c, financials: f, pledges: p };
     },
 
