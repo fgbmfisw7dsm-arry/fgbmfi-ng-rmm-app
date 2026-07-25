@@ -16,7 +16,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const log = (msg: string) => {
     console.log('[QRScanner]', msg);
-    setDebugInfo(prev => [...prev.slice(-5), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
+    setDebugInfo(prev => [...prev.slice(-4), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
   };
 
   useEffect(() => {
@@ -37,37 +37,31 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         if (!mountedRef.current) return;
         if (cameras.length === 0) {
           setError('No camera detected.');
-          log('ERROR: No cameras found');
           return;
         }
-        log(`Found ${cameras.length} camera(s): ${cameras.map((c: any) => c.label).join(', ')}`);
         const rear = cameras.find((c: { id: string; label: string }) =>
           c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment')
         );
         const cameraId = rear?.id || cameras[0].id;
-        log(`Using camera: ${rear?.label || cameras[0].label}`);
+        log(`Camera: ${rear?.label || cameras[0].label}`);
         setUseHtml5Fallback(true);
         setScanning(true);
         setError('');
 
         await new Promise(r => setTimeout(r, 150));
-
         const scanner = new Html5Qrcode('qr-scanner-view');
-        log('html5-qrcode scanner initialized, starting...');
         await scanner.start(
           cameraId,
           { fps: 10, qrbox: 250 },
           (decodedText: string) => {
-            log(`DETECTED: ${decodedText.substring(0, 40)}`);
             setScanning(false);
             scanner.stop().catch(() => {});
             onScanRef.current(decodedText.trim());
           },
           () => {}
         );
-        log('html5-qrcode scanner started, waiting for QR code...');
+        log('html5-qrcode scanner active');
       } catch (e: any) {
-        log(`ERROR: ${e.message || String(e)}`);
         if (mountedRef.current) {
           setError(e.message || 'Failed to start camera.');
           setScanning(false);
@@ -77,12 +71,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
     const startBarcodeDetector = async () => {
       try {
-        log('BarcodeDetector available, requesting camera...');
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'environment',
-            width: { ideal: 640 },
-            height: { ideal: 480 }
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
           }
         });
         if (!mountedRef.current || !videoRef.current) {
@@ -91,13 +84,21 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         }
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
-        log(`Video playing: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+        log(`Video: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const capabilities = track.getCapabilities ? track.getCapabilities() : null;
+          if (capabilities) {
+            log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
+          }
+        }
+
         setScanning(true);
         setError('');
 
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-        log('BarcodeDetector created, starting detection loop...');
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        log('BarcodeDetector active, hold badge closer...');
 
         intervalId = setInterval(async () => {
           if (!mountedRef.current || !videoRef.current) return;
@@ -105,23 +106,16 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           try {
             const codes = await detector.detect(videoRef.current);
             if (codes && codes.length > 0) {
-              log(`DETECTED: ${codes[0].rawValue.substring(0, 40)}`);
               if (intervalId) clearInterval(intervalId);
               if (stream) stream.getTracks().forEach(t => t.stop());
               setScanning(false);
               onScanRef.current(codes[0].rawValue);
             } else if (attempts % 40 === 0) {
-              log(`Scanning... (${attempts} attempts, no code found yet)`);
+              log(`Scanning... ${attempts} attempts, try moving badge closer`);
             }
-          } catch (detectErr: any) {
-            if (attempts <= 3) {
-              log(`Detection error: ${detectErr.message || String(detectErr)}`);
-            }
-          }
+          } catch (_e) {}
         }, 120);
-        log('Detection loop running...');
       } catch (e: any) {
-        log(`ERROR: ${e.message || String(e)}`);
         if (mountedRef.current) {
           const msg = e.message || '';
           if (msg.includes('Permission') || msg.includes('NotAllowed')) {
@@ -136,70 +130,58 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       }
     };
 
-    log(`BarcodeDetector API available: ${'BarcodeDetector' in window}`);
-
     if ('BarcodeDetector' in window) {
       startBarcodeDetector();
     } else {
       tryHtml5Qrcode();
     }
 
-    const timeout = setTimeout(() => {
-      if (mountedRef.current && scanning) {
-        log('TIMEOUT: 30 seconds with no detection');
-      }
-    }, 30000);
-
     return () => {
-      clearTimeout(timeout);
       if (intervalId) clearInterval(intervalId);
       if (stream) stream.getTracks().forEach(t => t.stop());
     };
   }, []);
 
   useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
+    return () => { mountedRef.current = false; };
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden">
-        <div className="p-4 flex justify-between items-center border-b border-gray-100">
-          <h3 className="text-sm font-black text-blue-900 uppercase tracking-wider">Scan QR Code</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      {useHtml5Fallback ? (
+        <div className="relative flex-1">
+          <div id="qr-scanner-view" className="absolute inset-0" />
+          <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
         </div>
-        <div className="p-4">
-          {useHtml5Fallback ? (
-            <div id="qr-scanner-view" className="w-full bg-black rounded-2xl overflow-hidden" style={{ minHeight: 280 }} />
-          ) : (
-            <video ref={videoRef} className="w-full bg-black rounded-2xl" style={{ minHeight: 280, objectFit: 'cover' }} playsInline autoPlay muted />
-          )}
-          {error && (
-            <div className="mt-3 p-3 bg-red-50 rounded-xl text-xs font-bold text-red-600 text-center">
-              {error}
-            </div>
-          )}
+      ) : (
+        <div className="relative flex-1">
+          <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: 'cover' }} playsInline autoPlay muted />
+          <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
+          <div className="absolute top-4 left-4 right-4">
+            {debugInfo.length > 0 && (
+              <div className="bg-black/50 rounded-lg p-1.5">
+                {debugInfo.map((line, i) => (
+                  <div key={i} className="text-[8px] font-mono text-green-400 leading-relaxed">{line}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-black/90 px-6 py-4 flex items-center justify-between">
+        <div className="flex flex-col">
           {scanning && !error && (
-            <div className="mt-3 text-center">
-              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Scanning...</span>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs font-bold text-white uppercase tracking-widest">Scanning...</span>
             </div>
           )}
-          {debugInfo.length > 0 && (
-            <div className="mt-3 p-2 bg-gray-50 rounded-xl border border-gray-100">
-              {debugInfo.map((line, i) => (
-                <div key={i} className="text-[8px] font-mono text-gray-500 leading-relaxed">{line}</div>
-              ))}
-            </div>
-          )}
+          {error && <span className="text-xs font-bold text-red-400">{error}</span>}
         </div>
-        <div className="p-4 pt-0 flex gap-3">
-          <button onClick={onClose} className="flex-1 py-3 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest transition-all">
-            Cancel
-          </button>
-        </div>
+        <button onClick={onClose} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all">
+          Cancel
+        </button>
       </div>
     </div>
   );
