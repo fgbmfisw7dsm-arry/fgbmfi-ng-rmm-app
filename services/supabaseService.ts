@@ -320,21 +320,24 @@ export const db = {
             return null;
         };
         
-        // Pass 1: UUID QR hash lookup (internal QR codes)
-        if (code.length > 10) {
+        const parsedData = parseQRData(code);
+        const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || code;
+        
+        // Pass 1: UUID QR hash lookup (internal QR codes, use raw code)
+        if (code.length > 10 && code !== lookupId) {
             const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
             if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
         
-        // Pass 2: External ID lookup (badges from other portals, e.g. CON26...)
-        if (code.length > 4) {
-            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('external_id', code).maybeSingle();
+        // Pass 2: External ID lookup (use extracted delegate ID, matches subsequent scans)
+        if (lookupId.length > 4) {
+            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('external_id', lookupId).maybeSingle();
             if (extMatch) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
         }
         
-        // Pass 3: Delegate ID lookup (fallback for direct ID match)
-        if (code.length > 4) {
-            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('delegate_id', code).maybeSingle();
+        // Pass 3: Delegate ID lookup
+        if (lookupId.length > 4 && lookupId !== code) {
+            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('delegate_id', lookupId).maybeSingle();
             if (idMatch) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
         }
         
@@ -345,22 +348,13 @@ export const db = {
             if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
         
-        // Not found — try to parse QR data for auto-registration
-        const parsedData = parseQRData(code);
-        
+        // Not found — return parsed data for confirmation form
         if (parsedData && parsedData['first_name'] && parsedData['last_name'] && parsedData['district']) {
-            // Auto-register: QR contains enough data to create a delegate record
-            try {
-                const newDelegate = await db.registerDelegateFromQR(eventId, code, parsedData);
-                const result = await db.checkInDelegate(eventId, newDelegate.delegate_id, registrar, sessionId);
-                return { ...result, message: 'Auto-registered & ' + (result.message || 'Verified') };
-            } catch (regErr: any) {
-                return { success: false, message: regErr.message || 'Auto-registration failed.', needsRegistration: true, scannedCode: code, parsedData };
-            }
+            return { success: false, message: 'Confirm delegate details below.', needsRegistration: true, scannedCode: lookupId, parsedData };
         }
         
-        if (code.length > 4) {
-            return { success: false, message: 'Delegate not found.', needsRegistration: true, scannedCode: code, parsedData };
+        if (lookupId.length > 4) {
+            return { success: false, message: 'Delegate not found.', needsRegistration: true, scannedCode: lookupId, parsedData };
         }
         
         return { success: false, message: 'Invalid code.' };
