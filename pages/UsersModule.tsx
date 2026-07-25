@@ -14,6 +14,8 @@ const UsersModule = () => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info', msg: string } | null>(null);
 
+    const needsDistrict = (r: string) => r === UserRole.DISTRICT_ADMIN || r === UserRole.DISTRICT_REGISTRAR || r === UserRole.REGISTRAR;
+
     const load = async () => {
         setLoading(true);
         try {
@@ -39,13 +41,7 @@ const UsersModule = () => {
             return;
         }
 
-        const needsDistrict = (r: string) => r === UserRole.DISTRICT_ADMIN || r === UserRole.DISTRICT_REGISTRAR || r === UserRole.REGISTRAR;
-
-    if (!form.email) {
-        alert("Please enter an email address.");
-        return;
-    }
-    if (needsDistrict(form.role) && !form.district) {
+        if (needsDistrict(form.role) && !form.district) {
             setStatus({ type: 'error', msg: "Registrar accounts must be assigned to a district." });
             return;
         }
