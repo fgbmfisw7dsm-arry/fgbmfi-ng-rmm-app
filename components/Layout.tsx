@@ -1,7 +1,6 @@
 import React, { useContext } from 'react';
 import { User, UserRole, isAdminRole, isRegistrarRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
-import { FGBMFILogo } from '../components/Logos';
 import { AppContext } from '../context/AppContext';
 import ConnectionStatus from './ConnectionStatus';
 
@@ -54,7 +53,7 @@ const getRoleLabel = () => {
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">
       <aside className="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 no-print flex flex-col shadow-2xl">
         <div className="p-8 border-b border-gray-800 flex flex-col items-center text-center">
-          <FGBMFILogo className="h-32 w-auto mb-6 drop-shadow-[0_10px_15px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-300" />
+          <img src="/logo-fgbmfi.png" alt="FGBMFI Logo" className="h-32 w-auto mb-6 drop-shadow-[0_10px_15px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-300" />
           <h1 className="text-xl font-black tracking-tight text-white leading-tight uppercase">FGBMFI Nigeria</h1>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Event Management System</p>
           {user.district && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}

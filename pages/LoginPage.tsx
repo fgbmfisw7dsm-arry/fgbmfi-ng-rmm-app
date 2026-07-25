@@ -2,7 +2,6 @@ import React, { useState, useContext, useEffect } from 'react';
 import { auth } from '../services/supabaseService';
 import { supabase, isStripeKeyDetected } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
-import { FGBMFILogo } from '../components/Logos';
 
 const LoginPage = () => {
   const { login } = useContext(AppContext);
@@ -64,10 +63,10 @@ const LoginPage = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-gray-100 animate-in fade-in zoom-in duration-500">
-        <div className="flex justify-center mb-8"><FGBMFILogo className="h-32 w-auto" /></div>
+        <div className="flex justify-center mb-8"><img src="/logo-fgbmfi.png" alt="FGBMFI Logo" className="h-32 w-auto" /></div>
         <div className="text-center mb-10">
           <h1 className="text-xl font-black text-gray-900 leading-tight text-center">FGBMFI Nigeria</h1>
-          <p className="text-sm font-bold text-blue-600 uppercase tracking-tight mt-1">Regional Events Management System</p>
+          <p className="text-sm font-bold text-blue-600 uppercase tracking-tight mt-1">Event Management System (EMS)</p>
         </div>
         
         {error && (
