@@ -45,6 +45,28 @@ export const downloadJSON = (data: any, filename: string) => {
     document.body.removeChild(link);
 };
 
+export const exportToCSV = (rows: Record<string, any>[], filename: string, columns?: string[]) => {
+    const cols = columns || Object.keys(rows[0] || {});
+    const header = cols.join(',');
+    const body = rows.map(row => 
+        cols.map(c => {
+            const val = String(row[c] ?? '');
+            return val.includes(',') || val.includes('"') || val.includes('\n')
+                ? `"${val.replace(/"/g, '""')}"`
+                : val;
+        }).join(',')
+    );
+    const csv = [header, ...body].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
 /**
  * Enhanced PDF Export: Uses a wider viewport (1600px) and proper scaling 
  * to ensure wide Matrix tables are not truncated during export.

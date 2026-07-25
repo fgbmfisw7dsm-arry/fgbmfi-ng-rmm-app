@@ -48,7 +48,7 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 | **Sprint 1** | Database & Search | pg_trgm indexes, pagination infra, scoped realtime, aggregate RPCs | 8 hrs | ✅ Done |
 | **Sprint 2** | QR & Import | UUID-based QR migration, chunked bulk import, deduplication at insert | 24 hrs | ✅ Done | | ✅ Done |
 | **Sprint 3** | Check-in Performance | TanStack Query integration, connection health UI, offline queue | 28 hrs | ✅ Done |
-| **Sprint 4** | Dashboard & Reports | Summary PDF only, CSV/JSON export, RPC-based dashboard | 20 hrs | ⬜ |
+| **Sprint 4** | Dashboard & Reports | Summary PDF only, CSV/JSON export, RPC-based dashboard | 20 hrs | ✅ Done |
 | **Sprint 5** | Hardening & Deployment | 50-concurrent-user load test, error recovery, operator training | 24 hrs | ⬜ |
 | **Total** | | | **~104 hrs** | |
 
@@ -191,9 +191,9 @@ Sprint 2 (QR + Import) ✅ Done
         ↓
 Sprint 3 (TanStack Query + Realtime) ✅ Done
         ↓
-Sprint 4 (Dashboard + Reports) ← You are here
+Sprint 4 (Dashboard + Reports) ✅ Done
         ↓
-Sprint 5 (Load Test + Hardening)
+Sprint 5 (Load Test + Hardening) ← You are here
         ↓
            25K Delegate Event
 ```

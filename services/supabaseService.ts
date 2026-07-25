@@ -175,16 +175,32 @@ export const db = {
     },
 
     getAllDelegates: async (): Promise<Delegate[]> => {
-        let all: Delegate[] = [];
-        let from = 0;
+        const results: Delegate[] = [];
+        let page = 1;
+        const pageSize = 500;
         while (true) {
-            const { data, error } = await supabase.from('delegates').select('*').range(from, from + 999).order('created_at', { ascending: false });
-            if (error || !data || data.length === 0) break;
-            all = [...all, ...data];
-            if (data.length < 1000) break;
-            from += 1000;
+            const { data } = await supabase.rpc('get_paginated_delegates', {
+                p_page: page, p_page_size: pageSize,
+                p_search: null, p_district: null,
+            });
+            const parsed = data as any;
+            if (!parsed?.data || parsed.data.length === 0) break;
+            results.push(...parsed.data);
+            if (parsed.data.length < pageSize) break;
+            page++;
         }
-        return all;
+        return results;
+    },
+
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+        const { data, error } = await supabase.rpc('get_paginated_delegates', {
+            p_page: page,
+            p_page_size: pageSize,
+            p_search: search || null,
+            p_district: district || null,
+        });
+        if (error) throw error;
+        return data as any;
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
@@ -291,66 +307,18 @@ export const db = {
     },
 
     getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
-        const filter = district ? normalize(district).toUpperCase() : null;
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true });
-        if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
-        const { count: totalDelegatesCount } = await delegatesQuery;
-
-        const rankCounts: Record<string, number> = {};
-        const districtCounts: Record<string, number> = {};
-        const seenIdentities = new Set<string>();
-        const recentActivity: CheckIn[] = [];
-        let from = 0;
-
-        while (true) {
-            const { data, error } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).range(from, from + 999);
-            if (error || !data || data.length === 0) break;
-            data.forEach(c => {
-                if (!c.delegates) return;
-                const d = c.delegates;
-                if (filter && normalize(d.district).toUpperCase() !== filter) return;
-                const identityKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.district)}|${normalize(d.rank)}`.toUpperCase();
-                if (!seenIdentities.has(identityKey)) {
-                    seenIdentities.add(identityKey);
-                    rankCounts[d.rank || 'OTHER'] = (rankCounts[d.rank || 'OTHER'] || 0) + 1;
-                    districtCounts[d.district || 'UNKNOWN'] = (districtCounts[d.district || 'UNKNOWN'] || 0) + 1;
-                    if (recentActivity.length < 10) {
-                        recentActivity.push({
-                            checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
-                            delegate_name: `${d.first_name} ${d.last_name}`, district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
-                        });
-                    }
-                }
-            });
-            if (data.length < 1000) break;
-            from += 1000;
-        }
-
-        let financialsSum = 0;
-        const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
-        financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
-
-        return { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
+        const { data, error } = await supabase.rpc('get_event_dashboard_stats', {
+            p_event_id: eventId,
+            p_district: district || null,
+        });
+        if (error) throw error;
+        return data as DashboardStats;
     },
 
     getAllDataForExport: async (eventId: string): Promise<any> => {
-        const fetchAll = async (table: string, eventIdFilter?: string) => {
-            let results: any[] = [];
-            let from = 0;
-            while (true) {
-                let q = supabase.from(table).select('*').range(from, from + 999);
-                if (eventIdFilter) q = q.eq('event_id', eventIdFilter);
-                if (table === 'checkins') q = q.order('checked_in_at', { ascending: true });
-                const { data, error } = await q;
-                if (error || !data || data.length === 0) break;
-                results = [...results, ...data];
-                if (data.length < 1000) break;
-                from += 1000;
-            }
-            return results;
-        };
-        const [d, c, f, p] = await Promise.all([ fetchAll('delegates'), fetchAll('checkins', eventId), fetchAll('financial_entries', eventId), fetchAll('pledges', eventId) ]);
-        return { delegates: d, checkins: c, financials: f, pledges: p };
+        const { data, error } = await supabase.rpc('get_event_export_data', { p_event_id: eventId });
+        if (error) throw error;
+        return data as any;
     },
 
     searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {

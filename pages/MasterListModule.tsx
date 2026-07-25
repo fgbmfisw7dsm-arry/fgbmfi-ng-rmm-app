@@ -1,9 +1,11 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings } from '../types';
-import { exportToPDF } from '../services/utils';
+import { exportToPDF, exportToCSV } from '../services/utils';
+
+const PAGE_SIZE = 50;
 
 const MasterListModule = () => {
     const [delegates, setDelegates] = useState<Delegate[]>([]);
@@ -15,65 +17,41 @@ const MasterListModule = () => {
     });
     const [editingId, setEditingId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(0);
+    const [totalRecords, setTotalRecords] = useState(0);
     const listRef = useRef<HTMLDivElement>(null);
 
-    const loadData = async () => {
+    const loadData = useCallback(async (p?: number) => {
+        const currentPage = p ?? page;
+        setLoading(true);
         try {
-            const [delData, settData] = await Promise.all([db.getAllDelegates(), db.getSettings()]);
-            setDelegates(delData);
+            const [paginated, settData] = await Promise.all([
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined),
+                db.getSettings()
+            ]);
+            setDelegates(paginated.data);
+            setTotalPages(paginated.totalPages);
+            setTotalRecords(paginated.total);
             setSettings(settData);
+            if (p !== undefined) setPage(p);
         } catch (err) {
             console.error("Master List Load Error:", err);
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, searchTerm, selectedDistrict]);
 
-    useEffect(() => { 
-        loadData(); 
-
-        const delegateSub = supabase
-          .channel('master_list_sync')
-          .on('postgres_changes', { event: '*', table: 'delegates' }, () => {
-              loadData(); 
-          })
+    useEffect(() => {
+        loadData(1);
+        const delegateSub = supabase.channel('master_list_sync')
+          .on('postgres_changes', { event: '*', table: 'delegates' }, () => loadData())
           .subscribe();
-
-        const settingsSub = supabase
-          .channel('settings_sync_master')
-          .on('postgres_changes', { event: '*', table: 'system_settings' }, () => {
-              loadData();
-          })
+        const settingsSub = supabase.channel('settings_sync_master')
+          .on('postgres_changes', { event: '*', table: 'system_settings' }, () => loadData())
           .subscribe();
-
-        return () => { 
-            delegateSub.unsubscribe(); 
-            settingsSub.unsubscribe();
-        };
-    }, []);
-
-    const filtered = useMemo(() => {
-        return delegates
-            .filter(d => {
-                const fullName = `${d.first_name} ${d.last_name}`.toLowerCase();
-                const matchesSearch = (
-                    fullName.includes(searchTerm.toLowerCase()) || 
-                    (d.phone || '').includes(searchTerm) || 
-                    (d.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    (d.chapter || '').toLowerCase().includes(searchTerm.toLowerCase())
-                );
-                
-                if (selectedDistrict === '') return matchesSearch;
-                
-                const normalizedTarget = selectedDistrict.trim().toUpperCase();
-                const normalizedDelegate = (d.district || '').trim().toUpperCase();
-                
-                return matchesSearch && (normalizedDelegate === normalizedTarget);
-            })
-            .sort((a, b) => 
-                `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
-            );
-    }, [delegates, searchTerm, selectedDistrict]);
+        return () => { delegateSub.unsubscribe(); settingsSub.unsubscribe(); };
+    }, [loadData]);
 
     const officialDistricts = useMemo(() => {
         return (settings?.districts || [])
@@ -83,7 +61,7 @@ const MasterListModule = () => {
 
     const displayGroups = useMemo(() => {
         const groups = [...officialDistricts];
-        const hasUncategorizedData = filtered.some(d => {
+        const hasUncategorizedData = delegates.some(d => {
             const dNorm = (d.district || '').trim().toUpperCase();
             return dNorm === '' || !groups.some(g => g.toUpperCase() === dNorm);
         });
@@ -91,7 +69,7 @@ const MasterListModule = () => {
             groups.push("Legacy / Uncategorized");
         }
         return groups;
-    }, [filtered, officialDistricts]);
+    }, [delegates, officialDistricts]);
 
     const titles = settings?.titles || ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
 
@@ -135,6 +113,7 @@ const MasterListModule = () => {
     };
 
     const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape'); };
+    const handleCSVExport = () => { exportToCSV(delegates, 'Delegate_Master_List.csv'); };
 
     return (
         <div className="space-y-6">
@@ -208,7 +187,8 @@ const MasterListModule = () => {
                     </select>
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest">Export PDF</button>
-                    <button onClick={loadData} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
+                    <button onClick={handleCSVExport} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase">CSV</button>
+                    <button onClick={() => loadData()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
                 </div>
             </div>
 
@@ -226,7 +206,7 @@ const MasterListModule = () => {
                         <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No records found matching your filter.</div>
                     </div>
                 ) : displayGroups.map(groupName => {
-                    const distDelegates = filtered.filter(d => {
+                    const distDelegates = delegates.filter(d => {
                         const dNorm = (d.district || '').trim().toUpperCase();
                         if (groupName === "Legacy / Uncategorized") {
                              return dNorm === '' || !officialDistricts.some(od => od.trim().toUpperCase() === dNorm);
@@ -269,6 +249,18 @@ const MasterListModule = () => {
                         </div>
                     );
                 })}
+                {totalPages > 1 && (
+                    <div className="no-print mt-6 flex items-center justify-center gap-3 pt-4 border-t border-gray-200">
+                        <button onClick={() => loadData(1)} disabled={page <= 1} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">First</button>
+                        <button onClick={() => loadData(page - 1)} disabled={page <= 1} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Prev</button>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-3">
+                            Page {page} of {totalPages}
+                        </span>
+                        <button onClick={() => loadData(page + 1)} disabled={page >= totalPages} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Next</button>
+                        <button onClick={() => loadData(totalPages)} disabled={page >= totalPages} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Last</button>
+                        <span className="text-[9px] font-bold text-gray-400">({totalRecords} total)</span>
+                    </div>
+                )}
             </div>
         </div>
     );
