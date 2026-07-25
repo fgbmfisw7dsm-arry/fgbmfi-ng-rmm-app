@@ -24,7 +24,7 @@ const EventsModule = () => {
 
     // Robust Case-insensitive Admin Check
     const userRole = (user?.role || '').toLowerCase();
-    const isAdmin = userRole === UserRole.ADMIN || userRole === 'admin' || userRole.includes('admin');
+    const isAdmin = userRole === UserRole.NATIONAL_ADMIN || userRole === UserRole.REGIONAL_ADMIN || userRole === UserRole.ADMIN || userRole === 'admin' || userRole.includes('admin');
 
     // Force a data sync on mount to ensure catalogue is complete
     useEffect(() => {

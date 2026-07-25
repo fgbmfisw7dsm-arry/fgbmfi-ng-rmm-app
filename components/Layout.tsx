@@ -28,20 +28,24 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
     ? "bg-blue-600 text-white shadow-md" 
     : "text-gray-300 hover:bg-gray-800 hover:text-white";
 
-  const getRoleLabel = () => {
-      const role = (user.role || '').toLowerCase();
-      switch(role) {
-          case UserRole.ADMIN: return 'System Admin';
-          case UserRole.FINANCE: return 'Financial Admin';
-          case UserRole.REGISTRAR: 
-            return user.district ? 'District Registrar' : 'Regional Registrar';
-          default: return 'User';
-      }
-  };
+const getRoleLabel = () => {
+       const role = (user.role || '').toLowerCase();
+       switch(role) {
+           case UserRole.NATIONAL_ADMIN: return 'National Admin';
+           case UserRole.REGIONAL_ADMIN: return 'Regional Admin';
+           case UserRole.DISTRICT_ADMIN: return 'District Admin';
+           case UserRole.ADMIN: return 'System Admin';
+           case UserRole.FINANCE: return 'Financial Admin';
+           case UserRole.REGISTRAR: 
+             return user.district ? 'District Registrar' : 'Regional Registrar';
+           default: return 'User';
+       }
+   };
 
-  const role = (user.role || '').toLowerCase();
-  const showOperations = role === UserRole.ADMIN || role === UserRole.REGISTRAR || role === UserRole.FINANCE;
-  const showAdminTools = role === UserRole.ADMIN;
+   const role = (user.role || '').toLowerCase();
+   const isAdminRole = role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN;
+   const showOperations = isAdminRole || role === UserRole.REGISTRAR || role === UserRole.FINANCE;
+   const showAdminTools = role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.ADMIN;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">

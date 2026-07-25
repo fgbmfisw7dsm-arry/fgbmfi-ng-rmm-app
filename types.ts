@@ -27,6 +27,9 @@ export enum FinancialType {
 }
 
 export enum UserRole {
+  NATIONAL_ADMIN = 'national_admin',
+  REGIONAL_ADMIN = 'regional_admin',
+  DISTRICT_ADMIN = 'district_admin',
   ADMIN = 'admin',
   REGISTRAR = 'registrar',
   FINANCE = 'finance'

@@ -26,7 +26,7 @@ const CheckInPage = () => {
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const isLocked = activeEvent?.is_active === false;
-  const isAdmin = user?.role === UserRole.ADMIN;
+  const isAdmin = user?.role === UserRole.NATIONAL_ADMIN || user?.role === UserRole.REGIONAL_ADMIN || user?.role === UserRole.DISTRICT_ADMIN || user?.role === UserRole.ADMIN;
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeEventId],
