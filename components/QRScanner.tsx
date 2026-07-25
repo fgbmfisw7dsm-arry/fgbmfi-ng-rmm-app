@@ -50,13 +50,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     if (!selectedCamera || scanned) return;
     const startScanner = async () => {
       try {
-        const { Html5Qrcode } = await import('html5-qrcode');
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
         if (scannerRef.current) await scannerRef.current.stop();
         scannerRef.current = new Html5Qrcode('qr-scanner-view');
         setScanning(true);
         await scannerRef.current.start(
           selectedCamera,
-          { fps: 15, qrbox: { width: 150, height: 150 }, aspectRatio: 0.75 },
+          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0, formatsToScan: [ Html5QrcodeSupportedFormats.QR_CODE ] },
           (text: string) => {
             if (scanned) return;
             setScanned(true);
