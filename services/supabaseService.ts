@@ -29,6 +29,28 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
 };
 
 // Lifecycle Guard: Checks if an event is active before allowing writes
+
+const withRetry = async <T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> => {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastError = e;
+      if (e.message === 'SESSION_EXPIRED' || e.message?.startsWith('EVENT_LOCKED')) throw e;
+      if (attempt < maxRetries && (e.message?.includes('Connection failed') || e.message?.includes('network error') || e.message?.includes('Failed to fetch'))) {
+        await new Promise(resolve => setTimeout(resolve, baseDelay * attempt));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError;
+};
 const ensureEventActive = async (eventId: string) => {
     const { data, error } = await supabase.from('events').select('is_active').eq('event_id', eventId).single();
     if (error) {
@@ -214,6 +236,7 @@ export const db = {
 
     // Fix: Corrected variable name mismatch from event_id to eventId
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+        return withRetry(async () => {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: existing } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle();
@@ -226,6 +249,7 @@ export const db = {
         if (error) throw error;
         const { data: del } = await supabase.from('delegates').select('qr_hash').eq('delegate_id', delegateId).maybeSingle();
         return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { qr_hash: del?.qr_hash || '' } as any };
+        });
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
