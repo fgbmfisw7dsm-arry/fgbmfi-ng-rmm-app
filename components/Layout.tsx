@@ -108,13 +108,6 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
              </Link>
           </MenuSection>
         </nav>
-
-        <div className="p-4 border-t border-gray-800">
-           <button onClick={onLogout} className="w-full flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 transition-colors rounded-lg hover:bg-gray-800">
-             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-             <span className="text-sm font-medium">Sign Out</span>
-           </button>
-        </div>
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -146,9 +139,12 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{user.email}</p>
                   <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">{getRoleLabel()}</p>
               </div>
-              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-black border-2 border-white shadow-sm">
-                 {(user.email || 'U').charAt(0).toUpperCase()}
-              </div>
+                 <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-black border-2 border-white shadow-sm">
+                   {(user.email || 'U').charAt(0).toUpperCase()}
+                </div>
+                <button onClick={onLogout} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="Sign Out">
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                </button>
            </div>
         </header>
 
