@@ -311,6 +311,12 @@ const CheckInPage = () => {
               <div>
                 <h2 className="text-lg font-black text-amber-700 uppercase tracking-tighter">Register Delegate</h2>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Delegate not in database</p>
+                <p className="text-[8px] font-mono text-gray-500 mt-1 break-all">Scanned: {pendingReg.scannedCode}</p>
+                {pendingReg.parsedData ? (
+                  <p className="text-[8px] font-bold text-green-600 mt-0.5">Data extracted from QR</p>
+                ) : (
+                  <p className="text-[8px] font-bold text-red-400 mt-0.5">Could not parse QR — fill manually</p>
+                )}
               </div>
               <button onClick={() => { setPendingReg(null); setFeedback(null); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
