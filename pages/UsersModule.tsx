@@ -190,7 +190,7 @@ const UsersModule = () => {
                         >
                             <option value={UserRole.REGISTRAR}>District Registrar</option>
                             <option value={UserRole.FINANCE}>Finance Admin</option>
-                            <option value={UserRole.ADMIN}>Regional Admin</option>
+                            <option value={UserRole.ADMIN}>System Admin</option>
                         </select>
                     </div>
 

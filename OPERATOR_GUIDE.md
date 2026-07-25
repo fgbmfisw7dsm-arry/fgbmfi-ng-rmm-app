@@ -1,7 +1,7 @@
 # FGBMFI EMS — Operator Quick Reference Guide
 
 **For:** Check-in Officers, Registrars, and Financial Admins  
-**Event System:** FGBMFI Nigeria Regional Events Management System  
+**Event System:** FGBMFI Nigeria Event Management System (EMS)  
 **Version:** 2.0-ready
 
 ---

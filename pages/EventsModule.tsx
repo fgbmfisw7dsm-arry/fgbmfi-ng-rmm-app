@@ -92,7 +92,7 @@ const EventsModule = () => {
         }
 
         if (!isAdmin) {
-            alert("PERMISSION DENIED: Regional Admin role required.");
+            alert("PERMISSION DENIED: System Admin role required.");
             return;
         }
 

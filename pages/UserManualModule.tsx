@@ -303,7 +303,7 @@ const UserManualModule = () => {
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: Mistake in Registration!</p>
-                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Only Admins can edit Master List records. Call the Regional Admin to fix typos in the Master List module.</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Only Admins can edit Master List records. Call the System Admin to fix typos in the Master List module.</p>
                                 </div>
                             </div>
                         </section>
@@ -312,7 +312,7 @@ const UserManualModule = () => {
 
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
-                    <span>© 2025 FGBMFI Nigeria Regional EMS</span>
+                    <span>© 2025 FGBMFI Nigeria EMS</span>
                     <span>Document: EMS-USER-V2.5</span>
                     <span>System Training & Operations Reference</span>
                 </div>

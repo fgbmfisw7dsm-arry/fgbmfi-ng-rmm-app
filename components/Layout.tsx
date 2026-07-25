@@ -31,7 +31,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
   const getRoleLabel = () => {
       const role = (user.role || '').toLowerCase();
       switch(role) {
-          case UserRole.ADMIN: return 'Regional Admin';
+          case UserRole.ADMIN: return 'System Admin';
           case UserRole.FINANCE: return 'Financial Admin';
           case UserRole.REGISTRAR: 
             return user.district ? 'District Registrar' : 'Regional Registrar';
@@ -49,7 +49,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId
         <div className="p-8 border-b border-gray-800 flex flex-col items-center text-center">
           <FGBMFILogo className="h-32 w-auto mb-6 drop-shadow-[0_10px_15px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-300" />
           <h1 className="text-xl font-black tracking-tight text-white leading-tight uppercase">FGBMFI Nigeria</h1>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Regional Event Admin</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Event Management System</p>
           {user.district && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}
         </div>
 
