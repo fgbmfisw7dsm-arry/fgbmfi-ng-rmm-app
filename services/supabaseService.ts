@@ -280,46 +280,54 @@ export const db = {
                 }
             } catch {}
             
-            const lines = raw.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
-            if (lines.length < 1) return null;
-            
-            const lastIdx = <T>(arr: T[], fn: (item: T, i: number) => boolean): number => {
-                for (let i = arr.length - 1; i >= 0; i--) { if (fn(arr[i], i)) return i; }
-                return -1;
+            const extractFromFields = (fields: string[]): Record<string, string> | null => {
+                const result: Record<string, string> = {};
+                
+                const idField = fields.find(f => f.length >= 20 && /[A-Z0-9]{20,}/i.test(f));
+                if (idField) {
+                    const m = idField.match(/[A-Z0-9]{20,}/i);
+                    if (m) result['delegate_id'] = m[0];
+                }
+                
+                const nameField = fields.find(f => {
+                    const clean = f.replace(/^null\s*/i, '').trim();
+                    return clean.includes(' ') && !/^[A-Z0-9_]+$/.test(clean);
+                });
+                if (nameField) {
+                    let clean = nameField.replace(/^null\s*null\s*/i, '').replace(/^null\s*/i, '').trim();
+                    const parts = clean.split(/\s+/);
+                    if (parts[0].endsWith('.')) result['title'] = parts.shift()!;
+                    if (parts.length >= 2) {
+                        result['first_name'] = parts.slice(0, -1).join(' ');
+                        result['last_name'] = parts[parts.length - 1];
+                    } else if (parts.length === 1) {
+                        result['first_name'] = parts[0];
+                    }
+                }
+                
+                const nonIdNameTypeFields = fields.filter(f => f !== idField && f !== nameField && !/^[A-Z][A-Z_]{3,}$/.test(f));
+                if (nonIdNameTypeFields.length >= 1) result['district'] = nonIdNameTypeFields[0];
+                if (nonIdNameTypeFields.length >= 2) result['chapter'] = nonIdNameTypeFields[1];
+                
+                const typeField = fields.find(f => /^[A-Z][A-Z_]{3,}$/.test(f));
+                if (typeField) result['delegate_type'] = typeField;
+                
+                if (result['delegate_id'] && result['first_name'] && result['last_name']) return result;
+                return null;
             };
             
-            const result: Record<string, string> = {};
-            
-            const idIdx = lastIdx(lines, (l: string) => l.length >= 20);
-            const idLine = idIdx >= 0 ? lines[idIdx] : '';
-            const idMatch = idLine.match(/[A-Z0-9]{20,}/i);
-            if (idMatch) result['delegate_id'] = idMatch[0];
-            
-            const typeIdx = lines.findIndex((l: string) => /^[A-Z][A-Z_]{3,}$/.test(l));
-            if (typeIdx >= 0 && typeIdx !== idIdx) result['delegate_type'] = lines[typeIdx];
-            
-            const remaining = lines.filter((_: string, i: number) => i !== idIdx && i !== typeIdx);
-            
-            const nameIdx = remaining.findIndex((l: string) => /\.\s/.test(l) || l.split(/\s+/).length >= 2);
-            if (nameIdx >= 0) {
-                const parts = remaining[nameIdx].split(/\s+/);
-                if (parts[0].endsWith('.')) result['title'] = parts.shift()!;
-                if (parts.length >= 2) {
-                    result['first_name'] = parts.slice(0, -1).join(' ');
-                    result['last_name'] = parts[parts.length - 1];
-                }
-                remaining.splice(nameIdx, 1);
+            const csvFields = raw.split(',').map(f => f.trim()).filter(f => f.length > 0 && !/^null$/i.test(f));
+            if (csvFields.length >= 3) {
+                const parsed = extractFromFields(csvFields);
+                if (parsed) return parsed;
             }
             
-            if (remaining.length >= 1) result['district'] = remaining[0];
-            if (remaining.length >= 2) result['chapter'] = remaining[1];
+            const lines = raw.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length >= 1) {
+                const parsed = extractFromFields(lines);
+                if (parsed) return parsed;
+            }
             
-            if (result['delegate_id'] && result['first_name'] && result['last_name'] && result['district']) {
-                return result;
-            }
-            if (result['delegate_id'] && result['first_name'] && result['last_name']) {
-                return result;
-            }
             return null;
         };
         
