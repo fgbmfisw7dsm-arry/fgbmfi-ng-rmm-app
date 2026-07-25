@@ -472,7 +472,7 @@ export const db = {
         } catch {}
 
         const filter = district ? normalize(district).toUpperCase() : null;
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).or(`event_id.eq.${eventId},event_id.is.null`);
+        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
         if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
