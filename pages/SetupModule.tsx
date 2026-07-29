@@ -238,7 +238,7 @@ const SetupModule = () => {
     };
 
     const handleImportChapters = async () => {
-        if (!window.confirm(`This will import approximately 2,892 chapters from the embedded master data. Existing records with matching chapter codes will be updated. Continue?`)) return;
+        if (!window.confirm(`This will import approximately 1,447 chapters from the embedded master data. Existing records with matching chapter codes will be updated. Continue?`)) return;
         setImportingChapters(true);
         try {
             const response = await fetch('/chapters_data.json');
@@ -326,7 +326,7 @@ const SetupModule = () => {
                             <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">{chapters.length} Chapters Loaded</p>
                         </div>
                         <button onClick={handleImportChapters} disabled={importingChapters} className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-black rounded-xl uppercase text-[9px] tracking-widest shadow transition-all">
-                            {importingChapters ? 'Importing...' : 'Import 2,892 Chapters'}
+                            {importingChapters ? 'Importing...' : 'Import 1,447 Chapters'}
                         </button>
                     </div>
                     <div className="p-4 bg-white border-b flex gap-2 flex-wrap">
