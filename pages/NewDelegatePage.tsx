@@ -6,7 +6,6 @@ import { generateCodeFromId } from '../services/utils';
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
-const DEFAULT_DISTRICTS = ['Lagos Central', 'Abuja Central', 'Rivers', 'Kano', 'Kaduna', 'Enugu', 'Edo', 'Anambra'];
 
 const NewDelegatePage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -27,7 +26,7 @@ const NewDelegatePage = () => {
   });
   
   const [loading, setLoading] = useState(false);
-  const [availableDistricts, setAvailableDistricts] = useState<string[]>(DEFAULT_DISTRICTS);
+  const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
   const [availableTitles, setAvailableTitles] = useState<string[]>(DEFAULT_TITLES);
   const [availableRanks, setAvailableRanks] = useState<string[]>([]);
   const [availableOffices, setAvailableOffices] = useState<string[]>([]);

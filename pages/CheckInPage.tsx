@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole } from '../types';
+import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
@@ -23,6 +23,8 @@ const CheckInPage = () => {
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
   const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
+  const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [registering, setRegistering] = useState(false);
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
@@ -36,6 +38,20 @@ const CheckInPage = () => {
   const showRank = eventConfig.show_rank !== false;
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
+
+  useEffect(() => {
+    db.getSettings().then(data => {
+      if (data?.districts?.length) setAvailableDistricts(data.districts);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (regForm.district) {
+      db.getChapters(regForm.district).then(setChapters).catch(() => setChapters([]));
+    } else {
+      setChapters([]);
+    }
+  }, [regForm.district]);
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeEventId],
@@ -380,11 +396,21 @@ const CheckInPage = () => {
               </div>
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">District *</label>
-                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.district} onChange={e => setRegForm(f => ({...f, district: e.target.value}))} placeholder="District" />
+                <select className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.district} onChange={e => setRegForm(f => ({...f, district: e.target.value}))}>
+                    <option value="">-- SELECT DISTRICT --</option>
+                    {availableDistricts.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Chapter</label>
-                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.chapter} onChange={e => setRegForm(f => ({...f, chapter: e.target.value}))} placeholder="Chapter" />
+                {chapters.length > 0 ? (
+                    <select className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.chapter} onChange={e => setRegForm(f => ({...f, chapter: e.target.value}))}>
+                        <option value="">-- SELECT CHAPTER --</option>
+                        {chapters.map(c => <option key={c.chapter_id} value={c.chapter_name}>{c.chapter_name}</option>)}
+                    </select>
+                ) : (
+                    <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.chapter} onChange={e => setRegForm(f => ({...f, chapter: e.target.value}))} placeholder="Chapter" />
+                )}
               </div>
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Phone</label>
