@@ -26,11 +26,6 @@ const CheckInPage = () => {
   const [registering, setRegistering] = useState(false);
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const addDebug = (msg: string) => {
-    const ts = new Date().toISOString().slice(11, 23);
-    setDebugLogs(prev => [...prev.slice(-10), `[${ts}] ${msg}`]);
-  };
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -134,12 +129,9 @@ const CheckInPage = () => {
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked) return;
     if(!user || !activeEventId) { processingRef.current = false; return; }
-    addDebug(`SUBMIT: started, len=${codeVal.length}, session=${selectedSessionId || 'arrival'}`);
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
-        const parsedKeys = res.parsedData ? Object.keys(res.parsedData).join(',') : 'none';
-        addDebug(`RESULT: ok=${res.success}, reg=${res.needsRegistration}, parsed=${!!res.parsedData}, keys=[${parsedKeys}]`);
         if(res && res.success) { 
           setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
           setCode(''); 
@@ -160,12 +152,10 @@ const CheckInPage = () => {
             rank: res.parsedData?.['rank'] || 'CP',
             office: res.parsedData?.['office'] || 'OTHER'
           });
-          addDebug(`FORM: fn="${res.parsedData?.['first_name']||''}", ln="${res.parsedData?.['last_name']||''}", dist="${res.parsedData?.['district']||''}", phone="${res.parsedData?.['phone']||''}"`);
         } else { 
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
-          addDebug(`ERROR: ${res.message || 'Invalid code'}`);
         }
         setTimeout(() => setFeedback(null), 3000);
     } catch(e: any) { 
@@ -182,11 +172,9 @@ const CheckInPage = () => {
     const cleaned = val.replace(/[^a-zA-Z0-9_-]/g, '');
     if (scannedRef.current) {
       scannedRef.current = false;
-      addDebug(`INPUT: suppressed (post-scan), len=${cleaned.length}`);
       setCode(cleaned);
       return;
     }
-    addDebug(`INPUT: manual, len=${cleaned.length}${cleaned.length===4||cleaned.length===24||cleaned.length===36?' -> triggering submit':''}`);
     setCode(cleaned);
     if (feedback?.type === 'error') setFeedback(null);
     setPendingReg(null);
@@ -247,13 +235,9 @@ const CheckInPage = () => {
 
   const handleScan = (code: string) => {
     setShowScanner(false);
-    if (!code?.trim() || processingRef.current) {
-      if (processingRef.current) addDebug('SCAN: blocked (processing)');
-      return;
-    }
+    if (!code?.trim() || processingRef.current) return;
     processingRef.current = true;
     scannedRef.current = true;
-    addDebug(`SCAN: len=${code.length}, preview=${code.slice(0,60)}`);
     setFeedback(null);
     setPendingReg(null);
     setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
@@ -340,7 +324,6 @@ const CheckInPage = () => {
                   setPendingReg(null);
                   setFeedback(null);
                   setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
-                  addDebug('CLEAR: reset all');
                 }}
                 disabled={isLocked}
                 className="px-4 py-4 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
@@ -562,27 +545,6 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
 
        {showScanner && (
           <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />
-        )}
-
-        {debugLogs.length > 0 && (
-          <div className="mt-6 bg-gray-900 rounded-2xl p-4 border border-gray-700 shadow-lg select-none">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Debug Log</h3>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(debugLogs.join('\n')).then(() => {
-                    addDebug('COPIED: logs to clipboard');
-                  }).catch(() => {});
-                }}
-                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold rounded-lg text-[9px] uppercase tracking-wider transition-all active:scale-95"
-              >
-                Copy All
-              </button>
-            </div>
-            <div className="font-mono text-[8px] text-green-400 leading-relaxed select-all whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-              {debugLogs.join('\n')}
-            </div>
-          </div>
         )}
     </div>
   );

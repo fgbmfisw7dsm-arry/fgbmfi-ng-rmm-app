@@ -147,14 +147,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+    <div className="fixed inset-0 z-50 flex flex-col md:bg-black/80 md:items-center md:justify-center md:p-4">
+      <div className="flex flex-col flex-1 md:flex-initial md:max-w-md md:w-full md:rounded-2xl md:overflow-hidden md:shadow-2xl md:border md:border-gray-700 bg-black">
       {useHtml5Fallback ? (
-        <div className="relative flex-1">
+        <div className="relative flex-1 md:h-72">
           <div id="qr-scanner-view" className="absolute inset-0" />
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
         </div>
       ) : (
-        <div className="relative flex-1">
+        <div className="relative flex-1 md:h-72">
           <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: 'cover' }} playsInline autoPlay muted />
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
           <div className="absolute top-4 left-4 right-4">
@@ -182,6 +183,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         <button onClick={onClose} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all">
           Cancel
         </button>
+      </div>
       </div>
     </div>
   );
