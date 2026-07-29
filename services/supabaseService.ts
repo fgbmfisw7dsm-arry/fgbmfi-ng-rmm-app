@@ -152,10 +152,42 @@ export const db = {
         return handleSupabaseError(await supabase.from('sessions').delete().eq('session_id', id));
     },
 
+    getChapters: async (district?: string) => {
+        let q = supabase.from('chapters').select('*').order('chapter_name');
+        if (district) q = q.eq('district', district);
+        const { data } = await q;
+        return data || [];
+    },
+
+    importChapters: async (chapters: { district: string; chapter_code?: string; chapter_name: string; state?: string; city?: string; meeting_day?: string }[]): Promise<{ inserted: number }> => {
+        const BATCH_SIZE = 500;
+        let inserted = 0;
+        for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
+            const batch = chapters.slice(i, i + BATCH_SIZE).map(c => ({
+                district: c.district,
+                chapter_code: c.chapter_code || null,
+                chapter_name: c.chapter_name,
+                state: c.state || null,
+                city: c.city || null,
+                meeting_day: c.meeting_day || null,
+            }));
+            const { error } = await supabase.from('chapters').upsert(batch, { onConflict: 'chapter_code', ignoreDuplicates: false });
+            if (error) {
+                for (const rec of batch) {
+                    const { error: singleErr } = await supabase.from('chapters').upsert(rec, { onConflict: 'chapter_code', ignoreDuplicates: false });
+                    if (!singleErr) inserted++;
+                }
+            } else {
+                inserted += batch.length;
+            }
+        }
+        return { inserted };
+    },
+
     getSettings: async (): Promise<SystemSettings> => {
         const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (error) throw error;
-        return data || { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: [], ranks: [], offices: [], regions: [] };
+        return data || { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: [], ranks: [], offices: [], regions: [], delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'] };
     },
 
     updateSettings: async (settings: SystemSettings, field?: keyof SystemSettings): Promise<SystemSettings> => {
@@ -456,6 +488,7 @@ export const db = {
                 email: p[6],
                 rank: p[7] || 'CP',
                 office: p[8] || 'OTHER',
+                delegate_type: p[9] || 'Member',
                 qr_hash: generateQrHash(),
                 event_id: eventId || null,
                 registration_source: 'import'

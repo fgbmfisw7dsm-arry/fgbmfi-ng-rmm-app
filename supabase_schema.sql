@@ -157,3 +157,35 @@ SELECT
     '{"DC", "RVP", "NVP", "NP", "NEC", "BOT", "CP", "FR", "ND", "CP-REP", "OTHER"}',
     '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}'
 WHERE NOT EXISTS (SELECT 1 FROM system_settings);
+
+-- 5. v1.2 MIGRATION — Delegate Types, Event Config, Chapters
+-- Run this section to upgrade an existing v1.1 database
+
+-- 5a. Add delegate_type to delegates
+ALTER TABLE delegates ADD COLUMN IF NOT EXISTS delegate_type TEXT DEFAULT 'Member';
+
+-- 5b. Add event_config to events (per-event field visibility overrides)
+ALTER TABLE events ADD COLUMN IF NOT EXISTS event_config JSONB DEFAULT '{}';
+
+-- 5c. Add delegate_types list to system_settings
+ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS delegate_types TEXT[] DEFAULT '{"Member","National Guest","Free Guest","Dependant-Adult","Dependant-Teen","Dependant-Children","International"}';
+
+-- 5d. Seed delegate_types into existing system_settings row
+UPDATE system_settings 
+SET delegate_types = COALESCE(delegate_types, '{"Member","National Guest","Free Guest","Dependant-Adult","Dependant-Teen","Dependant-Children","International"}')
+WHERE delegate_types IS NULL;
+
+-- 5e. Chapters table (district-linked chapter registry)
+CREATE TABLE IF NOT EXISTS chapters (
+    chapter_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    district TEXT NOT NULL,
+    chapter_code TEXT,
+    chapter_name TEXT NOT NULL,
+    state TEXT,
+    city TEXT,
+    meeting_day TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chapters_district ON chapters(district);

@@ -57,6 +57,7 @@ export interface Delegate {
   phone: string;
   rank: string;
   office: string;
+  delegate_type: string;
   room_number: string;
   qr_hash: string;
   external_id: string;
@@ -78,7 +79,8 @@ export interface Event {
   region: string;
   start_date: string;
   end_date: string;
-  is_active: boolean; // Lifecycle Status
+  is_active: boolean;
+  event_config?: Record<string, boolean>;
 }
 
 export interface Session {
@@ -87,6 +89,17 @@ export interface Session {
   title: string;
   start_time: string;
   end_time: string;
+}
+
+export interface Chapter {
+  chapter_id: string;
+  district: string;
+  chapter_code: string;
+  chapter_name: string;
+  state: string;
+  city: string;
+  meeting_day: string;
+  is_active: boolean;
 }
 
 export interface CheckIn {
@@ -147,10 +160,11 @@ export interface DashboardStats {
 }
 
 export interface SystemSettings {
-  id?: any; // Internal database primary key
+  id?: any;
   districts: string[];
   ranks: string[];
   offices: string[];
   regions: string[];
   titles: string[];
+  delegate_types: string[];
 }

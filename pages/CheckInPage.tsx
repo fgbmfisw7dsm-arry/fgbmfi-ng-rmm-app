@@ -22,7 +22,7 @@ const CheckInPage = () => {
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
-  const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+  const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
   const [registering, setRegistering] = useState(false);
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
@@ -32,6 +32,10 @@ const CheckInPage = () => {
   const isLocked = activeEvent?.is_active === false;
   const isAdmin = isAdminRole(user?.role || '');
   const isRegistrar = isRegistrarRole(user?.role || '');
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+  const showDelegateType = eventConfig.show_delegate_type !== false;
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeEventId],
@@ -135,7 +139,7 @@ const CheckInPage = () => {
         if(res && res.success) { 
           setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
           setPendingReg(null);
-          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
           setTimeout(() => { setFeedback(null); setCode(''); }, 5000);
         } else if (res.needsRegistration) {
           setFeedback(null);
@@ -155,7 +159,7 @@ const CheckInPage = () => {
         } else { 
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
           setPendingReg(null);
-          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
           setTimeout(() => setFeedback(null), 5000);
         }
     } catch(e: any) { 
@@ -240,7 +244,7 @@ const CheckInPage = () => {
     scannedRef.current = true;
     setFeedback(null);
     setPendingReg(null);
-    setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+    setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
     setCode(code);
     handleCodeSubmit(code);
   };
@@ -258,7 +262,7 @@ const CheckInPage = () => {
       const res = await db.checkInDelegate(activeEventId, newDelegate.delegate_id, user, selectedSessionId);
       setPendingReg(null);
       setCode('');
-      setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+      setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
       setFeedback({ type: 'success', msg: res.success ? 'Registered & Verified!' : 'Registered but check-in failed.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
@@ -324,7 +328,7 @@ const CheckInPage = () => {
                   setCode('');
                   setPendingReg(null);
                   setFeedback(null);
-                  setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+                  setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
                 }}
                 disabled={isLocked}
                 className="px-4 py-4 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
@@ -359,7 +363,7 @@ const CheckInPage = () => {
                   <p className="text-[8px] font-bold text-red-400 mt-0.5">Could not parse QR — fill manually</p>
                 )}
               </div>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' }); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' }); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -390,20 +394,30 @@ const CheckInPage = () => {
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Email</label>
                 <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.email} onChange={e => setRegForm(f => ({...f, email: e.target.value}))} placeholder="Email" />
               </div>
+              {showRank && (
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Rank</label>
                 <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.rank} onChange={e => setRegForm(f => ({...f, rank: e.target.value}))} placeholder="CP" />
               </div>
+              )}
+              {showOffice && (
               <div className="sm:col-span-2">
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Office</label>
                 <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.office} onChange={e => setRegForm(f => ({...f, office: e.target.value}))} placeholder="Office" />
               </div>
+              )}
+              {showDelegateType && (
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Delegate Type</label>
+                <input className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.delegate_type} onChange={e => setRegForm(f => ({...f, delegate_type: e.target.value}))} placeholder="Member" />
+              </div>
+              )}
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={handleQuickRegister} disabled={registering || isLocked} className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
                 {registering ? 'Registering...' : 'Register & Check In'}
               </button>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' }); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' }); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
                 Cancel
               </button>
             </div>

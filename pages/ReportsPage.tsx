@@ -107,8 +107,9 @@ const ReportsPage = () => {
         );
         const rankColumns = (settings.ranks || []).sort();
         const officeColumns = (settings.offices || []).sort();
+        const delegateTypeColumns = (settings.delegate_types || []).sort();
 
-        return { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges: calculatedPledges };
+        return { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges };
     }, [data, selectedSessionId, settings]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
@@ -116,7 +117,7 @@ const ReportsPage = () => {
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
     if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Data...</div>;
 
-    const { attendedDelegates, officialDistricts, rankColumns, officeColumns, financials, pledges } = reportData;
+    const { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges } = reportData;
 
     const renderAttendanceList = () => {
         const unrecognizedDists: string[] = [];
@@ -169,7 +170,7 @@ const ReportsPage = () => {
         );
     };
 
-    const renderMatrixTable = (title: string, columns: string[], type: 'rank' | 'office') => {
+    const renderMatrixTable = (title: string, columns: string[], type: 'rank' | 'office' | 'delegate_type') => {
         const allDists: string[] = [...officialDistricts];
         attendedDelegates.forEach(d => {
             const dn = norm(d.district);
@@ -198,7 +199,7 @@ const ReportsPage = () => {
                                     <tr key={rName} className="hover:bg-blue-50 border-b">
                                         <td className="border p-2 font-black uppercase bg-gray-50 sticky left-0 z-10">{rName}</td>
                                         {columns.map(col => {
-                                            const count = dels.filter(d => norm(type === 'rank' ? d.rank : d.office) === norm(col)).length;
+                                            const count = dels.filter(d => norm(type === 'rank' ? d.rank : type === 'office' ? d.office : d.delegate_type) === norm(col)).length;
                                             colTotals[col] = (colTotals[col] || 0) + count;
                                             return <td key={col} className="border p-2 text-center font-bold">{count || '-'}</td>;
                                         })}
@@ -268,6 +269,7 @@ const ReportsPage = () => {
                         <div className="space-y-12">
                             {renderMatrixTable("Attendance By Rank", rankColumns, 'rank')}
                             {renderMatrixTable("Attendance By Office", officeColumns, 'office')}
+                            {renderMatrixTable("Attendance By Delegate Type", delegateTypeColumns, 'delegate_type')}
                         </div>
                     )}
                     

@@ -13,7 +13,7 @@ const toDatetimeLocal = (utcStr?: string) => {
 
 const EventsModule = () => {
     const { refreshActiveEvent, refreshEvents, user, events } = useContext(AppContext);
-    const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true });
+    const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true, event_config: {} });
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
     const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -206,12 +206,35 @@ const EventsModule = () => {
                         </div>
                     </div>
 
+                    <div className="space-y-2 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Delegate Form Fields</label>
+                        {[
+                            { key: 'show_rank', label: 'Show Rank' },
+                            { key: 'show_office', label: 'Show Office' },
+                            { key: 'show_delegate_type', label: 'Show Delegate Type' },
+                        ].map(toggle => {
+                            const config = (form.event_config || {}) as Record<string, boolean>;
+                            const checked = config[toggle.key] !== false;
+                            return (
+                                <label key={toggle.key} className="flex items-center justify-between cursor-pointer py-1">
+                                    <span className="text-[10px] font-bold text-gray-600 uppercase">{toggle.label}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={e => setForm({...form, event_config: {...config, [toggle.key]: e.target.checked}})}
+                                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                </label>
+                            );
+                        })}
+                    </div>
+
                     <div className="flex gap-2 pt-2">
                         <button type="submit" disabled={loading || !isAdmin} className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg hover:bg-blue-700 disabled:opacity-50">
                             {editingEventId ? 'Update' : 'Create'}
                         </button>
                         {editingEventId && (
-                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true}); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
+                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true, event_config: {}}); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
                         )}
                     </div>
                 </form>

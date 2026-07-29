@@ -2,20 +2,25 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { Delegate, SystemSettings } from '../types';
+import { Delegate, SystemSettings, Chapter } from '../types';
 import { exportToPDF, exportToCSV } from '../services/utils';
 import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 50;
 
 const MasterListModule = () => {
-    const { activeEventId } = useContext(AppContext);
+    const { activeEventId, activeEvent } = useContext(AppContext);
+    const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+    const showRank = eventConfig.show_rank !== false;
+    const showOffice = eventConfig.show_office !== false;
+    const showDelegateType = eventConfig.show_delegate_type !== false;
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
+    const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
-        title: '', first_name: '', last_name: '', district: '', chapter: '', rank: '', office: '', phone: '', email: ''
+        title: '', first_name: '', last_name: '', district: '', chapter: '', rank: '', office: '', phone: '', email: '', delegate_type: 'Member'
     });
     const [editingId, setEditingId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -104,6 +109,14 @@ const MasterListModule = () => {
         }
     };
 
+    useEffect(() => {
+        if (editForm.district) {
+            db.getChapters(editForm.district).then(setChapters).catch(() => setChapters([]));
+        } else {
+            setChapters([]);
+        }
+    }, [editForm.district]);
+
     const startEditing = (d: Delegate) => {
         const clean = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
         setEditingId(d.delegate_id);
@@ -153,12 +166,23 @@ const MasterListModule = () => {
                                 )}
                             </select>
                         </div>
-                        <div className="space-y-1"><label className="text-[10px] font-black text-blue-800 uppercase">Chapter</label><input className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.chapter} onChange={e => setEditForm({...editForm, chapter: e.target.value})} /></div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-black text-blue-800 uppercase">Chapter</label>
+                            {chapters.length > 0 ? (
+                                <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.chapter} onChange={e => setEditForm({...editForm, chapter: e.target.value})}>
+                                    <option value="">Select Chapter</option>
+                                    {chapters.map(c => <option key={c.chapter_id} value={c.chapter_name}>{c.chapter_name}</option>)}
+                                </select>
+                            ) : (
+                                <input className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.chapter} onChange={e => setEditForm({...editForm, chapter: e.target.value})} />
+                            )}
+                        </div>
                         <div className="space-y-1"><label className="text-[10px] font-black text-blue-800 uppercase">Phone</label><input className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-blue-800 uppercase">Email</label>
                             <input type="email" className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} />
                         </div>
+                        {showRank && (
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-blue-800 uppercase">Rank</label>
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.rank} onChange={e => setEditForm({...editForm, rank: e.target.value})}>
@@ -169,6 +193,8 @@ const MasterListModule = () => {
                                 )}
                             </select>
                         </div>
+                        )}
+                        {showOffice && (
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-blue-800 uppercase">Office</label>
                             <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.office} onChange={e => setEditForm({...editForm, office: e.target.value})}>
@@ -179,6 +205,16 @@ const MasterListModule = () => {
                                 )}
                             </select>
                         </div>
+                        )}
+                        {showDelegateType && (
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-black text-blue-800 uppercase">Delegate Type</label>
+                            <select className="w-full p-3 border rounded-xl bg-white font-bold" value={editForm.delegate_type} onChange={e => setEditForm({...editForm, delegate_type: e.target.value})}>
+                                <option value="">Select Type</option>
+                                {(settings?.delegate_types || []).map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                            </select>
+                        </div>
+                        )}
                         <div className="flex items-end">
                             <button type="submit" disabled={loading} className="w-full py-4 bg-blue-900 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-xl h-[52px]">
                                 {loading ? 'SAVING...' : 'SAVE CHANGES'}
@@ -230,7 +266,7 @@ const MasterListModule = () => {
                             <div className="overflow-x-auto">
                                 <table className="w-full text-[10px] text-left min-w-[800px]">
                                     <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                        <tr><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th><th className="p-3">Rank</th><th className="p-3">Office</th><th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                        <tr><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
                                         {distDelegates.map(d => (
@@ -239,8 +275,9 @@ const MasterListModule = () => {
                                                 <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
                                                 <td className="p-3 font-medium">{d.chapter || '-'}</td>
                                                 <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
-                                                <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>
-                                                <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>
+                                                {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
+                                                {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
+                                                {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                                 <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                                 <td className="p-3 no-print text-center">
                                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>

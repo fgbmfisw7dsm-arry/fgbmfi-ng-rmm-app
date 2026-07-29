@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/supabaseService';
-import { SystemSettings } from '../types';
+import { SystemSettings, Chapter } from '../types';
 
 interface ConfigSectionProps {
     title: string;
@@ -156,6 +156,10 @@ const SetupModule = () => {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncingKey, setSyncingKey] = useState<string | null>(null);
+    const [chapters, setChapters] = useState<Chapter[]>([]);
+    const [chapterFilterDistrict, setChapterFilterDistrict] = useState('');
+    const [chapterSearch, setChapterSearch] = useState('');
+    const [importingChapters, setImportingChapters] = useState(false);
 
     const sortSettings = (data: any): SystemSettings => {
         return {
@@ -164,7 +168,8 @@ const SetupModule = () => {
             ranks: [...(data.ranks || [])].sort((a, b) => a.localeCompare(b)),
             offices: [...(data.offices || [])].sort((a, b) => a.localeCompare(b)),
             titles: [...(data.titles || [])].sort((a, b) => a.localeCompare(b)),
-            regions: [...(data.regions || [])].sort((a, b) => a.localeCompare(b))
+            regions: [...(data.regions || [])].sort((a, b) => a.localeCompare(b)),
+            delegate_types: [...(data.delegate_types || ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'])].sort((a, b) => a.localeCompare(b))
         };
     };
 
@@ -186,7 +191,19 @@ const SetupModule = () => {
 
     useEffect(() => { 
         loadSettings();
+        loadChapters();
     }, []);
+
+    const loadChapters = async (district?: string) => {
+        try {
+            const data = await db.getChapters(district || chapterFilterDistrict);
+            setChapters(data);
+        } catch {}
+    };
+
+    useEffect(() => {
+        loadChapters();
+    }, [chapterFilterDistrict]);
 
     const handleAction = async (key: keyof SystemSettings, action: 'add' | 'edit' | 'delete', val: string | number, newVal?: string) => {
         if (!settings) return;
@@ -217,6 +234,23 @@ const SetupModule = () => {
             await loadSettings();
         } finally {
             setSyncingKey(null);
+        }
+    };
+
+    const handleImportChapters = async () => {
+        if (!window.confirm(`This will import approximately 2,892 chapters from the embedded master data. Existing records with matching chapter codes will be updated. Continue?`)) return;
+        setImportingChapters(true);
+        try {
+            const response = await fetch('/chapters_data.json');
+            if (!response.ok) throw new Error('Chapters data not found');
+            const data = await response.json();
+            const result = await db.importChapters(data);
+            alert(`Chapters imported successfully. ${result.inserted} records synced.`);
+            await loadChapters();
+        } catch (e: any) {
+            alert('Import failed: ' + (e.message || 'Could not load chapters data.'));
+        } finally {
+            setImportingChapters(false);
         }
     };
 
@@ -277,6 +311,49 @@ const SetupModule = () => {
                     onAction={(a, v, nv) => handleAction('offices', a, v, nv)}
                     isSyncing={syncingKey === 'offices'}
                 />
+                <ConfigSection 
+                    title="Delegate Types" 
+                    fieldKey="delegate_types"
+                    items={settings?.delegate_types || []} 
+                    onAction={(a, v, nv) => handleAction('delegate_types', a, v, nv)}
+                    isSyncing={syncingKey === 'delegate_types'}
+                />
+
+                <div className="bg-white rounded-3xl border shadow-sm flex flex-col h-full overflow-hidden transition-all hover:shadow-md lg:col-span-2">
+                    <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
+                        <div>
+                            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-900">Chapters Registry</h3>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">{chapters.length} Chapters Loaded</p>
+                        </div>
+                        <button onClick={handleImportChapters} disabled={importingChapters} className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-black rounded-xl uppercase text-[9px] tracking-widest shadow transition-all">
+                            {importingChapters ? 'Importing...' : 'Import 2,892 Chapters'}
+                        </button>
+                    </div>
+                    <div className="p-4 bg-white border-b flex gap-2 flex-wrap">
+                        <select className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50" value={chapterFilterDistrict} onChange={e => setChapterFilterDistrict(e.target.value)}>
+                            <option value="">All Districts</option>
+                            {(settings?.districts || []).map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <input className="flex-1 p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50 min-w-[180px]" placeholder="Search chapter name..." value={chapterSearch} onChange={e => setChapterSearch(e.target.value)} />
+                    </div>
+                    <div className="flex-1 overflow-auto max-h-[400px]">
+                        <table className="w-full text-xs text-left">
+                            <tbody className="divide-y divide-gray-100">
+                                {chapters.filter(c => !chapterSearch || c.chapter_name.toLowerCase().includes(chapterSearch.toLowerCase())).map(c => (
+                                    <tr key={c.chapter_id} className="hover:bg-gray-50/50">
+                                        <td className="p-3 font-bold text-gray-700 uppercase">{c.chapter_name}</td>
+                                        <td className="p-3 font-medium text-blue-700 uppercase">{c.district}</td>
+                                        <td className="p-3 text-gray-400 font-mono text-[9px]">{c.chapter_code}</td>
+                                        <td className="p-3 text-gray-400">{c.city || '-'}</td>
+                                    </tr>
+                                ))}
+                                {chapters.filter(c => !chapterSearch || c.chapter_name.toLowerCase().includes(chapterSearch.toLowerCase())).length === 0 && (
+                                    <tr><td colSpan={4} className="p-12 text-center text-gray-300 italic font-bold text-[10px] uppercase tracking-widest">No chapters found. Click the import button to load from master data.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     );

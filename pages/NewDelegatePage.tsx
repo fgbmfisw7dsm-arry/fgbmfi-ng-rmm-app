@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole } from '../types';
+import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 
@@ -16,9 +16,14 @@ const NewDelegatePage = () => {
   const isDistrictScoped = isRegistrarRole((user?.role || '').toLowerCase()) && !!user?.district;
   const initialDistrict = isDistrictScoped ? (user?.district || '') : '';
 
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+  const showDelegateType = eventConfig.show_delegate_type !== false;
+
   const [form, setForm] = useState<Partial<Delegate>>({ 
     title: 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-    district: initialDistrict, chapter: '', rank: 'CP', office: 'OTHER' 
+    district: initialDistrict, chapter: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member'
   });
   
   const [loading, setLoading] = useState(false);
@@ -26,6 +31,8 @@ const NewDelegatePage = () => {
   const [availableTitles, setAvailableTitles] = useState<string[]>(DEFAULT_TITLES);
   const [availableRanks, setAvailableRanks] = useState<string[]>([]);
   const [availableOffices, setAvailableOffices] = useState<string[]>([]);
+  const [availableDelegateTypes, setAvailableDelegateTypes] = useState<string[]>(['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International']);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   
   const [successData, setSuccessData] = useState<{
     id: string;
@@ -49,9 +56,18 @@ const NewDelegatePage = () => {
             if (data.titles && data.titles.length > 0) setAvailableTitles(data.titles);
             if (data.ranks && data.ranks.length > 0) setAvailableRanks(data.ranks);
             if (data.offices && data.offices.length > 0) setAvailableOffices(data.offices);
+            if (data.delegate_types && data.delegate_types.length > 0) setAvailableDelegateTypes(data.delegate_types);
         }
     }).catch(e => console.warn("Using default lookup lists."));
   }, []);
+
+  useEffect(() => {
+    if (form.district) {
+        db.getChapters(form.district).then(setChapters).catch(() => setChapters([]));
+    } else {
+        setChapters([]);
+    }
+  }, [form.district]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,7 +115,7 @@ const NewDelegatePage = () => {
 
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-            district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER' 
+            district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member'
         });
         
     } catch (e: any) { 
@@ -236,7 +252,14 @@ const NewDelegatePage = () => {
                 </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Chapter</label>
-                    <input className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="CHAPTER NAME" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})} />
+                    {chapters.length > 0 ? (
+                        <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})}>
+                            <option value="">-- SELECT CHAPTER --</option>
+                            {chapters.map(c => <option key={c.chapter_id} value={c.chapter_name}>{c.chapter_name}</option>)}
+                        </select>
+                    ) : (
+                        <input className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="CHAPTER NAME" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})} />
+                    )}
                 </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Phone *</label>
@@ -247,18 +270,30 @@ const NewDelegatePage = () => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Email Address</label>
                     <input type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                 </div>
+                {showRank && (
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rank</label>
                     <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.rank} onChange={e => setForm({...form, rank: e.target.value})}>
                         {availableRanks.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                 </div>
+                )}
+                {showOffice && (
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Office</label>
                     <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.office} onChange={e => setForm({...form, office: e.target.value})}>
                         {availableOffices.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                 </div>
+                )}
+                {showDelegateType && (
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Delegate Type</label>
+                    <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.delegate_type} onChange={e => setForm({...form, delegate_type: e.target.value})}>
+                        {availableDelegateTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                    </select>
+                </div>
+                )}
 
                 <div className="md:col-span-2 lg:col-span-3 pt-8">
                     <button 

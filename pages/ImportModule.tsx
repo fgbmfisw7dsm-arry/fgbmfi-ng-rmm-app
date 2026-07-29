@@ -79,9 +79,9 @@ const ImportModule = () => {
 
                 {/* --- FIELD ORDER INSTRUCTIONS --- */}
                 <div className="bg-slate-900 p-6 rounded-2xl mb-8 border-b-4 border-blue-600 shadow-lg">
-                    <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-4">Required CSV Field Order (9 Columns):</h4>
+                    <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-4">Required CSV Field Order (10 Columns):</h4>
                     <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                        {['Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office'].map((field, idx) => (
+                        {['Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'].map((field, idx) => (
                             <div key={field} className="bg-white/10 p-2 rounded-lg border border-white/5 text-center">
                                 <span className="text-[9px] font-black text-blue-300 block opacity-50">{idx + 1}</span>
                                 <span className="text-[10px] font-bold text-white uppercase truncate">{field}</span>
@@ -91,7 +91,7 @@ const ImportModule = () => {
                     <div className="mt-6 pt-4 border-t border-white/5">
                         <p className="text-[9px] font-black text-gray-500 uppercase tracking-tighter mb-2">Sample Data Row (Do not include headers):</p>
                         <div className="bg-black/40 p-3 rounded-xl font-mono text-[10px] text-blue-200 break-all select-all">
-                            Mr, John, Doe, Lagos Central, Ikeja Chapter, 08012345678, john@email.com, CP, OTHER
+                            Mr, John, Doe, Lagos Central, Ikeja Chapter, 08012345678, john@email.com, CP, OTHER, Member
                         </div>
                     </div>
                 </div>
@@ -139,7 +139,7 @@ const ImportModule = () => {
                         className="w-full h-80 p-6 border-2 border-gray-100 rounded-[2rem] font-mono text-xs bg-gray-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none shadow-inner" 
                         value={csv} 
                         onChange={e => setCsv(e.target.value)} 
-                        placeholder="Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office..."
+                        placeholder="Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType..."
                     />
                     
                     <button 
