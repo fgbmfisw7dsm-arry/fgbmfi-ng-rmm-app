@@ -335,7 +335,7 @@ const SetupModule = () => {
                     <div className="p-4 bg-white border-b flex gap-2 flex-wrap">
                         <select className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50" value={chapterFilterDistrict} onChange={e => setChapterFilterDistrict(e.target.value)}>
                             <option value="">All Districts</option>
-                            {(settings?.districts || []).map(d => <option key={d} value={d}>{d}</option>)}
+                            {[...new Set([...(settings?.districts || []), ...chapters.map(c => c.district)])].sort().map(d => <option key={d} value={d}>{d}</option>)}
                         </select>
                         <input className="flex-1 p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50 min-w-[180px]" placeholder="Search chapter name..." value={chapterSearch} onChange={e => setChapterSearch(e.target.value)} />
                     </div>

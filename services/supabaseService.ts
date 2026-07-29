@@ -153,7 +153,7 @@ export const db = {
     },
 
     getChapters: async (district?: string) => {
-        let q = supabase.from('chapters').select('*').order('chapter_name');
+        let q = supabase.from('chapters').select('*', { count: 'exact' }).order('chapter_name').limit(5000);
         if (district) q = q.eq('district', district);
         const { data } = await q;
         return data || [];
