@@ -351,6 +351,7 @@ const EventsModule = () => {
                                                         <div className="flex flex-col sm:flex-row gap-2 w-full">
                                                             <input className="flex-1 p-2 border rounded-lg font-bold" value={sessionEditForm.title} onChange={e => setSessionEditForm({...sessionEditForm, title: e.target.value})} />
                                                             <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={toDatetimeLocal(sessionEditForm.start_time)} onChange={e => setSessionEditForm({...sessionEditForm, start_time: e.target.value})} />
+                                                            <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={toDatetimeLocal(sessionEditForm.end_time)} onChange={e => setSessionEditForm({...sessionEditForm, end_time: e.target.value})} />
                                                             <div className="flex gap-1">
                                                                 <button type="button" onClick={() => handleSessionUpdate(s.session_id)} className="bg-green-600 text-white px-3 py-2 rounded-lg font-black uppercase text-[10px]">Save</button>
                                                                 <button type="button" onClick={() => setEditingSessionId(null)} className="bg-gray-400 text-white px-3 py-2 rounded-lg font-black uppercase text-[10px]">Cancel</button>
