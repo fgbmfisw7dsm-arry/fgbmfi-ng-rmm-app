@@ -243,7 +243,7 @@ const EventsModule = () => {
                     const isConfirming = confirmDeleteId === ev.event_id;
 
                     return (
-                        <div key={ev.event_id} className={`bg-white p-6 border-2 rounded-2xl shadow-sm hover:shadow-md transition-all relative overflow-hidden flex flex-col gap-4 ${isLocked ? 'border-red-100 bg-red-50/5' : 'border-gray-50'}`}>
+                        <div key={ev.event_id} className={`bg-white p-6 border-2 rounded-2xl shadow-sm hover:shadow-md transition-all relative flex flex-col gap-4 ${isLocked ? 'border-red-100 bg-red-50/5' : 'border-gray-50'}`}>
                             {isLocked && !isConfirming && (
                                 <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none select-none -rotate-12">
                                     <span className="text-7xl font-black uppercase tracking-tighter text-red-900">LOCKED</span>
