@@ -4,6 +4,13 @@ import { Event, Session, UserRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { isStripeKeyDetected } from '../services/supabaseClient';
 
+const toDatetimeLocal = (utcStr?: string) => {
+    if (!utcStr) return '';
+    const d = new Date(utcStr);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const EventsModule = () => {
     const { refreshActiveEvent, refreshEvents, user, events } = useContext(AppContext);
     const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true });
@@ -166,7 +173,7 @@ const EventsModule = () => {
                 <form onSubmit={submit} className="space-y-5">
                     <div className="space-y-1">
                         <label className="text-[10px] font-black text-gray-400 uppercase">Event Name</label>
-                        <input required className="w-full p-3 border rounded-xl bg-gray-50 font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Regional Convention Name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                        <input required className="w-full p-3 border rounded-xl bg-gray-50 font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Event Name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
                     </div>
                     
                     <div className="grid grid-cols-2 gap-2">
@@ -218,7 +225,7 @@ const EventsModule = () => {
                     </div>
                 )}
                 
-                <h3 className="font-black text-[10px] text-gray-400 uppercase tracking-widest mb-2 px-2">Regional Event Catalog</h3>
+                <h3 className="font-black text-[10px] text-gray-400 uppercase tracking-widest mb-2 px-2">Events Catalog</h3>
                 
                 {initialLoading ? (
                     <div className="p-20 text-center bg-white rounded-2xl border-2 border-dashed border-gray-100 flex flex-col items-center gap-4">
@@ -343,7 +350,7 @@ const EventsModule = () => {
                                                     {editingSessionId === s.session_id ? (
                                                         <div className="flex flex-col sm:flex-row gap-2 w-full">
                                                             <input className="flex-1 p-2 border rounded-lg font-bold" value={sessionEditForm.title} onChange={e => setSessionEditForm({...sessionEditForm, title: e.target.value})} />
-                                                            <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={sessionEditForm.start_time?.substring(0, 16)} onChange={e => setSessionEditForm({...sessionEditForm, start_time: e.target.value})} />
+                                                            <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={toDatetimeLocal(sessionEditForm.start_time)} onChange={e => setSessionEditForm({...sessionEditForm, start_time: e.target.value})} />
                                                             <div className="flex gap-1">
                                                                 <button type="button" onClick={() => handleSessionUpdate(s.session_id)} className="bg-green-600 text-white px-3 py-2 rounded-lg font-black uppercase text-[10px]">Save</button>
                                                                 <button type="button" onClick={() => setEditingSessionId(null)} className="bg-gray-400 text-white px-3 py-2 rounded-lg font-black uppercase text-[10px]">Cancel</button>
@@ -354,7 +361,7 @@ const EventsModule = () => {
                                                             <div className="flex-1">
                                                                 <span className="font-black text-gray-800 uppercase block">{s.title}</span>
                                                                 <span className="text-[9px] text-gray-400 font-bold tracking-tight">
-                                                                    {new Date(s.start_time).toLocaleString()}
+                                                                    {new Date(s.start_time).toLocaleString()} — {new Date(s.end_time).toLocaleString()}
                                                                 </span>
                                                             </div>
 
@@ -408,7 +415,7 @@ const EventsModule = () => {
                                             <form onSubmit={submitSession} className="grid grid-cols-1 sm:grid-cols-4 gap-2 pb-4">
                                                 <input required className="p-3 border rounded-xl text-xs font-bold bg-white" placeholder="Session Title" value={sessionForm.title} onChange={e => setSessionForm({...sessionForm, title: e.target.value})} />
                                                 <input required type="datetime-local" className="p-3 border rounded-xl text-xs font-bold bg-white" value={sessionForm.start_time} onChange={e => setSessionForm({...sessionForm, start_time: e.target.value})} />
-                                                <input required type="datetime-local" className="p-3 border rounded-xl text-xs font-bold bg-white" value={sessionForm.end_date} onChange={e => setSessionForm({...sessionForm, end_time: e.target.value})} />
+                                                <input required type="datetime-local" className="p-3 border rounded-xl text-xs font-bold bg-white" value={sessionForm.end_time} onChange={e => setSessionForm({...sessionForm, end_time: e.target.value})} />
                                                 <button type="submit" className="bg-slate-900 text-white p-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md">Add</button>
                                             </form>
                                         </div>

@@ -129,13 +129,21 @@ export const db = {
 
     createSession: async (session: Omit<Session, 'session_id'>) => {
         await ensureEventActive(session.event_id);
-        return handleSupabaseError(await supabase.from('sessions').insert(session).select().single());
+        const payload = {
+            ...session,
+            start_time: session.start_time ? new Date(session.start_time).toISOString() : session.start_time,
+            end_time: session.end_time ? new Date(session.end_time).toISOString() : session.end_time,
+        };
+        return handleSupabaseError(await supabase.from('sessions').insert(payload).select().single());
     },
 
     updateSession: async (id: string, updates: Partial<Session>) => {
         const { data: existing } = await supabase.from('sessions').select('event_id').eq('session_id', id).single();
         if (existing) await ensureEventActive(existing.event_id);
-        return handleSupabaseError(await supabase.from('sessions').update(updates).eq('session_id', id).select().single());
+        const payload: any = { ...updates };
+        if (updates.start_time) payload.start_time = new Date(updates.start_time).toISOString();
+        if (updates.end_time) payload.end_time = new Date(updates.end_time).toISOString();
+        return handleSupabaseError(await supabase.from('sessions').update(payload).eq('session_id', id).select().single());
     },
 
     deleteSession: async (id: string) => {
@@ -253,11 +261,19 @@ export const db = {
         return withRetry(async () => {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
+
+        if (safeSessionId) {
+            const { data: arrival } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).is('session_id', null).maybeSingle();
+            if (!arrival) {
+                const { error: arrivalErr } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: null, checked_in_by: registrar.id });
+                if (arrivalErr) throw arrivalErr;
+            }
+        }
+
         const { data: existing } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle();
         if (existing) {
-            // Fetch the delegate's qr_hash for the response
             const { data: del } = await supabase.from('delegates').select('qr_hash').eq('delegate_id', delegateId).maybeSingle();
-            return { success: true, message: 'Already Verified', code: generateCodeFromId(delegateId, eventId), delegate: { qr_hash: del?.qr_hash || '' } as any };
+            return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { qr_hash: del?.qr_hash || '' } as any };
         }
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
         if (error) throw error;
