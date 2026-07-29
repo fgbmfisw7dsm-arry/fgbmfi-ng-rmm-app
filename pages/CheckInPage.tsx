@@ -25,6 +25,7 @@ const CheckInPage = () => {
   const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
   const [registering, setRegistering] = useState(false);
   const processingRef = useRef(false);
+  const scannedRef = useRef(false);
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -128,9 +129,11 @@ const CheckInPage = () => {
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked) return;
     if(!user || !activeEventId) { processingRef.current = false; return; }
+    console.log('[CheckIn] handleCodeSubmit started, code length:', codeVal.length);
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
+        console.log('[CheckIn] checkInByCode result:', { success: res.success, needsRegistration: res.needsRegistration, hasParsedData: !!res.parsedData, parsedKeys: res.parsedData ? Object.keys(res.parsedData) : null });
         if(res && res.success) { 
           setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
           setCode(''); 
@@ -169,6 +172,13 @@ const CheckInPage = () => {
     if (isLocked) return;
     const val = e.target.value;
     const cleaned = val.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (scannedRef.current) {
+      scannedRef.current = false;
+      console.log('[CheckIn] onCodeInput suppressed after scan. cleaned length:', cleaned.length);
+      setCode(cleaned);
+      return;
+    }
+    console.log('[CheckIn] onCodeInput user input, cleaned length:', cleaned.length);
     setCode(cleaned);
     if (feedback?.type === 'error') setFeedback(null);
     setPendingReg(null);
@@ -231,6 +241,8 @@ const CheckInPage = () => {
     setShowScanner(false);
     if (!code?.trim() || processingRef.current) return;
     processingRef.current = true;
+    scannedRef.current = true;
+    console.log('[CheckIn] handleScan called with code length:', code.length);
     setFeedback(null);
     setPendingReg(null);
     setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
