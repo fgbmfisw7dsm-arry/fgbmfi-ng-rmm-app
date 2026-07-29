@@ -384,6 +384,21 @@ export const db = {
     },
 
     registerDelegateFromQR: async (eventId: string, scannedCode: string, parsedData: Record<string, string>): Promise<Delegate> => {
+        const externalIdValue = parsedData['delegate_id'] || parsedData['external_id'] || scannedCode;
+
+        if (externalIdValue) {
+            const { data: existing } = await supabase.from('delegates').select('*').eq('external_id', externalIdValue).maybeSingle();
+            if (existing) return existing;
+        }
+
+        if (parsedData['first_name'] && parsedData['last_name'] && parsedData['phone']) {
+            const fname = normalize(parsedData['first_name']);
+            const lname = normalize(parsedData['last_name']);
+            const phone = parsedData['phone'].replace(/\s+/g, '');
+            const { data: nameMatch } = await supabase.from('delegates').select('*').ilike('first_name', fname).ilike('last_name', lname).eq('phone', phone).limit(1).maybeSingle();
+            if (nameMatch) return nameMatch;
+        }
+
         const record = {
             title: parsedData['title'] || '',
             first_name: parsedData['first_name'] || '',
@@ -396,7 +411,7 @@ export const db = {
             office: parsedData['office'] || 'OTHER',
             room_number: parsedData['room_number'] || '',
             event_id: eventId,
-            external_id: parsedData['delegate_id'] || parsedData['external_id'] || scannedCode,
+            external_id: externalIdValue,
             qr_hash: generateQrHash(),
             registration_source: 'qr_scan' as const
         };

@@ -23,6 +23,8 @@ const CheckInPage = () => {
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
   const [regForm, setRegForm] = useState({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+  const [registering, setRegistering] = useState(false);
+  const processingRef = useRef(false);
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -125,7 +127,7 @@ const CheckInPage = () => {
 
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked) return;
-    if(!user || !activeEventId) return;
+    if(!user || !activeEventId) { processingRef.current = false; return; }
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
@@ -133,31 +135,33 @@ const CheckInPage = () => {
           setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
           setCode(''); 
           setPendingReg(null);
+          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
         } else if (res.needsRegistration) {
           setFeedback(null);
           setCode(res.scannedCode || '');
           setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
-          if (res.parsedData) {
-            setRegForm({
-              title: res.parsedData['title'] || '',
-              first_name: res.parsedData['first_name'] || '',
-              last_name: res.parsedData['last_name'] || '',
-              district: res.parsedData['district'] || '',
-              chapter: res.parsedData['chapter'] || '',
-              phone: res.parsedData['phone'] || '',
-              email: res.parsedData['email'] || '',
-              rank: res.parsedData['rank'] || 'CP',
-              office: res.parsedData['office'] || 'OTHER'
-            });
-          }
+          setRegForm({
+            title: res.parsedData?.['title'] || '',
+            first_name: res.parsedData?.['first_name'] || '',
+            last_name: res.parsedData?.['last_name'] || '',
+            district: res.parsedData?.['district'] || '',
+            chapter: res.parsedData?.['chapter'] || '',
+            phone: res.parsedData?.['phone'] || '',
+            email: res.parsedData?.['email'] || '',
+            rank: res.parsedData?.['rank'] || 'CP',
+            office: res.parsedData?.['office'] || 'OTHER'
+          });
         } else { 
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
           setPendingReg(null);
+          setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
         }
         setTimeout(() => setFeedback(null), 3000);
     } catch(e: any) { 
         console.error("Fast Check-in Error:", e);
         setFeedback({ type: 'error', msg: e.message || "Fast check-in rejected" }); 
+    } finally {
+        processingRef.current = false;
     }
   };
 
@@ -225,28 +229,35 @@ const CheckInPage = () => {
 
   const handleScan = (code: string) => {
     setShowScanner(false);
-    if (code) {
-      setCode(code);
-      handleCodeSubmit(code);
-    }
+    if (!code?.trim() || processingRef.current) return;
+    processingRef.current = true;
+    setFeedback(null);
+    setPendingReg(null);
+    setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+    setCode(code);
+    handleCodeSubmit(code);
   };
 
   const handleQuickRegister = async () => {
-    if (!activeEventId || !user || !pendingReg) return;
+    if (!activeEventId || !user || !pendingReg || registering) return;
     if (!regForm.first_name || !regForm.last_name || !regForm.district) {
       setFeedback({ type: 'error', msg: 'First name, last name, and district are required.' });
       return;
     }
+    setRegistering(true);
     setFeedback({ type: 'success', msg: 'Registering...' });
     try {
       const newDelegate = await db.registerDelegateFromQR(activeEventId, pendingReg.scannedCode, { ...regForm });
       const res = await db.checkInDelegate(activeEventId, newDelegate.delegate_id, user, selectedSessionId);
       setPendingReg(null);
       setCode('');
+      setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
       setFeedback({ type: 'success', msg: res.success ? 'Registered & Verified!' : 'Registered but check-in failed.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
       setFeedback({ type: 'error', msg: e.message || 'Registration failed.' });
+    } finally {
+      setRegistering(false);
     }
   };
 
@@ -300,6 +311,20 @@ const CheckInPage = () => {
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9V7a2 2 0 012-2h2M3 15v2a2 2 0 002 2h2M21 9V7a2 2 0 00-2-2h-2M21 15v2a2 2 0 01-2 2h-2M7 12h.01M12 12h.01M17 12h.01M7 16h10" /></svg>
                 <span className="text-[8px]">SCAN QR</span>
               </button>
+              <button 
+                onClick={() => {
+                  setCode('');
+                  setPendingReg(null);
+                  setFeedback(null);
+                  setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+                }}
+                disabled={isLocked}
+                className="px-4 py-4 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
+                title="Clear input and start new scan"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                <span className="text-[8px]">CLEAR</span>
+              </button>
             </div>
             <div className={`h-8 mt-4 text-center font-black uppercase text-xs tracking-widest ${feedback?.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                 {feedback?.msg}
@@ -319,7 +344,7 @@ const CheckInPage = () => {
                   <p className="text-[8px] font-bold text-red-400 mt-0.5">Could not parse QR — fill manually</p>
                 )}
               </div>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' }); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -360,10 +385,10 @@ const CheckInPage = () => {
               </div>
             </div>
             <div className="flex gap-3 mt-4">
-              <button onClick={handleQuickRegister} className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
-                Register & Check In
+              <button onClick={handleQuickRegister} disabled={registering || isLocked} className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
+                {registering ? 'Registering...' : 'Register & Check In'}
               </button>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' }); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
                 Cancel
               </button>
             </div>
