@@ -134,9 +134,9 @@ const CheckInPage = () => {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
         if(res && res.success) { 
           setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
-          setCode(''); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+          setTimeout(() => { setFeedback(null); setCode(''); }, 5000);
         } else if (res.needsRegistration) {
           setFeedback(null);
           setCode(res.scannedCode || '');
@@ -156,8 +156,8 @@ const CheckInPage = () => {
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER' });
+          setTimeout(() => setFeedback(null), 5000);
         }
-        setTimeout(() => setFeedback(null), 3000);
     } catch(e: any) { 
         console.error("Fast Check-in Error:", e);
         setFeedback({ type: 'error', msg: e.message || "Fast check-in rejected" }); 
@@ -333,9 +333,16 @@ const CheckInPage = () => {
                 <span className="text-[8px]">CLEAR</span>
               </button>
             </div>
-            <div className={`h-8 mt-4 text-center font-black uppercase text-xs tracking-widest ${feedback?.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                {feedback?.msg}
-            </div>
+            {feedback && (
+              <div className={`mt-4 p-3 rounded-xl text-center font-black uppercase text-sm tracking-wider animate-in zoom-in ${
+                feedback.type === 'success' 
+                  ? 'bg-green-500 text-white shadow-lg shadow-green-200' 
+                  : 'bg-red-500 text-white shadow-lg shadow-red-200'
+              }`}>
+                {feedback.type === 'success' && <span className="mr-1">&#10003;</span>}
+                {feedback.msg}
+              </div>
+            )}
         </div>
 
         {pendingReg && (
