@@ -277,7 +277,8 @@ const CheckInPage = () => {
   );
 
   return (
-    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4 ${isLocked ? 'opacity-80' : ''}`}>
+    <>
+    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4 ${isLocked ? 'opacity-80' : ''} ${badgeDelegate ? 'print:hidden' : ''}`}>
        {isLocked && (
             <div className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700 animate-in slide-in-from-top-4">
                 <span className="text-xl">🔒</span>
@@ -515,10 +516,13 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                  </div>
                  <div>
                    <div className="text-2xl font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                   <div className="text-sm font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
-                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
-                 </div>
-                 <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Backup Code: <span className="text-blue-900 text-lg tracking-[0.3em]">{badgeCode}</span></div>
+                  <div className="text-sm font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
+                    {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                      <div className="text-[8px] font-bold text-gray-400 uppercase tracking-wider mt-1">Conv ID: <span className="text-gray-600 font-mono text-[7px]">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
+                    )}
+                  </div>
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Backup Code: <span className="text-blue-900 text-lg tracking-[0.3em]">{badgeCode}</span></div>
                </div>
 
                <div className="mt-6 flex gap-3">
@@ -530,23 +534,8 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                  </button>
                </div>
              </div>
-           </div>
+            </div>
 
-           <div className="hidden print:block print:p-4">
-             <div className="border-2 border-blue-900 rounded-2xl p-6 text-center space-y-4 max-w-sm mx-auto">
-               <div className="text-[9px] font-black text-blue-600 uppercase tracking-[0.3em]">FGBMFI Nigeria</div>
-               <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{activeEvent?.name || 'Event'}</div>
-               <div style={{ width: '128px', height: '128px' }} className="mx-auto">
-                 {badgeQrDataUrl && <img src={badgeQrDataUrl} alt="QR Code" style={{ width: '100%', height: '100%' }} />}
-               </div>
-               <div>
-                 <div className="text-2xl font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                 <div className="text-sm font-bold text-gray-600 uppercase">{badgeDelegate.district} DISTRICT</div>
-                 <div className="text-xs font-bold text-gray-500 uppercase">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
-               </div>
-               <div className="text-[10px] font-black text-gray-400 uppercase">Code: <span className="text-blue-900 text-lg tracking-[0.3em]">{badgeCode}</span></div>
-             </div>
-           </div>
           </>
         )}
 
@@ -554,6 +543,28 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
           <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />
         )}
     </div>
+
+        {badgeDelegate && (
+          <div className="hidden print:block" style={{ margin: '0', padding: '0' }}>
+            <div style={{ width: '85mm', minHeight: '54mm' }} className="border-2 border-blue-900 rounded-2xl p-3 text-center flex flex-col justify-center gap-1.5 mx-auto bg-white">
+              <div className="text-[7px] font-black text-blue-600 uppercase tracking-[0.3em]">FGBMFI Nigeria</div>
+              <div className="text-[8px] font-black text-gray-500 uppercase tracking-widest">{activeEvent?.name || 'Event'}</div>
+              <div style={{ width: '22mm', height: '22mm' }} className="mx-auto">
+                {badgeQrDataUrl && <img src={badgeQrDataUrl} alt="QR Code" style={{ width: '100%', height: '100%' }} />}
+              </div>
+              <div>
+                <div className="text-sm font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
+                <div className="text-[8px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
+                <div className="text-[7px] font-bold text-gray-500 uppercase">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
+                {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                  <div className="text-[6px] font-bold text-gray-400 uppercase mt-0.5">Conv ID: <span className="text-gray-500 font-mono">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
+                )}
+              </div>
+              <div className="text-[7px] font-black text-gray-400 uppercase">Code: <span className="text-blue-900 text-xs tracking-[0.2em]">{badgeCode}</span></div>
+            </div>
+          </div>
+        )}
+    </>
   );
 };
 
