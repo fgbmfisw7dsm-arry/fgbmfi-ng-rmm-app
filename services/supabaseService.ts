@@ -335,8 +335,8 @@ export const db = {
         const parsedData = parseQRData(code);
         const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || code;
         
-        // Pass 1: UUID QR hash lookup (internal QR codes, use raw code)
-        if (code.length > 10 && code !== lookupId) {
+        // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
+        if (code.length > 10 && code === lookupId) {
             const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
             if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }

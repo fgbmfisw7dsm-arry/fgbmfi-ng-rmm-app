@@ -519,7 +519,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                   <div className="text-sm font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
                     <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
                     {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                      <div className="text-[8px] font-bold text-gray-400 uppercase tracking-wider mt-1">Conv ID: <span className="text-gray-600 font-mono text-[7px]">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
+                      <div className="text-[8px] font-black text-gray-400 uppercase tracking-wider mt-1 leading-tight">Conv ID: <span className="text-gray-700 font-mono text-[9px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
                     )}
                   </div>
                   <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Backup Code: <span className="text-blue-900 text-lg tracking-[0.3em]">{badgeCode}</span></div>
@@ -557,7 +557,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                 <div className="text-[8px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
                 <div className="text-[7px] font-bold text-gray-500 uppercase">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
                 {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                  <div className="text-[6px] font-bold text-gray-400 uppercase mt-0.5">Conv ID: <span className="text-gray-500 font-mono">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
+                  <div className="text-[7px] font-black text-gray-400 uppercase mt-0.5 leading-tight">Conv ID: <span className="text-gray-600 font-mono text-[9px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
                 )}
               </div>
               <div className="text-[7px] font-black text-gray-400 uppercase">Code: <span className="text-blue-900 text-xs tracking-[0.2em]">{badgeCode}</span></div>
