@@ -268,6 +268,7 @@ export const db = {
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         await ensureEventActive(eventId);
+        code = code.trim();
         
         const parseQRData = (raw: string): Record<string, string> | null => {
             try {
@@ -429,6 +430,7 @@ export const db = {
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
             const payload = batch.map(p => ({
+                external_id: p[0],
                 title: p[0],
                 first_name: p[1],
                 last_name: p[2],

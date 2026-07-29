@@ -109,7 +109,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               if (intervalId) clearInterval(intervalId);
               if (stream) stream.getTracks().forEach(t => t.stop());
               setScanning(false);
-              onScanRef.current(codes[0].rawValue);
+              onScanRef.current(codes[0].rawValue.trim());
             } else if (attempts % 40 === 0) {
               log(`Scanning... ${attempts} attempts, try moving badge closer`);
             }
