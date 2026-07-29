@@ -192,3 +192,12 @@ CREATE INDEX IF NOT EXISTS idx_chapters_district ON chapters(district);
 
 -- 5f. Unique index on chapter_code (required for upsert)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chapters_code_unique ON chapters(chapter_code);
+
+-- 5g. RLS for chapters (authenticated users can read/write)
+ALTER TABLE chapters ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "chapters_select" ON chapters;
+CREATE POLICY "chapters_select" ON chapters FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "chapters_insert" ON chapters;
+CREATE POLICY "chapters_insert" ON chapters FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "chapters_update" ON chapters;
+CREATE POLICY "chapters_update" ON chapters FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
