@@ -346,9 +346,9 @@ const EventsModule = () => {
                                             const isDeletingThisSession = deletingSessionId === s.session_id;
 
                                             return (
-                                                <div key={s.session_id} className="text-xs bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm relative overflow-hidden group">
+                                                <div key={s.session_id} className="text-xs bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm relative group">
                                                     {editingSessionId === s.session_id ? (
-                                                        <div className="flex flex-col sm:flex-row gap-2 w-full">
+                                                        <div className="flex flex-wrap items-center gap-2 w-full">
                                                             <input className="flex-1 p-2 border rounded-lg font-bold" value={sessionEditForm.title} onChange={e => setSessionEditForm({...sessionEditForm, title: e.target.value})} />
                                                             <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={toDatetimeLocal(sessionEditForm.start_time)} onChange={e => setSessionEditForm({...sessionEditForm, start_time: e.target.value})} />
                                                             <input type="datetime-local" className="p-2 border rounded-lg font-bold" value={toDatetimeLocal(sessionEditForm.end_time)} onChange={e => setSessionEditForm({...sessionEditForm, end_time: e.target.value})} />
