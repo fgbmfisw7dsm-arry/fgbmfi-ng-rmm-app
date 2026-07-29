@@ -245,7 +245,10 @@ const SetupModule = () => {
             if (!response.ok) throw new Error('Chapters data not found');
             const data = await response.json();
             const result = await db.importChapters(data);
-            alert(`Chapters imported successfully. ${result.inserted} records synced.`);
+            if (result.errors.length > 0) {
+                console.error('Chapter import errors:', result.errors);
+            }
+            alert(`Chapters import complete. ${result.inserted} records synced.${result.errors.length > 0 ? ` ${result.errors.length} errors occurred (check console).` : ''}`);
             await loadChapters();
         } catch (e: any) {
             alert('Import failed: ' + (e.message || 'Could not load chapters data.'));

@@ -189,3 +189,6 @@ CREATE TABLE IF NOT EXISTS chapters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chapters_district ON chapters(district);
+
+-- 5f. Unique index on chapter_code (required for upsert)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chapters_code_unique ON chapters(chapter_code);

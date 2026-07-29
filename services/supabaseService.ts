@@ -159,9 +159,10 @@ export const db = {
         return data || [];
     },
 
-    importChapters: async (chapters: { district: string; chapter_code?: string; chapter_name: string; state?: string; city?: string; meeting_day?: string }[]): Promise<{ inserted: number }> => {
+    importChapters: async (chapters: { district: string; chapter_code?: string; chapter_name: string; state?: string; city?: string; meeting_day?: string }[]): Promise<{ inserted: number; errors: string[] }> => {
         const BATCH_SIZE = 500;
         let inserted = 0;
+        const errors: string[] = [];
         for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
             const batch = chapters.slice(i, i + BATCH_SIZE).map(c => ({
                 district: c.district,
@@ -171,17 +172,22 @@ export const db = {
                 city: c.city || null,
                 meeting_day: c.meeting_day || null,
             }));
-            const { error } = await supabase.from('chapters').upsert(batch, { onConflict: 'chapter_code', ignoreDuplicates: false });
+            const { data, error } = await supabase.from('chapters').upsert(batch, { onConflict: 'chapter_code' });
             if (error) {
+                console.warn(`Chapters batch ${i} failed, falling back to row-by-row:`, error.message);
                 for (const rec of batch) {
-                    const { error: singleErr } = await supabase.from('chapters').upsert(rec, { onConflict: 'chapter_code', ignoreDuplicates: false });
-                    if (!singleErr) inserted++;
+                    const { error: singleErr } = await supabase.from('chapters').upsert(rec, { onConflict: 'chapter_code' });
+                    if (singleErr) {
+                        errors.push(singleErr.message);
+                    } else {
+                        inserted++;
+                    }
                 }
             } else {
-                inserted += batch.length;
+                inserted += (data?.length || batch.length);
             }
         }
-        return { inserted };
+        return { inserted, errors };
     },
 
     getSettings: async (): Promise<SystemSettings> => {
