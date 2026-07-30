@@ -10,6 +10,7 @@ ALTER TABLE app_users ADD COLUMN IF NOT EXISTS region TEXT;
 -- 2. Fix delete_app_user RPC (explicit ::uuid cast for remove)
 -- ============================================================
 DROP FUNCTION IF EXISTS delete_app_user(TEXT);
+DROP FUNCTION IF EXISTS delete_app_user(UUID);
 
 CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
 RETURNS JSON AS $$
@@ -25,6 +26,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- 3. Fix create_app_user RPC (accept region parameter)
 -- ============================================================
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 
 CREATE OR REPLACE FUNCTION create_app_user(
   email TEXT,
@@ -54,6 +56,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- 4. Verify reset_user_password has ::uuid cast
 -- ============================================================
 DROP FUNCTION IF EXISTS reset_user_password(TEXT, TEXT);
+DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
 RETURNS JSON AS $$
