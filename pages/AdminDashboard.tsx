@@ -26,7 +26,6 @@ const AdminDashboard = () => {
     queryKey: ['stats', activeEventId, districtFilter],
     queryFn: () => db.getStats(activeEventId, districtFilter),
     enabled: !!activeEventId,
-    staleTime: 30000,
     refetchOnWindowFocus: false,
   });
 
