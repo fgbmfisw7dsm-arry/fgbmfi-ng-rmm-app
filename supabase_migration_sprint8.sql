@@ -59,27 +59,14 @@ DECLARE
   new_user_id UUID;
 BEGIN
   new_user_id := gen_random_uuid();
-  INSERT INTO auth.users (
-    instance_id, id, aud, role, email,
-    encrypted_password, email_confirmed_at,
-    raw_app_meta_data, raw_user_meta_data,
-    created_at, updated_at,
-    is_sso_user, is_anonymous
-  )
+  INSERT INTO auth.users (instance_id, id, email, encrypted_password, email_confirmed_at, raw_app_meta_data)
   VALUES (
     '00000000-0000-0000-0000-000000000000',
     new_user_id,
-    'authenticated',
-    'authenticated',
     email,
     crypt(password, gen_salt('bf')),
     NOW(),
-    jsonb_build_object('role', role),
-    '{}'::jsonb,
-    NOW(),
-    NOW(),
-    false,
-    false
+    jsonb_build_object('role', role)
   );
   INSERT INTO public.app_users (id, email, role, district, region, is_active)
   VALUES (new_user_id, email, role, district, region, true);
