@@ -367,10 +367,10 @@ const UsersModule = () => {
                             {isInactive && (
                                 <div className="absolute top-0 right-0 bg-red-500 text-white px-3 py-1 rounded-bl-xl font-black uppercase text-[8px] tracking-widest">Inactive</div>
                             )}
-                            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 relative z-10">
-                                <div className="w-full">
-                                    <div className="flex items-center gap-3 mb-1">
-                                        <span className={`font-black uppercase text-lg tracking-tight ${isInactive ? 'text-gray-400 line-through' : 'text-blue-900'}`}>{u.email}</span>
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
+                                <div className="min-w-0 flex-1 w-full">
+                                    <div className="flex items-center gap-3 mb-1 flex-wrap">
+                                        <span className={`font-black uppercase text-lg tracking-tight truncate max-w-[320px] ${isInactive ? 'text-gray-400 line-through' : 'text-blue-900'}`} title={u.email}>{u.email}</span>
                                         <span className={`px-2.5 py-1 rounded-lg font-black uppercase text-[8px] tracking-widest shadow-sm ${u.role === UserRole.NATIONAL_ADMIN ? 'bg-blue-900 text-white' : u.role === UserRole.REGIONAL_ADMIN ? 'bg-blue-700 text-white' : u.role === UserRole.DISTRICT_ADMIN ? 'bg-blue-500 text-white' : u.role === 'admin' ? 'bg-blue-900 text-white' : u.role === 'finance' ? 'bg-purple-600 text-white' : 'bg-slate-500 text-white'}`}>
                                             {u.role === UserRole.NATIONAL_ADMIN ? 'Nat. Admin' : u.role === UserRole.REGIONAL_ADMIN ? 'Reg. Admin' : u.role === UserRole.DISTRICT_ADMIN ? 'Dist. Admin' : u.role === UserRole.NATIONAL_REGISTRAR ? 'Nat. Reg' : u.role === UserRole.REGIONAL_REGISTRAR ? 'Reg. Reg' : u.role === UserRole.DISTRICT_REGISTRAR ? 'Dist. Reg' : u.role === UserRole.ADMIN ? 'Sys Admin' : u.role === UserRole.REGISTRAR ? 'Registrar' : u.role.toUpperCase()}
                                         </span>
@@ -385,7 +385,7 @@ const UsersModule = () => {
                                     )}
                                 </div>
 
-                                <div className="flex gap-2 items-center w-full sm:w-auto justify-end">
+                                <div className="flex gap-2 items-center w-full sm:w-auto justify-end flex-shrink-0 flex-wrap">
                                      {isResetting ? (
                                         <div className="flex items-center gap-2 bg-slate-900 p-2 rounded-xl shadow-xl animate-in slide-in-from-right-2">
                                             <input 
