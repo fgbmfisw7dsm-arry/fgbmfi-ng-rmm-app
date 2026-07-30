@@ -58,7 +58,7 @@ RETURNS JSON AS $$
 DECLARE
   new_user_id UUID;
 BEGIN
-  INSERT INTO auth.users (email, password, email_confirmed_at, raw_app_meta_data)
+  INSERT INTO auth.users (email, encrypted_password, email_confirmed_at, raw_app_meta_data)
   VALUES (email, crypt(password, gen_salt('bf')), NOW(), jsonb_build_object('role', role))
   RETURNING id INTO new_user_id;
   INSERT INTO public.app_users (id, email, role, district, region, is_active)
