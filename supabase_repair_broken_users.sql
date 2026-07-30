@@ -14,7 +14,6 @@ UPDATE auth.users u
 SET 
     email = a.email,
     email_confirmed_at = COALESCE(u.email_confirmed_at, NOW()),
-    confirmation_sent_at = COALESCE(u.confirmation_sent_at, NOW()),
     updated_at = NOW()
 FROM app_users a
 WHERE u.id = a.id

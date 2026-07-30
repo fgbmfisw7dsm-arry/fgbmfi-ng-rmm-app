@@ -130,18 +130,18 @@ DROP FUNCTION IF EXISTS reactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS deactivate_all_event_users();
 
 -- 3b. Create User Profile & Auth Account (Fix: removed instance_id — removed in GoTrue v2)
+-- Uses ONLY columns guaranteed across all Supabase Auth schema versions.
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON AS $$
 DECLARE
   new_user_id UUID;
 BEGIN
   new_user_id := gen_random_uuid();
-  INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, confirmation_sent_at, raw_app_meta_data, created_at, updated_at)
+  INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, created_at, updated_at)
   VALUES (
     new_user_id,
     email,
     crypt(password, gen_salt('bf')),
-    NOW(),
     NOW(),
     jsonb_build_object('role', role, 'provider', 'email'),
     NOW(),

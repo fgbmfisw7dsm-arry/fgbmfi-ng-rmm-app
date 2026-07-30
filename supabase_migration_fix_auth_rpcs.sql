@@ -10,8 +10,9 @@ DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS update_auth_user_email(UUID, TEXT);
 
--- 2. create_app_user — Direct auth.users insert without instance_id
---    instance_id column was removed in Supabase GoTrue v2 (2024+)
+-- 2. create_app_user — Direct auth.users insert, no instance_id.
+--    Uses ONLY columns guaranteed across all Supabase Auth schema versions.
+--    instance_id was removed in GoTrue v2 (2024+).
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON AS $$
 DECLARE
@@ -19,12 +20,11 @@ DECLARE
 BEGIN
   new_user_id := gen_random_uuid();
 
-  INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, confirmation_sent_at, raw_app_meta_data, created_at, updated_at)
+  INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, created_at, updated_at)
   VALUES (
     new_user_id,
     email,
     crypt(password, gen_salt('bf')),
-    NOW(),
     NOW(),
     jsonb_build_object('role', role, 'provider', 'email'),
     NOW(),
@@ -40,9 +40,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 3. update_auth_user_email — Only update columns guaranteed to exist
---    Removed: confirmation_token, recovery_token, email_change_token, email_change
---    These columns were removed in Supabase GoTrue v2 schema updates
+-- 3. update_auth_user_email — Only touches email and confirmed_at.
+--    All other token/change columns removed from GoTrue v2 schema.
 CREATE OR REPLACE FUNCTION update_auth_user_email(user_id UUID, new_email TEXT)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
@@ -51,7 +50,6 @@ BEGIN
     UPDATE auth.users SET
         email = new_email,
         email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
-        confirmation_sent_at = COALESCE(confirmation_sent_at, NOW()),
         updated_at = NOW()
     WHERE id = user_id;
 
