@@ -13,14 +13,14 @@ DROP FUNCTION IF EXISTS delete_app_user(TEXT);
 DROP FUNCTION IF EXISTS delete_app_user(UUID);
 
 CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
-RETURNS JSON AS $$
+RETURNS JSON AS $body$
 BEGIN
   DELETE FROM auth.users WHERE auth.users.id = user_id_to_delete::uuid;
   RETURN json_build_object('status', 'success', 'message', 'Account deleted');
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$body$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- 3. Fix create_app_user RPC (accept region parameter)
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION create_app_user(
   district TEXT DEFAULT NULL,
   region TEXT DEFAULT NULL
 )
-RETURNS JSON AS $$
+RETURNS JSON AS $body$
 DECLARE
   new_user_id UUID;
 BEGIN
@@ -50,7 +50,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$body$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- 4. Verify reset_user_password has ::uuid cast
@@ -59,7 +59,7 @@ DROP FUNCTION IF EXISTS reset_user_password(TEXT, TEXT);
 DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
-RETURNS JSON AS $$
+RETURNS JSON AS $body$
 BEGIN
   UPDATE auth.users
   SET encrypted_password = crypt(new_password, gen_salt('bf'))
@@ -69,4 +69,4 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$body$ LANGUAGE plpgsql SECURITY DEFINER;
