@@ -14,9 +14,21 @@ DROP FUNCTION IF EXISTS delete_app_user(UUID);
 
 CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
 RETURNS JSON AS $body$
+DECLARE
+  v_uid UUID;
 BEGIN
-  DELETE FROM auth.users WHERE auth.users.id = user_id_to_delete::uuid;
-  RETURN json_build_object('status', 'success', 'message', 'Account deleted');
+  v_uid := user_id_to_delete::uuid;
+
+  -- Soft-delete the auth.users entry (Supabase uses deleted_at, not hard delete)
+  UPDATE auth.users SET deleted_at = now() WHERE id = v_uid;
+  IF NOT FOUND THEN
+    RETURN json_build_object('error', 'User not found in auth system');
+  END IF;
+
+  -- Hard-delete the app_users profile (auth soft-delete does not cascade)
+  DELETE FROM public.app_users WHERE id = v_uid;
+
+  RETURN json_build_object('status', 'success', 'message', 'Account permanently removed');
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
