@@ -149,12 +149,13 @@ BEGIN
     NOW(),
     NOW()
   );
-  INSERT INTO auth.identities (id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
   VALUES (
     new_user_id,
     new_user_id,
     jsonb_build_object('sub', new_user_id, 'email', email),
     'email',
+    email,
     NOW(),
     NOW(),
     NOW()
