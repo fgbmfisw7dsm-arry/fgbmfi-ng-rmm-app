@@ -59,7 +59,7 @@ const UserManualModule = () => {
                             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">Regional Events Management System (EMS)</p>
                             <div className="mt-6 flex justify-center gap-4">
                                 <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.5</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.6</span>
                             </div>
                         </div>
 
@@ -99,11 +99,12 @@ const UserManualModule = () => {
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">03</span>
                                 Dashboard & Analytics
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600 font-medium">The Dashboard provides a real-time summary of the event status.</p>
+                            <p className="mb-4 text-sm text-gray-600 font-medium">The Dashboard provides a real-time summary of the event status. Data refreshes automatically when you select a different event.</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold text-gray-700">
-                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">REAL-TIME STATS</span> Total Delegates, Attendance %, and Financial Totals.</div>
-                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">ATTENDANCE CHARTS</span> Visual breakdown by Rank and District.</div>
-                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">LIVE FEED</span> A scrolling log of the 10 most recent arrivals.</div>
+                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">4 STAT CARDS</span> Total Delegates, Event Arrivals (with %), Session Attendance Count, and Total Financials.</div>
+                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">DYNAMIC CHARTS</span> Attendance by Rank pie chart and Attendance by District bar chart. The Rank chart and Live Feed Rank/Office columns respect per-event field visibility settings.</div>
+                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">LIVE FEED</span> A scrolling log of the 10 most recent check-ins with real-time updates via Supabase Realtime.</div>
+                                <div className="p-4 border rounded-xl bg-gray-50"><span className="text-blue-600 block mb-1">AUTO-LOAD</span> Selecting a new event from the dropdown immediately refreshes all dashboard data.</div>
                             </div>
                         </section>
 
@@ -142,21 +143,21 @@ const UserManualModule = () => {
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">05</span>
-                                Operations: National / External Delegates
+                                Operations: New Delegate Registration
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600">For delegates not found in the database (e.g., visitors from other regions or National Officers):</p>
+                            <p className="mb-4 text-sm text-gray-600">For delegates not found in the database (e.g., visitors from other regions or National Officers). The form adapts per event via the Events Catalog configuration.</p>
                             <div className="space-y-4">
                                 <div className="border-l-4 border-blue-600 pl-6 py-2">
-                                    <h4 className="text-xs font-black uppercase text-blue-700 mb-1">Step 1: Registration</h4>
-                                    <p className="text-sm text-gray-600">Navigate to <strong>"New Delegate"</strong>. Enter their full details (Title, Name, District, Rank, etc.).</p>
+                                    <h4 className="text-xs font-black uppercase text-blue-700 mb-1">Step 1: Complete the Form</h4>
+                                    <p className="text-sm text-gray-600">Navigate to <strong>"New Delegate"</strong>. Fill in Title, First Name, Last Name, District (dropdown of all 25 FGBMFI Nigeria Districts), Chapter (cascaded dropdown filtered by the selected District), Phone, and Email.</p>
                                 </div>
                                 <div className="border-l-4 border-blue-600 pl-6 py-2">
-                                    <h4 className="text-xs font-black uppercase text-blue-700 mb-1">Step 2: Dual Action</h4>
-                                    <p className="text-sm text-gray-600">Click <strong>"Complete Registration & Verify Arrival"</strong>. This adds them to the master list and records their event arrival simultaneously.</p>
+                                    <h4 className="text-xs font-black uppercase text-blue-700 mb-1">Step 2: Configurable Fields</h4>
+                                    <p className="text-sm text-gray-600">Fields like <strong>Rank, Office, and Delegate Type</strong> (Member, National Guest, Free Guest, Dependant, International etc.) appear or hide based on the active event's configuration set in the Events Catalog. Admins can toggle these per event.</p>
                                 </div>
                                 <div className="border-l-4 border-green-600 pl-6 py-2">
-                                    <h4 className="text-xs font-black uppercase text-green-700 mb-1">Step 3: Code Issuance</h4>
-                                    <p className="text-sm text-gray-600 font-bold">The system displays their unique 4-Digit Code immediately. Record this and provide it to the delegate.</p>
+                                    <h4 className="text-xs font-black uppercase text-green-700 mb-1">Step 3: Register & Verify</h4>
+                                    <p className="text-sm text-gray-600 font-bold">Click <strong>"Complete Registration & Verify Arrival"</strong>. The system adds them to the master list and records their event arrival simultaneously. A 4-digit code is generated for the delegate.</p>
                                 </div>
                             </div>
                         </section>
@@ -167,12 +168,13 @@ const UserManualModule = () => {
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">06</span>
                                 Active Session Verification
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.) once arrival is already verified.</p>
+                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.).</p>
                             <div className="bg-blue-900 p-8 rounded-2xl text-white shadow-xl">
                                 <ol className="space-y-3 text-sm">
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">1.</span> Go to <strong>"Check-In"</strong> and select the current session from the dropdown.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">2.</span> Enter the delegate's <strong>4-Digit Code</strong> into the large keypad.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> The system confirms entry instantly. If code is lost, use the Manual Lookup at the bottom of the page to find it.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">2.</span> Enter the delegate's <strong>4-Digit Code</strong> into the large keypad, or use Manual Lookup.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>Auto-Arrival Cascade:</strong> If the delegate has NOT yet completed Event Arrival check-in, the system automatically records arrival first, then verifies the session attendance — all in one scan.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">4.</span> For new visitors not yet in the database, the Quick Registration form provides District and Chapter dropdowns populated from the official 25-district, 1,447-chapter registry.</li>
                                 </ol>
                             </div>
                         </section>
@@ -205,12 +207,68 @@ const UserManualModule = () => {
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">08</span>
                                 Reporting & Master Export
                             </h2>
-                            <p className="text-sm text-gray-600 mb-4">The Reports module is used to generate the final Attendance Matrix and Financial Ledger.</p>
+                            <p className="text-sm text-gray-600 mb-4">The Reports module generates the final Attendance List, Attendance Matrix, and Financial Ledger. Reports respect per-event field visibility settings.</p>
                             <ul className="space-y-4 text-xs font-bold text-gray-700">
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance Matrix:</strong> A grid view showing Rank vs District headcounts.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance List:</strong> Full list grouped by district with Name, Chapter, Rank, Office, Phone, and Check-in Time columns. Chapter column is always shown. Rank and Office columns are conditionally displayed based on event configuration.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance Matrix:</strong> Grid views showing Rank vs District, Office vs District, and Delegate Type vs District headcounts. Each matrix is conditionally shown based on event configuration.</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Financial Matrix:</strong> A summary of funds collected across all sessions.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>CSV Export:</strong> The Delegate Master List supports CSV export for offline processing and integration with other systems.</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Exporting:</strong> Switch to your desired report tab and click <strong>"Export Master PDF"</strong>. The system will generate a landscape-oriented document ready for printing.</span></li>
                             </ul>
+                        </section>
+
+                        {/* Section 09: Admin Configuration */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">09</span>
+                                Admin: Events Catalog & Configuration
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">The <strong>Events Catalog</strong> (formerly Regional Events) is where Admins manage events and their settings.</p>
+                            <div className="space-y-4 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">EVENT LIFECYCLE</span>
+                                    Each event has a Live (Open) or Locked (Final) status. Locked events are read-only — all registration, check-in, and financial writes are blocked.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">SESSION MANAGEMENT</span>
+                                    Admins can create and edit sessions (sub-events) with start/end times. Session times are stored in UTC and display correctly in local Nigeria time.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">FIELD VISIBILITY TOGGLES</span>
+                                    For each event, Admins can toggle which delegate fields appear in forms and reports: <strong>Show Rank</strong>, <strong>Show Office</strong>, and <strong>Show Delegate Type</strong>. For example, a Convention may hide Rank and Office while a Council Meeting shows them. Changes apply instantly across Dashboard, New Delegate, Master List, Check-In, and Reports.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">CSV IMPORT</span>
+                                    Bulk-import delegates via 10-column CSV (Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType).
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* Section 10: System Setup & Chapters Registry */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">10</span>
+                                System Setup & Chapters Registry
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">The <strong>System Setup</strong> module is where Admins configure global reference data that drives all dropdowns across the application.</p>
+                            <div className="space-y-4 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">CONFIGURABLE LISTS</span>
+                                    Manage Titles, Regions, Districts, Ranks, Offices, and Delegate Types. Changes sync instantly and propagate to all forms and reports.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">DELEGATE TYPES</span>
+                                    Define the types of delegates expected at events: Member, National Guest, Free Guest, Dependant-Adult, Dependant-Teen, Dependant-Children, International. The list is expandable/compressible via add/edit/delete controls.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">CHAPTERS REGISTRY (1,447 Chapters)</span>
+                                    A master registry of all FGBMFI Nigeria chapters across 25 districts. Filter by district, search by name. The <strong>"Import Chapters"</strong> button loads the official consolidated chapter list. Once imported, the Chapter dropdown in all delegate forms cascades automatically — selecting a District filters the Chapter list to only show chapters in that district.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">25 FGBMFI DISTRICTS</span>
+                                    The system supports all 25 FGBMFI Nigeria Districts: North Central (1-5), North East (1-2), North West (1-3), South East (1-3), South South (1-4), and South West (1-8). The district dropdown in all forms merges official districts from settings with those found in the chapters registry.
+                                </div>
+                            </div>
                         </section>
                     </>
                 ) : (
@@ -239,7 +297,8 @@ const UserManualModule = () => {
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
                                         <p>1. Open Check-In Tab.</p>
                                         <p>2. Select active session (e.g. Banquet).</p>
-                                        <p>3. Type the 4 digits on the large keypad. Done.</p>
+                                        <p>3. Type the 4 digits on the large keypad.</p>
+                                        <p>4. System auto-verifies arrival if not already done. Done.</p>
                                     </div>
                                 </div>
 
@@ -258,8 +317,9 @@ const UserManualModule = () => {
                                     <p className="text-sm text-gray-300 italic">"I'm from a different region/national office and not in the database."</p>
                                     <div className="mt-3 text-[11px] font-black uppercase space-y-1">
                                         <p>1. Go to "New Delegate" page.</p>
-                                        <p>2. Fill details (Title, Name, Phone, District).</p>
-                                        <p>3. Click "Register & Verify". Record the new 4-digit code for them.</p>
+                                        <p>2. Select District from dropdown (25 options).</p>
+                                        <p>3. Chapter field auto-filters to that district only.</p>
+                                        <p>4. Fill remaining details and click "Register & Verify".</p>
                                     </div>
                                 </div>
                             </div>
@@ -305,6 +365,14 @@ const UserManualModule = () => {
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: Mistake in Registration!</p>
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Only Admins can edit Master List records. Call the System Admin to fix typos in the Master List module.</p>
                                 </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: Chapter dropdown is empty!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Go to System Setup &gt; Chapters Registry and click "Import Chapters". This loads all 1,447 official FGBMFI Nigeria chapters.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: Session time shows wrong hour!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Refresh the page. Session times are now stored as UTC and should display correctly in Nigeria time (UTC+1).</p>
+                                </div>
                             </div>
                         </section>
                     </>
@@ -313,7 +381,7 @@ const UserManualModule = () => {
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>© 2025 FGBMFI Nigeria EMS</span>
-                    <span>Document: EMS-USER-V2.5</span>
+                    <span>Document: EMS-USER-V2.6</span>
                     <span>System Training & Operations Reference</span>
                 </div>
             </div>
