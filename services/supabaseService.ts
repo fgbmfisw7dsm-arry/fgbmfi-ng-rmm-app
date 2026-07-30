@@ -73,7 +73,7 @@ const ensureEventActive = async (eventId: string) => {
 };
 
 export const auth = {
-    getOrCreateProfile: async (authId: string, email: string, appMetadata?: { role?: string }): Promise<User> => {
+    getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
         try {
             const { data, error } = await supabase.from('app_users').select('*').eq('id', authId).maybeSingle();
             if (data) {
@@ -88,7 +88,7 @@ export const auth = {
                 throw new Error("ACCOUNT_DELETED: Your account has been permanently removed. Please contact your administrator.");
             }
 
-            let role = appMetadata?.role || 'registrar';
+            let role = metadata?.app_metadata?.role || metadata?.user_metadata?.role || metadata?.role || 'registrar';
             if (role === 'registrar') {
                 try {
                     const { data: authRole } = await supabase.rpc('get_auth_user_role');
@@ -122,7 +122,7 @@ export const auth = {
             }
             
             if (!authData.user) return null;
-            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, authData.user.app_metadata);
+            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
         } catch (e: any) {
             if (!e.message || e.message === '{}') throw new Error("Authentication service returned an unexpected response. The user account may be incomplete.");
             throw e;
@@ -245,8 +245,44 @@ export const db = {
     getUsers: async (): Promise<User[]> => 
         handleSupabaseError(await supabase.from('app_users').select('*')),
 
-    createUser: async (user: Omit<User, 'id'>, password: string) => 
-        handleRpcResponse(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district || null, region: user.region || null }), 'create_app_user'),
+    createUser: async (user: Omit<User, 'id'>, password: string) => {
+        const email = normalizeEmail(user.email);
+        const role = user.role.toLowerCase();
+        const district = user.district || null;
+        const region = user.region || null;
+
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { role } }
+        });
+
+        if (signUpError) {
+            return handleRpcResponse(
+                await supabase.rpc('create_app_user', { email, password, role, district, region }),
+                'create_app_user'
+            );
+        }
+
+        if (!signUpData.user) {
+            throw new Error("Failed to create user account: no user returned");
+        }
+
+        const { error: profileError } = await supabase
+            .from('app_users')
+            .upsert({
+                id: signUpData.user.id,
+                email,
+                role,
+                district,
+                region,
+                is_active: true
+            }, { onConflict: 'id' });
+
+        if (profileError) throw profileError;
+
+        return { status: 'success', id: signUpData.user.id };
+    },
 
     updateUser: async (userId: string, updates: Partial<User>) => {
         const clean = { ...updates };
