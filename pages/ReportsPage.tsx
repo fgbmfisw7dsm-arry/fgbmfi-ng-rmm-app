@@ -99,7 +99,7 @@ const ReportsPage = () => {
         filteredCheckIns.forEach((c: any) => {
             const d = delegates.find((del: any) => del.delegate_id === c.delegate_id);
             if (!d) return;
-            const identityKey = `${norm(d.first_name)}|${norm(d.last_name)}|${norm(d.district)}|${norm(d.rank)}`;
+            const identityKey = `${norm(d.first_name)}|${norm(d.last_name)}|${norm(d.district)}|${norm(d.chapter)}`;
             if (!identityMap.has(identityKey)) {
                 identityMap.set(identityKey, { ...d, checked_in_at: c.checked_in_at });
             }
@@ -145,13 +145,14 @@ const ReportsPage = () => {
                             </div>
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300">
                                 <thead className="bg-gray-50 uppercase text-gray-400 font-black">
-                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
+                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Chapter</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
                                 </thead>
                                 <tbody>
                                     {group.map((d, i) => (
                                         <tr key={i} className="hover:bg-gray-50 border-b">
                                             <td className="border p-2 text-center">{i + 1}</td>
                                             <td className="border p-2 font-black uppercase text-blue-900">{d.title} {d.first_name} {d.last_name}</td>
+                                            <td className="border p-2 font-bold uppercase">{d.chapter || '-'}</td>
                                             {showOffice && <td className="border p-2 font-bold uppercase">{d.office}</td>}
                                             {showRank && <td className="border p-2 uppercase">{d.rank}</td>}
                                             <td className="border p-2 font-mono">{d.phone}</td>
