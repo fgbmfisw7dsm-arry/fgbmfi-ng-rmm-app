@@ -14,6 +14,13 @@ CREATE TABLE deleted_users (
     deleted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE app_users DROP CONSTRAINT IF EXISTS app_users_role_check;
+ALTER TABLE app_users ADD CONSTRAINT app_users_role_check CHECK (role IN (
+  'national_admin','regional_admin','district_admin','admin',
+  'national_registrar','regional_registrar','district_registrar','registrar',
+  'finance'
+));
+
 -- ============================================================
 -- BLOCK 2: delete_app_user (select everything from DROP through $$ LANGUAGE and run)
 -- ============================================================
