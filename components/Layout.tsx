@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { User, UserRole, isAdminRole, isRegistrarRole } from '../types';
+import { User, UserRole, isAdminRole, isRegistrarRole, isNationalRole, isRegionalRole, isDistrictRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import ConnectionStatus from './ConnectionStatus';
@@ -37,7 +37,7 @@ const getRoleLabel = () => {
            case UserRole.REGIONAL_REGISTRAR: return 'Regional Registrar';
            case UserRole.DISTRICT_REGISTRAR: return 'District Registrar';
            case UserRole.ADMIN: return 'System Admin';
-           case UserRole.REGISTRAR: return user.district ? 'District Registrar' : 'Regional Registrar';
+            case UserRole.REGISTRAR: return 'Registrar';
            case UserRole.FINANCE: return 'Finance Admin';
            default: return 'User';
        }
@@ -57,8 +57,8 @@ const getRoleLabel = () => {
           <img src="/logo-fgbmfi.png" alt="FGBMFI Logo" className="h-32 w-auto mb-6 drop-shadow-[0_10px_15px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-300" />
           <h1 className="text-xl font-black tracking-tight text-white leading-tight uppercase">FGBMFI Nigeria</h1>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2">Event Management System</p>
-           {user.district && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}
-           {user.region && <p className="text-[9px] text-emerald-400 mt-1 font-black uppercase tracking-tighter">{user.region} Region</p>}
+           {user.district && isDistrictRole(role) && <p className="text-[9px] text-blue-400 mt-1 font-black uppercase tracking-tighter">{user.district} District</p>}
+           {user.region && isRegionalRole(role) && <p className="text-[9px] text-emerald-400 mt-1 font-black uppercase tracking-tighter">{user.region} Region</p>}
           <button onClick={onLogout} className="mt-4 flex items-center gap-1.5 text-gray-400 hover:text-red-400 transition-colors text-[10px] font-bold uppercase tracking-wider" title="Sign Out">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             Sign Out

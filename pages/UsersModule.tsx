@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { User, UserRole, SystemSettings, isRegistrarRole, isAdminRole, isRegionalRole, isDistrictRole } from '../types';
+import { User, UserRole, SystemSettings, isRegistrarRole, isAdminRole, isRegionalRole, isDistrictRole, isNationalRole } from '../types';
 import { AppContext } from '../context/AppContext';
 
 const UsersModule = () => {
@@ -111,13 +111,14 @@ const UsersModule = () => {
     };
 
     const startEditing = (u: User) => {
+        const role = (u.role || '').toLowerCase();
         setEditingUserId(u.id);
         setForm({
             email: u.email,
-            password: '', 
+            password: '',
             role: u.role,
-            district: u.district || '',
-            region: u.region || ''
+            district: isDistrictRole(role) ? (u.district || '') : '',
+            region: isRegionalRole(role) ? (u.region || '') : ''
         });
         setStatus(null);
         setConfirmDeleteUserId(null);
@@ -404,12 +405,12 @@ const UsersModule = () => {
                                             <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded-md font-black uppercase text-[7px] tracking-wider">Deactivated</span>
                                         )}
                                     </div>
-                                    {u.district && (
+                                    {u.district && isDistrictRole((u.role || '').toLowerCase()) && (
                                         <p className="text-blue-500 font-black uppercase text-[10px] tracking-widest">
                                             {u.district} District Jurisdiction
                                         </p>
                                     )}
-                                    {u.region && (
+                                    {u.region && isRegionalRole((u.role || '').toLowerCase()) && (
                                         <p className="text-emerald-600 font-black uppercase text-[10px] tracking-widest">
                                             {u.region} Region Jurisdiction
                                         </p>
