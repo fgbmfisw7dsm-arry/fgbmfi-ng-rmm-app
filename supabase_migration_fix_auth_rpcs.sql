@@ -10,8 +10,8 @@ DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS update_auth_user_email(UUID, TEXT);
 
--- 2. create_app_user — Direct auth.users insert, no instance_id.
---    Uses ONLY columns guaranteed across all Supabase Auth schema versions.
+-- 2. create_app_user — Direct auth.users + identities insert.
+--    GoTrue v2+ requires auth.identities record for signInWithPassword().
 --    instance_id was removed in GoTrue v2 (2024+).
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON AS $$
@@ -27,6 +27,17 @@ BEGIN
     crypt(password, gen_salt('bf')),
     NOW(),
     jsonb_build_object('role', role, 'provider', 'email'),
+    NOW(),
+    NOW()
+  );
+
+  INSERT INTO auth.identities (id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  VALUES (
+    new_user_id,
+    new_user_id,
+    jsonb_build_object('sub', new_user_id, 'email', email),
+    'email',
+    NOW(),
     NOW(),
     NOW()
   );
