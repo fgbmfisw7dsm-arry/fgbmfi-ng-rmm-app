@@ -130,31 +130,35 @@ DROP FUNCTION IF EXISTS reactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS deactivate_all_event_users();
 
 -- 3b. Create User Profile & Auth Account (dynamic schema — handles GoTrue v2/v3)
+-- Skips generated columns (cannot INSERT into GENERATED ALWAYS columns)
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
 DECLARE
   new_user_id UUID;
-  confirmed_col TEXT;
+  confirmed_cols TEXT := '';
+  confirmed_vals TEXT := '';
   extra_cols TEXT := '';
   extra_vals TEXT := '';
 BEGIN
   new_user_id := gen_random_uuid();
 
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at') THEN
-    confirmed_col := 'confirmed_at';
-  ELSE
-    confirmed_col := 'email_confirmed_at';
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
+    confirmed_cols := ', email_confirmed_at';
+    confirmed_vals := ', NOW()';
+  ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
+    confirmed_cols := ', confirmed_at';
+    confirmed_vals := ', NOW()';
   END IF;
 
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'is_sso_user') THEN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'is_sso_user' AND is_generated = 'NEVER') THEN
     extra_cols := ', is_sso_user, is_anonymous';
     extra_vals := ', false, false';
   END IF;
 
-  EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, ' || confirmed_col || ', raw_app_meta_data, created_at, updated_at' || extra_cols || ')
-    VALUES ($1, $2, crypt($3, gen_salt(''bf'')), NOW(), $4, NOW(), NOW()' || extra_vals || ')'
+  EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at, updated_at' || confirmed_cols || extra_cols || ')
+    VALUES ($1, $2, crypt($3, gen_salt(''bf'')), $4, NOW(), NOW()' || confirmed_vals || extra_vals || ')'
     USING new_user_id, email, password, jsonb_build_object('role', role, 'provider', 'email');
 
   INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
