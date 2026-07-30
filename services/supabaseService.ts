@@ -250,12 +250,17 @@ export const db = {
         const role = user.role.toLowerCase();
         const district = user.district || null;
         const region = user.region || null;
-
         const hasAtSign = email.includes('@');
-        const signUpEmail = hasAtSign ? email : `${email}@fgbmfi.ng`;
+
+        if (!hasAtSign) {
+            const result = await supabase.rpc('create_app_user', {
+                email, password, role, district, region
+            });
+            return handleRpcResponse(result, 'create_app_user');
+        }
 
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: signUpEmail,
+            email,
             password,
             options: { data: { role } }
         });
@@ -269,16 +274,6 @@ export const db = {
 
         if (!signUpData.user) {
             throw new Error("Failed to create user account: no user returned");
-        }
-
-        if (!hasAtSign) {
-            const rpcResult = await supabase.rpc('update_auth_user_email', {
-                user_id: signUpData.user.id,
-                new_email: email
-            });
-            if (rpcResult.error) {
-                console.warn("Failed to restore original username in auth:", rpcResult.error);
-            }
         }
 
         const { error: profileError } = await supabase

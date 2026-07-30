@@ -129,21 +129,23 @@ DROP FUNCTION IF EXISTS deactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS reactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS deactivate_all_event_users();
 
--- 3b. Create User Profile & Auth Account (Sprint 8 — supports region, correct auth.users schema)
+-- 3b. Create User Profile & Auth Account (Fix: removed instance_id — removed in GoTrue v2)
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON AS $$
 DECLARE
   new_user_id UUID;
 BEGIN
   new_user_id := gen_random_uuid();
-  INSERT INTO auth.users (instance_id, id, email, encrypted_password, email_confirmed_at, raw_app_meta_data)
+  INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, confirmation_sent_at, raw_app_meta_data, created_at, updated_at)
   VALUES (
-    '00000000-0000-0000-0000-000000000000',
     new_user_id,
     email,
     crypt(password, gen_salt('bf')),
     NOW(),
-    jsonb_build_object('role', role)
+    NOW(),
+    jsonb_build_object('role', role, 'provider', 'email'),
+    NOW(),
+    NOW()
   );
   INSERT INTO public.app_users (id, email, role, district, region, is_active)
   VALUES (new_user_id, email, role, district, region, true);
