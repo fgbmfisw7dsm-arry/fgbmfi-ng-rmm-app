@@ -644,6 +644,7 @@ END $$;
 CREATE POLICY "app_users_view_own" ON app_users FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY "app_users_admin_view_all" ON app_users FOR SELECT TO authenticated USING (is_admin_user());
 CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (id = auth.uid());
+CREATE POLICY "app_users_admin_insert_all" ON app_users FOR INSERT TO authenticated WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_update" ON app_users FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_delete" ON app_users FOR DELETE TO authenticated USING (is_admin_user());
 
