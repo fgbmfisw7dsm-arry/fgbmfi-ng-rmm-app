@@ -2,9 +2,15 @@
 -- Run in Supabase SQL Editor after Sprint 7
 
 -- ============================================================
--- 1. Add region column to app_users (for Regional Admin/Registrar)
+-- 1. Add region column + deleted_users tombstone table
 -- ============================================================
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS region TEXT;
+
+CREATE TABLE IF NOT EXISTS deleted_users (
+    id UUID PRIMARY KEY,
+    email TEXT,
+    deleted_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ============================================================
 -- 2. Fix delete_app_user RPC (explicit ::uuid cast for remove)
@@ -16,16 +22,21 @@ CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
 RETURNS JSON AS $body$
 DECLARE
   v_uid UUID;
+  v_email TEXT;
 BEGIN
   v_uid := user_id_to_delete::uuid;
 
-  -- Soft-delete the auth.users entry (Supabase uses deleted_at, not hard delete)
-  UPDATE auth.users SET deleted_at = now() WHERE id = v_uid;
+  -- Capture email before deleting
+  SELECT email INTO v_email FROM public.app_users WHERE id = v_uid;
   IF NOT FOUND THEN
-    RETURN json_build_object('error', 'User not found in auth system');
+    RETURN json_build_object('error', 'User not found');
   END IF;
 
-  -- Hard-delete the app_users profile (auth soft-delete does not cascade)
+  -- Insert tombstone to prevent re-registration on next login
+  INSERT INTO public.deleted_users (id, email) VALUES (v_uid, v_email)
+  ON CONFLICT (id) DO UPDATE SET deleted_at = NOW();
+
+  -- Delete the app profile
   DELETE FROM public.app_users WHERE id = v_uid;
 
   RETURN json_build_object('status', 'success', 'message', 'Account permanently removed');

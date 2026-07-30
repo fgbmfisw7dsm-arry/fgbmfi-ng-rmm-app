@@ -83,6 +83,11 @@ export const auth = {
                 return data as User;
             }
 
+            const { data: tombstone } = await supabase.from('deleted_users').select('id').eq('id', authId).maybeSingle();
+            if (tombstone) {
+                throw new Error("ACCOUNT_DELETED: Your account has been permanently removed. Please contact your administrator.");
+            }
+
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
                 .upsert({ id: authId, email: normalizeEmail(email), is_active: true }, { onConflict: 'id' })
@@ -92,6 +97,7 @@ export const auth = {
             return newProfile as User;
         } catch (err) {
             if ((err as any)?.message?.startsWith?.('ACCOUNT_DEACTIVATED')) throw err;
+            if ((err as any)?.message?.startsWith?.('ACCOUNT_DELETED')) throw err;
             throw err;
         }
     },
