@@ -1,9 +1,9 @@
 -- Sprint 8: Fix RPCs + Add Region Support + Fix Delete/Remove
 -- Run in Supabase SQL Editor after Sprint 7
--- CRITICAL: Run the CREATE TABLE below FIRST (select it alone), then run each function definition separately
+-- IMPORTANT: Run each numbered block separately by selecting it and executing
 
 -- ============================================================
--- 1. Alter app_users + create deleted_users tombstone
+-- BLOCK 1: Table changes (select these 3 statements and run)
 -- ============================================================
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS region TEXT;
 
@@ -15,7 +15,7 @@ CREATE TABLE deleted_users (
 );
 
 -- ============================================================
--- 2. delete_app_user (select and run this block alone)
+-- BLOCK 2: delete_app_user (select everything from DROP through $$ LANGUAGE and run)
 -- ============================================================
 DROP FUNCTION IF EXISTS delete_app_user(TEXT);
 DROP FUNCTION IF EXISTS delete_app_user(UUID);
@@ -41,18 +41,12 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
--- 3. create_app_user (select and run this block alone)
+-- BLOCK 3: create_app_user (select everything from DROP through $$ LANGUAGE and run)
 -- ============================================================
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 
-CREATE OR REPLACE FUNCTION create_app_user(
-  email TEXT,
-  password TEXT,
-  role TEXT,
-  district TEXT DEFAULT NULL,
-  region TEXT DEFAULT NULL
-)
+CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON AS $$
 DECLARE
   new_user_id UUID;
@@ -60,10 +54,8 @@ BEGIN
   INSERT INTO auth.users (email, password, email_confirmed_at, raw_app_meta_data)
   VALUES (email, crypt(password, gen_salt('bf')), NOW(), jsonb_build_object('role', role))
   RETURNING id INTO new_user_id;
-
   INSERT INTO public.app_users (id, email, role, district, region, is_active)
   VALUES (new_user_id, email, role, district, region, true);
-
   RETURN json_build_object('status', 'success', 'id', new_user_id);
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
@@ -71,7 +63,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
--- 4. reset_user_password (select and run this block alone)
+-- BLOCK 4: reset_user_password (select everything from DROP through $$ LANGUAGE and run)
 -- ============================================================
 DROP FUNCTION IF EXISTS reset_user_password(TEXT, TEXT);
 DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
@@ -79,10 +71,8 @@ DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
 RETURNS JSON AS $$
 BEGIN
-  UPDATE auth.users
-  SET encrypted_password = crypt(new_password, gen_salt('bf'))
+  UPDATE auth.users SET encrypted_password = crypt(new_password, gen_salt('bf'))
   WHERE auth.users.id = user_id::uuid;
-
   RETURN json_build_object('status', 'success', 'message', 'Password updated');
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
