@@ -550,7 +550,7 @@ export const db = {
                 p_event_id: eventId,
                 p_district: district || null,
             });
-            if (!error && data) return data as DashboardStats;
+            if (!error && data && typeof data.totalArrivals === 'number' && typeof data.totalSessionAttendance === 'number') return data as DashboardStats;
         } catch {}
 
         const filter = district ? normalize(district).toUpperCase() : null;
