@@ -7,7 +7,8 @@
 -- ============================================================
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS region TEXT;
 
-CREATE TABLE IF NOT EXISTS deleted_users (
+DROP TABLE IF EXISTS deleted_users;
+CREATE TABLE deleted_users (
     id UUID PRIMARY KEY,
     email TEXT,
     deleted_at TIMESTAMPTZ DEFAULT NOW()
