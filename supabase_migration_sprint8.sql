@@ -20,7 +20,7 @@ DROP FUNCTION IF EXISTS delete_app_user(TEXT);
 DROP FUNCTION IF EXISTS delete_app_user(UUID);
 
 CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
-RETURNS JSON AS $body$
+RETURNS JSON AS $$
 DECLARE
   v_uid UUID;
   v_email TEXT;
@@ -37,7 +37,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$body$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- 3. create_app_user (select and run this block alone)
@@ -52,7 +52,7 @@ CREATE OR REPLACE FUNCTION create_app_user(
   district TEXT DEFAULT NULL,
   region TEXT DEFAULT NULL
 )
-RETURNS JSON AS $body$
+RETURNS JSON AS $$
 DECLARE
   new_user_id UUID;
 BEGIN
@@ -67,7 +67,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$body$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- 4. reset_user_password (select and run this block alone)
@@ -76,7 +76,7 @@ DROP FUNCTION IF EXISTS reset_user_password(TEXT, TEXT);
 DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
-RETURNS JSON AS $body$
+RETURNS JSON AS $$
 BEGIN
   UPDATE auth.users
   SET encrypted_password = crypt(new_password, gen_salt('bf'))
@@ -86,4 +86,4 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$body$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
