@@ -61,11 +61,9 @@ BEGIN
   new_user_id := gen_random_uuid();
   INSERT INTO auth.users (
     instance_id, id, aud, role, email,
-    encrypted_password, email_confirmed_at,
+    encrypted_password, email_confirmed_at, confirmed_at,
     raw_app_meta_data, raw_user_meta_data,
     created_at, updated_at,
-    confirmation_token, recovery_token,
-    email_change_token_new, email_change_token_current,
     is_sso_user, is_anonymous
   )
   VALUES (
@@ -76,14 +74,11 @@ BEGIN
     email,
     crypt(password, gen_salt('bf')),
     NOW(),
+    NOW(),
     jsonb_build_object('role', role),
     '{}'::jsonb,
     NOW(),
     NOW(),
-    '',
-    '',
-    '',
-    '',
     false,
     false
   );

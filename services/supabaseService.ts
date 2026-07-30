@@ -110,36 +110,20 @@ export const auth = {
             });
             
             if (authError) {
-                if (authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
-                throw new Error(authError.message);
+                if (authError.message && authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
+                throw new Error(authError.message || "Authentication service unavailable");
             }
             
             if (!authData.user) return null;
             return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email);
         } catch (e: any) {
+            if (!e.message || e.message === '{}') throw new Error("Authentication service returned an unexpected response. The user account may be incomplete.");
             throw e;
         }
-    }
+    },
 };
 
 export const db = {
-    getEvents: async (): Promise<Event[]> => 
-        handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
-
-    createEvent: async (event: Omit<Event, 'event_id'>) => 
-        handleSupabaseError(await supabase.from('events').insert({ ...event, is_active: true }).select().single()),
-
-    updateEvent: async (id: string, updates: Partial<Event>) => {
-        console.log(`DB-SERVICE: Executing Update for Event ${id}`, updates);
-        // We perform the update without .select() first to ensure we aren't blocked by SELECT RLS policies
-        const { error } = await supabase.from('events').update(updates).eq('event_id', id);
-        if (error) {
-            console.error("Supabase Update Failed:", error);
-            throw error;
-        }
-        return { event_id: id, ...updates };
-    },
-
     deleteEvent: async (id: string) => 
         handleSupabaseError(await supabase.from('events').delete().eq('event_id', id)),
 
