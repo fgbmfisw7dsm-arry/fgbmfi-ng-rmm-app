@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User, Event } from './types';
+import { User, Event, UserRole } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
@@ -25,6 +25,18 @@ import ImportModule from './pages/ImportModule';
 import SetupModule from './pages/SetupModule';
 import DataModule from './pages/DataModule';
 import UserManualModule from './pages/UserManualModule';
+import ProtectedRoute from './components/ProtectedRoute';
+
+const ALL_ADMIN_ROLES: UserRole[] = [
+  UserRole.NATIONAL_ADMIN, UserRole.REGIONAL_ADMIN, UserRole.DISTRICT_ADMIN, UserRole.ADMIN
+];
+const ADMIN_AND_REGISTRAR: UserRole[] = [
+  ...ALL_ADMIN_ROLES,
+  UserRole.NATIONAL_REGISTRAR, UserRole.REGIONAL_REGISTRAR, UserRole.DISTRICT_REGISTRAR, UserRole.REGISTRAR
+];
+const ADMIN_AND_FINANCE: UserRole[] = [
+  ...ALL_ADMIN_ROLES, UserRole.FINANCE
+];
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -199,15 +211,33 @@ const AppContent = () => {
                  <Routes>
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/admin/reports" element={<ReportsPage />} />
-                    <Route path="/admin/financials" element={<FinancialsPage />} />
-                    <Route path="/checkin" element={<CheckInPage />} />
-                    <Route path="/register-new" element={<NewDelegatePage />} />
-                    <Route path="/admin/delegates" element={<MasterListModule />} />
-                    <Route path="/admin/events" element={<EventsModule />} />
-                    <Route path="/admin/users" element={<UsersModule />} />
-                    <Route path="/admin/import" element={<ImportModule />} />
-                    <Route path="/admin/setup" element={<SetupModule />} />
-                    <Route path="/admin/data" element={<DataModule />} />
+                    <Route path="/admin/financials" element={
+                      <ProtectedRoute allowedRoles={ADMIN_AND_FINANCE}><FinancialsPage /></ProtectedRoute>
+                    } />
+                    <Route path="/checkin" element={
+                      <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><CheckInPage /></ProtectedRoute>
+                    } />
+                    <Route path="/register-new" element={
+                      <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><NewDelegatePage /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/delegates" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><MasterListModule /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/events" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><EventsModule /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/users" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><UsersModule /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/import" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><ImportModule /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/setup" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><SetupModule /></ProtectedRoute>
+                    } />
+                    <Route path="/admin/data" element={
+                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><DataModule /></ProtectedRoute>
+                    } />
                     <Route path="/help" element={<UserManualModule />} />
                     <Route path="/" element={<Navigate to="/admin" replace />} />
                  </Routes>

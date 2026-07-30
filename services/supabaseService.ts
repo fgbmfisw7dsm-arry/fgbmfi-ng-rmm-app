@@ -28,6 +28,16 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
     return res.data;
 };
 
+const handleRpcResponse = (res: any, operationName: string) => {
+    handleSupabaseError(res);
+    const data = res.data;
+    if (data && typeof data === 'object' && data.error) {
+        console.error(`RPC ${operationName} Error:`, data.error);
+        throw new Error(data.error);
+    }
+    return data;
+};
+
 // Lifecycle Guard: Checks if an event is active before allowing writes
 
 const withRetry = async <T>(
@@ -66,16 +76,22 @@ export const auth = {
     getOrCreateProfile: async (authId: string, email: string): Promise<User> => {
         try {
             const { data, error } = await supabase.from('app_users').select('*').eq('id', authId).maybeSingle();
-            if (data) return data as User;
+            if (data) {
+                if (data.is_active === false) {
+                    throw new Error("ACCOUNT_DEACTIVATED: Your account has been deactivated. Please contact your administrator.");
+                }
+                return data as User;
+            }
 
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
-                .upsert({ id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR }, { onConflict: 'id' })
+                .upsert({ id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR, is_active: true }, { onConflict: 'id' })
                 .select().single();
 
             if (createError) throw createError;
             return newProfile as User;
         } catch (err) {
+            if ((err as any)?.message?.startsWith?.('ACCOUNT_DEACTIVATED')) throw err;
             return { id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR };
         }
     },
@@ -224,16 +240,25 @@ export const db = {
         handleSupabaseError(await supabase.from('app_users').select('*')),
 
     createUser: async (user: Omit<User, 'id'>, password: string) => 
-        handleSupabaseError(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district })),
+        handleRpcResponse(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district }), 'create_app_user'),
 
     updateUser: async (userId: string, updates: Partial<User>) => 
         handleSupabaseError(await supabase.from('app_users').update(updates).eq('id', userId).select().single()),
 
     deleteUser: async (userId: string) => 
-        handleSupabaseError(await supabase.rpc('delete_app_user', { user_id_to_delete: userId })),
+        handleRpcResponse(await supabase.rpc('delete_app_user', { user_id_to_delete: userId }), 'delete_app_user'),
 
     resetUserPassword: async (userId: string, newPassword: string) => 
-        handleSupabaseError(await supabase.rpc('reset_user_password', { user_id: userId, new_password: newPassword })),
+        handleRpcResponse(await supabase.rpc('reset_user_password', { user_id: userId, new_password: newPassword }), 'reset_user_password'),
+
+    deactivateUser: async (userId: string) => 
+        handleRpcResponse(await supabase.rpc('deactivate_app_user', { user_id: userId }), 'deactivate_app_user'),
+
+    reactivateUser: async (userId: string) => 
+        handleRpcResponse(await supabase.rpc('reactivate_app_user', { user_id: userId }), 'reactivate_app_user'),
+
+    bulkDeactivateEventUsers: async () => 
+        handleRpcResponse(await supabase.rpc('deactivate_all_event_users'), 'deactivate_all_event_users'),
 
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
         if (!eventId) return [];

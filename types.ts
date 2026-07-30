@@ -71,6 +71,7 @@ export interface User {
   email: string;
   role: UserRole;
   district?: string;
+  is_active?: boolean;
 }
 
 export interface Event {

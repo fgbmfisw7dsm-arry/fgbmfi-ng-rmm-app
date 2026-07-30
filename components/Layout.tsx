@@ -46,8 +46,9 @@ const getRoleLabel = () => {
    const role = (user.role || '').toLowerCase();
    const adminRole = isAdminRole(role);
    const registrarRole = isRegistrarRole(role);
-   const showOperations = adminRole || registrarRole || role === UserRole.FINANCE;
-   const showAdminTools = role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.ADMIN;
+   const showAdminTools = adminRole;
+   const showFinanceModule = adminRole || role === UserRole.FINANCE;
+   const showCheckInModule = adminRole || registrarRole;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">
@@ -74,7 +75,7 @@ const getRoleLabel = () => {
           </MenuSection>
 
           <MenuSection title="Operations">
-             {showOperations && (
+             {showCheckInModule && (
                 <>
                   <Link to="/checkin" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/checkin')}`}>
                     Check-In
@@ -82,10 +83,12 @@ const getRoleLabel = () => {
                   <Link to="/register-new" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/register-new')}`}>
                     New Delegate
                   </Link>
-                  <Link to="/admin/financials" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/financials')}`}>
-                     Financials
-                  </Link>
                 </>
+             )}
+             {showFinanceModule && (
+                <Link to="/admin/financials" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/financials')}`}>
+                   Financials
+                </Link>
              )}
           </MenuSection>
 
