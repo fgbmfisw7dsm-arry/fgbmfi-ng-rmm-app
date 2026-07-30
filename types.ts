@@ -153,6 +153,8 @@ export interface FinancialEntry {
 export interface DashboardStats {
   totalDelegates: number;
   totalCheckIns: number;
+  totalArrivals: number;
+  totalSessionAttendance: number;
   checkInsByRank: Record<string, number>;
   checkInsByDistrict: Record<string, number>;
   totalFinancials: number;

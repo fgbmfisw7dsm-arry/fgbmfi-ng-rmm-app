@@ -59,13 +59,14 @@ const AdminDashboard = () => {
     : [];
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
-  const percentage = stats.totalDelegates > 0 ? Math.round((stats.totalCheckIns / stats.totalDelegates) * 100) : 0;
+  const arrivalPct = stats.totalDelegates > 0 ? Math.round((stats.totalArrivals / stats.totalDelegates) * 100) : 0;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard title="Total Delegates" value={stats.totalDelegates || 0} color="blue" />
-        <StatCard title="Total Event Entry" value={`${stats.totalCheckIns || 0} (${percentage}%)`} color="green" />
+        <StatCard title="Event Arrivals" value={`${stats.totalArrivals || 0} (${arrivalPct}%)`} color="green" />
+        <StatCard title="Session Attendance" value={stats.totalSessionAttendance || 0} color="amber" />
         <StatCard title="Total Financials" value={formatCurrency(stats.totalFinancials || 0)} color="purple" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

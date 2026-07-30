@@ -561,6 +561,8 @@ export const db = {
         const rankCounts: Record<string, number> = {};
         const districtCounts: Record<string, number> = {};
         const seenIdentities = new Set<string>();
+        const arrivalIdentities = new Set<string>();
+        let totalSessionAttendance = 0;
         const recentActivity: CheckIn[] = [];
         let from = 0;
 
@@ -583,6 +585,12 @@ export const db = {
                         });
                     }
                 }
+                if (!c.session_id && !arrivalIdentities.has(identityKey)) {
+                    arrivalIdentities.add(identityKey);
+                }
+                if (c.session_id) {
+                    totalSessionAttendance++;
+                }
             });
             if (data.length < 1000) break;
             from += 1000;
@@ -592,7 +600,7 @@ export const db = {
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
 
-        return { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
+        return { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalArrivals: arrivalIdentities.size, totalSessionAttendance, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
     },
 
     getAllDataForExport: async (eventId: string): Promise<any> => {
