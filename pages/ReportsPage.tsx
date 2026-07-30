@@ -7,6 +7,10 @@ import { formatCurrency, exportToPDF } from '../services/utils';
 const ReportsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const isLocked = activeEvent?.is_active === false;
+    const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+    const showRank = eventConfig.show_rank !== false;
+    const showOffice = eventConfig.show_office !== false;
+    const showDelegateType = eventConfig.show_delegate_type !== false;
     const [data, setData] = useState<any>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
     const [events, setEvents] = useState<Event[]>([]);
@@ -141,15 +145,15 @@ const ReportsPage = () => {
                             </div>
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300">
                                 <thead className="bg-gray-50 uppercase text-gray-400 font-black">
-                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Office</th><th className="border p-2">Rank</th><th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
+                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
                                 </thead>
                                 <tbody>
                                     {group.map((d, i) => (
                                         <tr key={i} className="hover:bg-gray-50 border-b">
                                             <td className="border p-2 text-center">{i + 1}</td>
                                             <td className="border p-2 font-black uppercase text-blue-900">{d.title} {d.first_name} {d.last_name}</td>
-                                            <td className="border p-2 font-bold uppercase">{d.office}</td>
-                                            <td className="border p-2 uppercase">{d.rank}</td>
+                                            {showOffice && <td className="border p-2 font-bold uppercase">{d.office}</td>}
+                                            {showRank && <td className="border p-2 uppercase">{d.rank}</td>}
                                             <td className="border p-2 font-mono">{d.phone}</td>
                                             <td className="border p-2 text-center text-gray-400 uppercase leading-tight font-black">
                                                 {d.checked_in_at ? (
@@ -267,9 +271,9 @@ const ReportsPage = () => {
                     
                     {activeTab === 'attendanceMatrix' && (
                         <div className="space-y-12">
-                            {renderMatrixTable("Attendance By Rank", rankColumns, 'rank')}
-                            {renderMatrixTable("Attendance By Office", officeColumns, 'office')}
-                            {renderMatrixTable("Attendance By Delegate Type", delegateTypeColumns, 'delegate_type')}
+                            {showRank && renderMatrixTable("Attendance By Rank", rankColumns, 'rank')}
+                            {showOffice && renderMatrixTable("Attendance By Office", officeColumns, 'office')}
+                            {showDelegateType && renderMatrixTable("Attendance By Delegate Type", delegateTypeColumns, 'delegate_type')}
                         </div>
                     )}
                     

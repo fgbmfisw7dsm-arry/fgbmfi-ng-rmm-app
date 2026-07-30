@@ -10,8 +10,13 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const AdminDashboard = () => {
-  const { activeEventId, user } = useContext(AppContext);
+  const { activeEventId, activeEvent, user } = useContext(AppContext);
   const queryClient = useQueryClient();
+
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+  const showDelegateType = eventConfig.show_delegate_type !== false;
 
   const districtFilter = (isRegistrarRole(user?.role || '') && user?.district) 
     ? user.district.trim() 
@@ -64,6 +69,7 @@ const AdminDashboard = () => {
         <StatCard title="Total Financials" value={formatCurrency(stats.totalFinancials || 0)} color="purple" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {showRank && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border min-h-[400px]">
           <h3 className="font-black mb-4 text-gray-400 uppercase text-[10px] tracking-widest border-b pb-2">Attendance by Rank</h3>
           <div className="h-80 w-full">
@@ -88,7 +94,8 @@ const AdminDashboard = () => {
             ) : <div className="h-full flex items-center justify-center text-gray-400 text-xs">Waiting for records...</div>}
           </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border min-h-[400px]">
+        )}
+        <div className={`bg-white p-6 rounded-2xl shadow-sm border min-h-[400px] ${!showRank ? 'lg:col-span-2' : ''}`}>
           <h3 className="font-black mb-4 text-gray-400 uppercase text-[10px] tracking-widest border-b pb-2">Attendance by District</h3>
           <div className="h-80 w-full">
             {districtData.length > 0 ? (
@@ -121,8 +128,8 @@ const AdminDashboard = () => {
                 <tr className="border-b bg-gray-50 text-gray-400 font-black uppercase text-[10px]">
                     <th className="p-4">Date & Time</th>
                     <th className="p-4">Delegate Name</th>
-                    <th className="p-4">Office</th>
-                    <th className="p-4">Rank</th>
+                    {showOffice && <th className="p-4">Office</th>}
+                    {showRank && <th className="p-4">Rank</th>}
                     <th className="p-4">District</th>
                     <th className="p-4">Status</th>
                 </tr>
@@ -135,8 +142,8 @@ const AdminDashboard = () => {
                         <span className="text-blue-600 font-bold">{c.checked_in_at ? new Date(c.checked_in_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: true}) : ''}</span>
                     </td>
                     <td className="p-4 font-black text-blue-900 uppercase text-xs">{c.delegate_name}</td>
-                    <td className="p-4 font-black text-blue-700 uppercase text-[10px]">{c.office || '-'}</td>
-                    <td className="p-4 font-black text-blue-700 uppercase text-[10px]">{c.rank || '-'}</td>
+                    {showOffice && <td className="p-4 font-black text-blue-700 uppercase text-[10px]">{c.office || '-'}</td>}
+                    {showRank && <td className="p-4 font-black text-blue-700 uppercase text-[10px]">{c.rank || '-'}</td>}
                     <td className="p-4 text-gray-500 font-black text-[10px] uppercase">{c.district}</td>
                     <td className="p-4">
                         <span className={`px-3 py-1 rounded-full font-black uppercase text-[8px] tracking-tighter ${c.session_id ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>
