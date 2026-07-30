@@ -23,7 +23,7 @@ const UsersModule = () => {
     }
 
     const [users, setUsers] = useState<User[]>([]);
-    const [form, setForm] = useState({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
+    const [form, setForm] = useState({ email: '', password: '', role: '' as string, district: '', region: '' });
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
     const [config, setSettings] = useState<SystemSettings | null>(null);
     const [resettingId, setResettingId] = useState<string | null>(null);
@@ -64,6 +64,11 @@ const UsersModule = () => {
             return;
         }
 
+        if (!form.role) {
+            setStatus({ type: 'error', msg: "Please select a system role." });
+            return;
+        }
+
         if (needsDistrict(form.role) && !form.district) {
             setStatus({ type: 'error', msg: "District roles must be assigned to a district." });
             return;
@@ -97,7 +102,7 @@ const UsersModule = () => {
             }
             
             setEditingUserId(null);
-            setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
+            setForm({ email: '', password: '', role: '', district: '', region: '' });
             await load();
         } catch(e:any) { 
             console.error("User Action Error:", e);
@@ -263,12 +268,15 @@ const UsersModule = () => {
                             onChange={e => setForm({...form, role: e.target.value as any, district: needsDistrict(e.target.value) ? form.district : '', region: needsRegion(e.target.value) ? form.region : ''})}
                             disabled={loading}
                         >
+                            <option value="" disabled>-- Select Role --</option>
                             <option value={UserRole.NATIONAL_ADMIN}>National Admin</option>
                             <option value={UserRole.REGIONAL_ADMIN}>Regional Admin</option>
                             <option value={UserRole.DISTRICT_ADMIN}>District Admin</option>
+                            <option value={UserRole.ADMIN}>System Admin (Legacy)</option>
                             <option value={UserRole.NATIONAL_REGISTRAR}>National Registrar</option>
                             <option value={UserRole.REGIONAL_REGISTRAR}>Regional Registrar</option>
                             <option value={UserRole.DISTRICT_REGISTRAR}>District Registrar</option>
+                            <option value={UserRole.REGISTRAR}>Registrar (Legacy)</option>
                             <option value={UserRole.FINANCE}>Finance Admin</option>
                         </select>
                     </div>
