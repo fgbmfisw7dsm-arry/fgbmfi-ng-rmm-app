@@ -272,21 +272,22 @@ AS $func$
 $func$;
 
 -- 3i. Auto-confirm a user after signUp (bypasses email confirmation)
+-- Detects whether auth.users uses confirmed_at (GoTrue v3) or email_confirmed_at (v2)
 CREATE OR REPLACE FUNCTION auto_confirm_user(user_id UUID)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
+DECLARE
+  v_found BOOLEAN;
 BEGIN
-    UPDATE auth.users SET
-        email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
-        updated_at = NOW()
-    WHERE id = user_id;
-
-    IF NOT FOUND THEN
-        RETURN json_build_object('status', 'error', 'message', 'User not found');
-    END IF;
-
-    RETURN json_build_object('status', 'success');
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at') THEN
+    EXECUTE 'UPDATE auth.users SET confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
+  ELSE
+    EXECUTE 'UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
+  END IF;
+  GET DIAGNOSTICS v_found = ROW_COUNT;
+  IF NOT v_found THEN RETURN json_build_object('status', 'error', 'message', 'User not found'); END IF;
+  RETURN json_build_object('status', 'success');
 END;
 $func$;
 
