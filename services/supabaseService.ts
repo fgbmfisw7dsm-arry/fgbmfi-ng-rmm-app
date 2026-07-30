@@ -250,42 +250,12 @@ export const db = {
         const role = user.role.toLowerCase();
         const district = user.district || null;
         const region = user.region || null;
-        const hasAtSign = email.includes('@');
-        const signUpEmail = hasAtSign ? email : `${email}@fgbmfi.ng`;
+        const signUpEmail = email.includes('@') ? email : `${email}@fgbmfi.ng`;
 
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: signUpEmail,
-            password,
-            options: { data: { role } }
+        const result = await supabase.rpc('create_app_user', {
+            email: signUpEmail, password, role, district, region
         });
-
-        if (signUpError) throw signUpError;
-
-        if (!signUpData?.user) {
-            throw new Error("Failed to create user account: no user returned");
-        }
-
-        const { error: confirmError } = await supabase.rpc('auto_confirm_user', {
-            user_id: signUpData.user.id
-        });
-        if (confirmError) {
-            console.warn("Auto-confirm failed:", confirmError);
-        }
-
-        const { error: profileError } = await supabase
-            .from('app_users')
-            .upsert({
-                id: signUpData.user.id,
-                email,
-                role,
-                district,
-                region,
-                is_active: true
-            }, { onConflict: 'id' });
-
-        if (profileError) throw profileError;
-
-        return { status: 'success', id: signUpData.user.id, signUpEmail };
+        return handleRpcResponse(result, 'create_app_user');
     },
 
     updateUser: async (userId: string, updates: Partial<User>) => {
