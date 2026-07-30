@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
-import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole } from '../types';
+import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole, getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF } from '../services/utils';
 
@@ -38,8 +38,19 @@ const ReportsPage = () => {
 
                 if (!mounted) return;
 
-                const userDistrictNorm = user?.district ? norm(user.district) : null;
-                if (isRegistrarRole(user?.role || '') && userDistrictNorm) {
+                const scope = getScopeFilter(user);
+                if (scope.region) {
+                    const regionPrefix = norm(scope.region);
+                    exportData.delegates = (exportData.delegates || []).filter((d: any) => 
+                        norm(d.district).startsWith(regionPrefix)
+                    );
+                    const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
+                    exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
+                    exportData.pledges = (exportData.pledges || []).filter((p: any) => 
+                        norm(p.district).startsWith(regionPrefix)
+                    );
+                } else if (scope.district) {
+                    const userDistrictNorm = norm(scope.district);
                     exportData.delegates = (exportData.delegates || []).filter((d: any) => 
                         norm(d.district) === userDistrictNorm
                     );

@@ -2,7 +2,7 @@
 import React, { useContext, useEffect } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { UserRole, DashboardStats, isRegistrarRole } from '../types';
+import { UserRole, DashboardStats, isRegistrarRole, getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 import StatCard from '../components/StatCard';
 import { formatCurrency } from '../services/utils';
@@ -18,13 +18,13 @@ const AdminDashboard = () => {
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
 
-  const districtFilter = (isRegistrarRole(user?.role || '') && user?.district) 
-    ? user.district.trim() 
-    : undefined;
+  const scope = getScopeFilter(user);
+  const districtFilter = scope.district;
+  const regionFilter = scope.region;
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['stats', activeEventId, districtFilter],
-    queryFn: () => db.getStats(activeEventId, districtFilter),
+    queryFn: () => db.getStats(activeEventId, districtFilter, regionFilter),
     enabled: !!activeEventId,
     refetchOnWindowFocus: false,
   });

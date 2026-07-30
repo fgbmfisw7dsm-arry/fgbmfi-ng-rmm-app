@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { FinancialEntry, Pledge, Delegate, FinancialType, Session, UserRole, isRegistrarRole } from '../types';
+import { FinancialEntry, Pledge, Delegate, FinancialType, Session, UserRole, isRegistrarRole, getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency } from '../services/utils';
 
@@ -46,8 +46,9 @@ const FinancialsPage = () => {
     useEffect(() => {
         const timer = setTimeout(async () => {
             if(searchTerm.length > 2 && activeEventId) {
-                const districtFilter = (isRegistrarRole(user?.role || '') && user.district) ? user.district : undefined;
-                const res = await db.searchDelegates(searchTerm, activeEventId, districtFilter);
+                const scope = getScopeFilter(user);
+                const districtFilter = scope.district;
+                const res = await db.searchDelegates(searchTerm, activeEventId, districtFilter, undefined, scope.region);
                 setSearchResults(res);
             } else setSearchResults([]);
         }, 400);
@@ -57,8 +58,9 @@ const FinancialsPage = () => {
     useEffect(() => {
         const timer = setTimeout(async () => {
             if (redemptionSearch.length > 1 && activeEventId) {
-                const districtFilter = (isRegistrarRole(user?.role || '') && user.district) ? user.district : undefined;
-                const res = await db.searchPledges(redemptionSearch, activeEventId, districtFilter);
+                const scope = getScopeFilter(user);
+                const districtFilter = scope.district;
+                const res = await db.searchPledges(redemptionSearch, activeEventId, districtFilter, scope.region);
                 setRedemptionResults(res);
             } else setRedemptionResults([]);
         }, 400);

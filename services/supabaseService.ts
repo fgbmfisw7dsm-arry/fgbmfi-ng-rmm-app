@@ -85,14 +85,14 @@ export const auth = {
 
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
-                .upsert({ id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR, is_active: true }, { onConflict: 'id' })
+                .upsert({ id: authId, email: normalizeEmail(email), is_active: true }, { onConflict: 'id' })
                 .select().single();
 
             if (createError) throw createError;
             return newProfile as User;
         } catch (err) {
             if ((err as any)?.message?.startsWith?.('ACCOUNT_DEACTIVATED')) throw err;
-            return { id: authId, email: normalizeEmail(email), role: UserRole.REGISTRAR };
+            throw err;
         }
     },
 
@@ -240,7 +240,7 @@ export const db = {
         handleSupabaseError(await supabase.from('app_users').select('*')),
 
     createUser: async (user: Omit<User, 'id'>, password: string) => 
-        handleRpcResponse(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district }), 'create_app_user'),
+        handleRpcResponse(await supabase.rpc('create_app_user', { email: normalizeEmail(user.email), password, role: user.role.toLowerCase(), district: user.district || null, region: user.region || null }), 'create_app_user'),
 
     updateUser: async (userId: string, updates: Partial<User>) => 
         handleSupabaseError(await supabase.from('app_users').update(updates).eq('id', userId).select().single()),
@@ -260,10 +260,14 @@ export const db = {
     bulkDeactivateEventUsers: async () => 
         handleRpcResponse(await supabase.rpc('deactivate_all_event_users'), 'deactivate_all_event_users'),
 
-    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
+    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
         if (!eventId) return [];
         let q = supabase.from('delegates').select('*').or(`event_id.eq.${eventId},event_id.is.null`);
-        if (district) q = q.ilike('district', normalize(district));
+        if (region) {
+            q = q.ilike('district', `${normalize(region)}%`);
+        } else if (district) {
+            q = q.ilike('district', normalize(district));
+        }
         if (query.length > 1) q = q.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,phone.ilike.%${query}%`);
         const { data: delegates, error } = await q.limit(100);
         if (error) throw error;
@@ -295,7 +299,7 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string, region?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         try {
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
@@ -307,7 +311,11 @@ export const db = {
         let q = supabase.from('delegates').select('*', { count: 'exact' });
         if (eventId) q = q.or(`event_id.eq.${eventId},event_id.is.null`);
         if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
-        if (district) q = q.ilike('district', normalize(district));
+        if (region) {
+            q = q.ilike('district', `${normalize(region)}%`);
+        } else if (district) {
+            q = q.ilike('district', normalize(district));
+        }
         const from = (page - 1) * pageSize;
         const { data: rows, count, error } = await q.order('first_name').range(from, from + pageSize - 1);
         if (error) throw error;
@@ -569,18 +577,20 @@ export const db = {
         return { inserted, skipped };
     },
 
-    getStats: async (eventId: string, district?: string): Promise<DashboardStats> => {
+    getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {
         try {
             const { data, error } = await supabase.rpc('get_event_dashboard_stats', {
                 p_event_id: eventId,
-                p_district: district || null,
+                p_district: district || region || null,
             });
             if (!error && data && typeof data.totalArrivals === 'number' && typeof data.totalSessionAttendance === 'number') return data as DashboardStats;
         } catch {}
 
-        const filter = district ? normalize(district).toUpperCase() : null;
+        const regionPrefix = region ? `${normalize(region).toUpperCase()}%` : null;
+        const filter = region ? null : (district ? normalize(district).toUpperCase() : null);
         let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
-        if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
+        if (regionPrefix) delegatesQuery = delegatesQuery.ilike('district', regionPrefix);
+        else if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
         const rankCounts: Record<string, number> = {};
@@ -597,7 +607,10 @@ export const db = {
             data.forEach(c => {
                 if (!c.delegates) return;
                 const d = c.delegates;
-                if (filter && normalize(d.district).toUpperCase() !== filter) return;
+                const districtNorm = normalize(d.district).toUpperCase();
+                if (regionPrefix) {
+                    if (!districtNorm.startsWith(regionPrefix.replace('%', ''))) return;
+                } else if (filter && districtNorm !== filter) return;
                 const identityKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.district)}|${normalize(d.rank)}`.toUpperCase();
                 if (!seenIdentities.has(identityKey)) {
                     seenIdentities.add(identityKey);
@@ -659,9 +672,13 @@ export const db = {
         return { delegates: d, checkins: c, financials: f, pledges: p };
     },
 
-    searchPledges: async (query: string, eventId: string, district?: string): Promise<Pledge[]> => {
+    searchPledges: async (query: string, eventId: string, district?: string, region?: string): Promise<Pledge[]> => {
         let q = supabase.from('pledges').select('*').eq('event_id', eventId);
-        if (district) q = q.ilike('district', normalize(district));
+        if (region) {
+            q = q.ilike('district', `${normalize(region)}%`);
+        } else if (district) {
+            q = q.ilike('district', normalize(district));
+        }
         if (query) q = q.ilike('donor_name', `%${query}%`);
         const { data } = await q.limit(500);
         return data || [];

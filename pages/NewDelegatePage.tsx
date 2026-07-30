@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, Chapter } from '../types';
+import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, isRegionalRole, isDistrictRole, getScopeFilter, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 
@@ -11,8 +11,9 @@ const NewDelegatePage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
   const isLocked = activeEvent?.is_active === false;
   
-  // Logic: Is this a District Registrar who should be locked to one district?
-  const isDistrictScoped = isRegistrarRole((user?.role || '').toLowerCase()) && !!user?.district;
+  const role = (user?.role || '').toLowerCase();
+  const isDistrictScoped = isDistrictRole(role) && !!user?.district;
+  const isRegionalScoped = isRegionalRole(role) && !!user?.region;
   const initialDistrict = isDistrictScoped ? (user?.district || '') : '';
 
   const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
@@ -51,7 +52,16 @@ const NewDelegatePage = () => {
   useEffect(() => { 
     db.getSettings().then(data => {
         if (data) {
-            if (data.districts && data.districts.length > 0) setAvailableDistricts(data.districts);
+            if (data.districts && data.districts.length > 0) {
+                if (isRegionalScoped && user?.region) {
+                    const regionPrefix = user.region.trim().toUpperCase();
+                    setAvailableDistricts(data.districts.filter((d: string) => 
+                        d.trim().toUpperCase().startsWith(regionPrefix)
+                    ));
+                } else {
+                    setAvailableDistricts(data.districts);
+                }
+            }
             if (data.titles && data.titles.length > 0) setAvailableTitles(data.titles);
             if (data.ranks && data.ranks.length > 0) setAvailableRanks(data.ranks);
             if (data.offices && data.offices.length > 0) setAvailableOffices(data.offices);

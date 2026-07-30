@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { User, UserRole, SystemSettings, isRegistrarRole, isAdminRole } from '../types';
+import { User, UserRole, SystemSettings, isRegistrarRole, isAdminRole, isRegionalRole, isDistrictRole } from '../types';
 import { AppContext } from '../context/AppContext';
 
 const UsersModule = () => {
@@ -23,7 +23,7 @@ const UsersModule = () => {
     }
 
     const [users, setUsers] = useState<User[]>([]);
-    const [form, setForm] = useState({ email: '', password: '', role: UserRole.REGISTRAR, district: '' });
+    const [form, setForm] = useState({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
     const [config, setSettings] = useState<SystemSettings | null>(null);
     const [resettingId, setResettingId] = useState<string | null>(null);
@@ -36,7 +36,8 @@ const UsersModule = () => {
     const [bulkDeactivating, setBulkDeactivating] = useState(false);
     const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
-    const needsDistrict = (r: string) => r === UserRole.DISTRICT_ADMIN || r === UserRole.DISTRICT_REGISTRAR || r === UserRole.REGISTRAR;
+    const needsDistrict = (r: string) => isDistrictRole(r);
+    const needsRegion = (r: string) => isRegionalRole(r);
 
     const load = async () => {
         setLoading(true);
@@ -64,7 +65,12 @@ const UsersModule = () => {
         }
 
         if (needsDistrict(form.role) && !form.district) {
-            setStatus({ type: 'error', msg: "Registrar accounts must be assigned to a district." });
+            setStatus({ type: 'error', msg: "District roles must be assigned to a district." });
+            return;
+        }
+
+        if (needsRegion(form.role) && !form.region) {
+            setStatus({ type: 'error', msg: "Regional roles must be assigned to a region." });
             return;
         }
 
@@ -80,7 +86,8 @@ const UsersModule = () => {
             if (editingUserId) {
                 await db.updateUser(editingUserId, { 
                     role: form.role, 
-                    district: needsDistrict(form.role) ? form.district : '' 
+                    district: needsDistrict(form.role) ? form.district : '',
+                    region: needsRegion(form.role) ? form.region : ''
                 });
                 setStatus({ type: 'success', msg: "Account updated successfully." });
             } else {
@@ -90,7 +97,7 @@ const UsersModule = () => {
             }
             
             setEditingUserId(null);
-            setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '' });
+            setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
             await load();
         } catch(e:any) { 
             console.error("User Action Error:", e);
@@ -109,7 +116,8 @@ const UsersModule = () => {
             email: u.email,
             password: '', 
             role: u.role,
-            district: u.district || ''
+            district: u.district || '',
+            region: u.region || ''
         });
         setStatus(null);
         setConfirmDeleteUserId(null);
@@ -119,7 +127,7 @@ const UsersModule = () => {
 
     const cancelEditing = () => {
         setEditingUserId(null);
-        setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '' });
+        setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
         setStatus(null);
     };
 
@@ -251,7 +259,7 @@ const UsersModule = () => {
                         <select 
                             className="w-full p-4 border-2 border-gray-100 rounded-2xl bg-gray-50 font-black text-sm uppercase outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
                             value={form.role} 
-                            onChange={e => setForm({...form, role: e.target.value as any, district: needsDistrict(e.target.value) ? form.district : ''})}
+                            onChange={e => setForm({...form, role: e.target.value as any, district: needsDistrict(e.target.value) ? form.district : '', region: needsRegion(e.target.value) ? form.region : ''})}
                             disabled={loading}
                         >
                             <option value={UserRole.NATIONAL_ADMIN}>National Admin</option>
@@ -277,6 +285,24 @@ const UsersModule = () => {
                                 {config?.districts.map(d => <option key={d} value={d}>{d}</option>)}
                                 {form.district && !config?.districts.includes(form.district) && (
                                     <option value={form.district}>{form.district} (Un-normalized)</option>
+                                )}
+                            </select>
+                        </div>
+                    )}
+
+                    {needsRegion(form.role) && (
+                        <div className="space-y-1 animate-in slide-in-from-top-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Region Scope</label>
+                            <select 
+                                className="w-full p-4 border-2 border-gray-100 rounded-2xl bg-gray-50 font-black text-xs uppercase outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                                value={form.region} 
+                                onChange={e => setForm({...form, region: e.target.value})}
+                                disabled={loading}
+                            >
+                                <option value="">Select Region...</option>
+                                {config?.regions.map(r => <option key={r} value={r}>{r}</option>)}
+                                {form.region && !config?.regions.includes(form.region) && (
+                                    <option value={form.region}>{form.region} (Custom)</option>
                                 )}
                             </select>
                         </div>
@@ -381,6 +407,11 @@ const UsersModule = () => {
                                     {u.district && (
                                         <p className="text-blue-500 font-black uppercase text-[10px] tracking-widest">
                                             {u.district} District Jurisdiction
+                                        </p>
+                                    )}
+                                    {u.region && (
+                                        <p className="text-emerald-600 font-black uppercase text-[10px] tracking-widest">
+                                            {u.region} Region Jurisdiction
                                         </p>
                                     )}
                                 </div>

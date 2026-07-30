@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, Chapter } from '../types';
+import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
@@ -60,11 +60,13 @@ const CheckInPage = () => {
     staleTime: 300000,
   });
 
-  const districtFilter = (isRegistrar && user.district) ? user.district : undefined;
+  const scope = getScopeFilter(user);
+  const districtFilter = scope.district;
+  const regionFilter = scope.region;
 
   const { data: searchResults } = useQuery({
-    queryKey: ['delegates', activeEventId, query, selectedSessionId, districtFilter],
-    queryFn: () => db.searchDelegates(query, activeEventId, districtFilter, selectedSessionId),
+    queryKey: ['delegates', activeEventId, query, selectedSessionId, districtFilter, regionFilter],
+    queryFn: () => db.searchDelegates(query, activeEventId, districtFilter, selectedSessionId, regionFilter),
     enabled: query.trim().length > 1 && !!activeEventId,
     staleTime: 15000,
   });

@@ -44,6 +44,24 @@ export const isAdminRole = (role: string): boolean =>
 export const isRegistrarRole = (role: string): boolean =>
   role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR;
 
+export const isNationalRole = (role: string): boolean =>
+  role === UserRole.NATIONAL_ADMIN || role === UserRole.NATIONAL_REGISTRAR;
+
+export const isRegionalRole = (role: string): boolean =>
+  role === UserRole.REGIONAL_ADMIN || role === UserRole.REGIONAL_REGISTRAR;
+
+export const isDistrictRole = (role: string): boolean =>
+  role === UserRole.DISTRICT_ADMIN || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR;
+
+export const getScopeFilter = (user: { role?: string; district?: string; region?: string } | null): { district?: string; region?: string } => {
+  if (!user) return {};
+  const role = (user.role || '').toLowerCase();
+  if (isAdminRole(role) || role === UserRole.FINANCE) return {};
+  if (isNationalRole(role)) return {};
+  if (isRegionalRole(role)) return user.region ? { region: user.region } : {};
+  return user.district ? { district: user.district } : {};
+};
+
 // Database Models
 export interface Delegate {
   delegate_id: string;
@@ -71,6 +89,7 @@ export interface User {
   email: string;
   role: UserRole;
   district?: string;
+  region?: string;
   is_active?: boolean;
 }
 
