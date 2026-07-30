@@ -185,6 +185,7 @@ BEGIN
   INSERT INTO public.deleted_users (id, email) VALUES (v_uid, v_email)
   ON CONFLICT (id) DO UPDATE SET deleted_at = NOW();
   DELETE FROM public.app_users WHERE id = v_uid;
+  DELETE FROM auth.users WHERE id = v_uid;
   RETURN json_build_object('status', 'success', 'message', 'Account permanently removed');
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
