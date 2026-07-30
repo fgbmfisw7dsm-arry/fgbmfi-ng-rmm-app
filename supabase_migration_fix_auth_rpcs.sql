@@ -1,20 +1,18 @@
 -- ============================================================
 -- FGBMFI Nigeria EMS — Auth RPC Bugfix Migration
--- Fixes: create_app_user (removes instance_id reference)
---        update_auth_user_email (removes removed column references)
+-- Fixes: create_app_user (removes instance_id, adds identities)
+--        update_auth_user_email (removed dead column refs)
 -- Run this ENTIRE block in the Supabase SQL Editor.
 -- ============================================================
 
--- 1. Drop old function signatures to ensure clean replacement
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS update_auth_user_email(UUID, TEXT);
 
--- 2. create_app_user — Direct auth.users + identities insert.
---    GoTrue v2+ requires auth.identities record for signInWithPassword().
---    instance_id was removed in GoTrue v2 (2024+).
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   new_user_id UUID;
 BEGIN
@@ -49,14 +47,12 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
--- 3. update_auth_user_email — Only touches email and confirmed_at.
---    All other token/change columns removed from GoTrue v2 schema.
 CREATE OR REPLACE FUNCTION update_auth_user_email(user_id UUID, new_email TEXT)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
-AS $$
+AS $func$
 BEGIN
     UPDATE auth.users SET
         email = new_email,
@@ -70,4 +66,4 @@ BEGIN
 
     RETURN json_build_object('status', 'success');
 END;
-$$;
+$func$;

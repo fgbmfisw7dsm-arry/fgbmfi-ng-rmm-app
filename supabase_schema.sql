@@ -132,7 +132,9 @@ DROP FUNCTION IF EXISTS deactivate_all_event_users();
 -- 3b. Create User Profile & Auth Account (Fix: removed instance_id, added identities insert)
 -- GoTrue v2+ requires auth.identities record for signInWithPassword() to work.
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   new_user_id UUID;
 BEGIN
@@ -163,11 +165,13 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3c. Delete User (Sprint 8 — with tombstone tracking)
 CREATE OR REPLACE FUNCTION delete_app_user(user_id_to_delete TEXT)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   v_uid UUID;
   v_email TEXT;
@@ -184,11 +188,13 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3d. Reset Password (Sprint 8 — uses encrypted_password, explicit cast)
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 BEGIN
   UPDATE auth.users SET encrypted_password = crypt(new_password, gen_salt('bf'))
   WHERE auth.users.id = user_id::uuid;
@@ -196,11 +202,13 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3e. Deactivate a single user (soft-delete)
 CREATE OR REPLACE FUNCTION deactivate_app_user(user_id TEXT)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 BEGIN
   UPDATE public.app_users SET is_active = false WHERE id = user_id::uuid;
   IF NOT FOUND THEN
@@ -210,11 +218,13 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3f. Reactivate a single user
 CREATE OR REPLACE FUNCTION reactivate_app_user(user_id TEXT)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 BEGIN
   UPDATE public.app_users SET is_active = true WHERE id = user_id::uuid;
   IF NOT FOUND THEN
@@ -224,11 +234,13 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3g. Bulk deactivate all non-admin users
 CREATE OR REPLACE FUNCTION deactivate_all_event_users()
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   v_count INT;
 BEGIN
@@ -248,15 +260,15 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- 3h. Get Auth User Role (reads role from auth.users raw_app_meta_data as fallback)
 CREATE OR REPLACE FUNCTION get_auth_user_role()
 RETURNS TEXT
 LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
+AS $func$
   SELECT raw_app_meta_data->>'role' FROM auth.users WHERE id = auth.uid();
-$$;
+$func$;
 
 -- 4. INITIAL SEED DATA
 INSERT INTO system_settings (districts, ranks, offices, regions)
@@ -321,7 +333,9 @@ CREATE POLICY "chapters_update" ON chapters FOR UPDATE TO authenticated USING (t
 
 -- Dashboard stats: returns counts and aggregates for a single event
 CREATE OR REPLACE FUNCTION get_event_dashboard_stats(p_event_id UUID, p_district TEXT DEFAULT NULL)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   total_delegates BIGINT;
   total_checkins BIGINT;
@@ -396,7 +410,7 @@ BEGIN
     'recentActivity', recent_activity
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- Paginated delegates query (for MasterListModule)
 CREATE OR REPLACE FUNCTION get_paginated_delegates(
@@ -404,7 +418,9 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_page_size INTEGER DEFAULT 50,
   p_search TEXT DEFAULT NULL,
   p_district TEXT DEFAULT NULL
-) RETURNS JSON AS $$
+) RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   total_count BIGINT;
   results JSON;
@@ -454,11 +470,13 @@ BEGIN
     'totalPages', CEIL(total_count::FLOAT / p_page_size)
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- Export data RPC (replaces client-side getAllDataForExport)
 CREATE OR REPLACE FUNCTION get_event_export_data(p_event_id UUID)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   delegates_json JSON;
   checkins_json JSON;
@@ -502,14 +520,13 @@ BEGIN
     'pledges', pledges_json
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$func$;
 
 -- Bulk import delegates with deduplication
 CREATE OR REPLACE FUNCTION import_delegates_batch(p_delegates JSONB)
 RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+LANGUAGE plpgsql SECURITY DEFINER
+AS $func$
 DECLARE
   v_inserted INT := 0;
   v_skipped INT := 0;
@@ -552,7 +569,7 @@ BEGIN
     'total', v_inserted + v_skipped
   );
 END;
-$$;
+$func$;
 
 -- 8. ROW-LEVEL SECURITY (RLS) POLICIES
 
@@ -560,25 +577,25 @@ $$;
 CREATE OR REPLACE FUNCTION is_admin_user()
 RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
+AS $func$
   SELECT EXISTS (
     SELECT 1 FROM app_users
     WHERE id = auth.uid()
       AND role IN ('national_admin','regional_admin','district_admin','admin')
       AND (is_active IS NULL OR is_active = true)
   );
-$$;
+$func$;
 
 -- 8b. Helper: Get current user's district (for registrar scoping)
 CREATE OR REPLACE FUNCTION current_user_district()
 RETURNS TEXT
 LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
+AS $func$
   SELECT district FROM app_users
   WHERE id = auth.uid()
     AND (is_active IS NULL OR is_active = true)
   LIMIT 1;
-$$;
+$func$;
 
 -- 8c. Enable RLS on all tables
 ALTER TABLE events           ENABLE ROW LEVEL SECURITY;
