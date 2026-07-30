@@ -238,6 +238,14 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- 3h. Get Auth User Role (reads role from auth.users raw_app_meta_data as fallback)
+CREATE OR REPLACE FUNCTION get_auth_user_role()
+RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT raw_app_meta_data->>'role' FROM auth.users WHERE id = auth.uid();
+$$;
+
 -- 4. INITIAL SEED DATA
 INSERT INTO system_settings (districts, ranks, offices, regions)
 SELECT 

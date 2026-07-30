@@ -122,7 +122,7 @@ const AppContent = () => {
         if (error) throw error;
 
         if (session?.user && mounted) {
-           const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
+           const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '', session.user.app_metadata);
            if (appUser && mounted) {
              userIdRef.current = appUser.id;
              setUser(appUser as User);
@@ -144,7 +144,7 @@ const AppContent = () => {
           if (mounted) setUser(null);
         } else if (event === 'SIGNED_IN' && session?.user) {
           if (userIdRef.current !== session.user.id) {
-            const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '');
+            const appUser = await auth.getOrCreateProfile(session.user.id, session.user.email || '', session.user.app_metadata);
             if (mounted) {
               userIdRef.current = appUser.id;
               setUser(appUser as User);
