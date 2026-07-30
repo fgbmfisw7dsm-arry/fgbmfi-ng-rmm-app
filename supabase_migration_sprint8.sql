@@ -67,19 +67,3 @@ EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- ============================================================
--- 5. Verify RLS helper is_admin_user handles region-based admins
--- ============================================================
-DROP FUNCTION IF EXISTS is_admin_user();
-CREATE OR REPLACE FUNCTION is_admin_user()
-RETURNS BOOLEAN
-LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM app_users
-    WHERE id = auth.uid()
-      AND role IN ('national_admin','regional_admin','district_admin','admin')
-      AND (is_active IS NULL OR is_active = true)
-  );
-$$;
