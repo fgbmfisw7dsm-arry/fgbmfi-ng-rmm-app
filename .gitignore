@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+nul
+temp_*.js
+temp_*.cjs

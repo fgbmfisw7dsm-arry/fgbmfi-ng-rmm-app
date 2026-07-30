@@ -124,6 +124,15 @@ export const auth = {
 };
 
 export const db = {
+    getEvents: async (): Promise<Event[]> =>
+        handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
+
+    createEvent: async (event: Omit<Event, 'event_id'>): Promise<Event> =>
+        handleSupabaseError(await supabase.from('events').insert(event).select().single()),
+
+    updateEvent: async (id: string, updates: Partial<Event>): Promise<Event> =>
+        handleSupabaseError(await supabase.from('events').update(updates).eq('event_id', id).select().single()),
+
     deleteEvent: async (id: string) => 
         handleSupabaseError(await supabase.from('events').delete().eq('event_id', id)),
 

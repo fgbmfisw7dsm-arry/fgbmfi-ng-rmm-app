@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { db } from '../services/supabaseService';
-import { Event, Session, UserRole } from '../types';
+import { Event, Session, isAdminRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { isStripeKeyDetected } from '../services/supabaseClient';
 
@@ -29,9 +29,8 @@ const EventsModule = () => {
     const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
 
-    // Robust Case-insensitive Admin Check
     const userRole = (user?.role || '').toLowerCase();
-    const isAdmin = userRole === UserRole.NATIONAL_ADMIN || userRole === UserRole.REGIONAL_ADMIN || userRole === UserRole.ADMIN || userRole === 'admin' || userRole.includes('admin');
+    const isAdmin = isAdminRole(userRole);
 
     // Force a data sync on mount to ensure catalogue is complete
     useEffect(() => {
