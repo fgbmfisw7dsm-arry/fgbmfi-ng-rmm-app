@@ -1,8 +1,9 @@
 -- Sprint 8: Fix RPCs + Add Region Support + Fix Delete/Remove
 -- Run in Supabase SQL Editor after Sprint 7
+-- CRITICAL: Run the CREATE TABLE below FIRST (select it alone), then run each function definition separately
 
 -- ============================================================
--- 1. Add region column + deleted_users tombstone table
+-- 1. Alter app_users + create deleted_users tombstone
 -- ============================================================
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS region TEXT;
 
@@ -13,7 +14,7 @@ CREATE TABLE IF NOT EXISTS deleted_users (
 );
 
 -- ============================================================
--- 2. Fix delete_app_user RPC (explicit ::uuid cast for remove)
+-- 2. delete_app_user (select and run this block alone)
 -- ============================================================
 DROP FUNCTION IF EXISTS delete_app_user(TEXT);
 DROP FUNCTION IF EXISTS delete_app_user(UUID);
@@ -25,20 +26,13 @@ DECLARE
   v_email TEXT;
 BEGIN
   v_uid := user_id_to_delete::uuid;
-
-  -- Capture email before deleting
   SELECT email INTO v_email FROM public.app_users WHERE id = v_uid;
   IF NOT FOUND THEN
     RETURN json_build_object('error', 'User not found');
   END IF;
-
-  -- Insert tombstone to prevent re-registration on next login
   INSERT INTO public.deleted_users (id, email) VALUES (v_uid, v_email)
   ON CONFLICT (id) DO UPDATE SET deleted_at = NOW();
-
-  -- Delete the app profile
   DELETE FROM public.app_users WHERE id = v_uid;
-
   RETURN json_build_object('status', 'success', 'message', 'Account permanently removed');
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
@@ -46,7 +40,7 @@ END;
 $body$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
--- 3. Fix create_app_user RPC (accept region parameter)
+-- 3. create_app_user (select and run this block alone)
 -- ============================================================
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
@@ -76,7 +70,7 @@ END;
 $body$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
--- 4. Verify reset_user_password has ::uuid cast
+-- 4. reset_user_password (select and run this block alone)
 -- ============================================================
 DROP FUNCTION IF EXISTS reset_user_password(TEXT, TEXT);
 DROP FUNCTION IF EXISTS reset_user_password(UUID, TEXT);
