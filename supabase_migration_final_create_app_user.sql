@@ -1,13 +1,12 @@
 -- ============================================================
--- FGBMFI Nigeria EMS — Final Fix: Single RPC User Creation (v2)
+-- FGBMFI Nigeria EMS — create_app_user RPC (v3)
 -- Run this in Supabase SQL Editor.
+-- Sets all required GoTrue columns dynamically.
 -- ============================================================
 
--- 1. Drop old versions
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 
--- 2. Single RPC — dynamically builds UPDATE to skip missing columns
 CREATE OR REPLACE FUNCTION create_app_user(
     email TEXT, password TEXT, role TEXT,
     district TEXT DEFAULT NULL, region TEXT DEFAULT NULL
@@ -17,47 +16,49 @@ LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
 DECLARE
     new_user_id UUID;
-    extra_cols TEXT := '';
-    extra_vals TEXT := '';
-    upd_cols TEXT := '';
+    v_instance_id UUID;
+    ins_cols TEXT;
+    ins_vals TEXT;
+    upd_cols TEXT;
 BEGIN
     new_user_id := gen_random_uuid();
 
-    -- Optional GoTrue v3 columns
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'auth' AND table_name = 'users'
-          AND column_name = 'is_sso_user' AND is_generated = 'NEVER'
-    ) THEN
-        extra_cols := ', is_sso_user, is_anonymous';
-        extra_vals := ', false, false';
+    -- Get project instance_id from caller's own auth record
+    BEGIN
+        SELECT instance_id INTO v_instance_id FROM auth.users WHERE id = auth.uid();
+    EXCEPTION WHEN OTHERS THEN
+        v_instance_id := NULL;
+    END;
+
+    -- Build INSERT column/value lists dynamically
+    ins_cols := 'id, email, encrypted_password, created_at, updated_at, raw_app_meta_data, aud, role';
+    ins_vals := '$1, $2, crypt($3, gen_salt(''bf'')), NOW(), NOW(), $4, ''authenticated'', ''authenticated''';
+
+    IF v_instance_id IS NOT NULL THEN
+        ins_cols := ins_cols || ', instance_id';
+        ins_vals := ins_vals || ', $5';
     END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'auth' AND table_name = 'users'
-          AND column_name = 'role' AND is_generated = 'NEVER'
-    ) THEN
-        extra_cols := extra_cols || ', role';
-        extra_vals := extra_vals || ', ''authenticated''';
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'is_sso_user' AND is_generated = 'NEVER') THEN
+        ins_cols := ins_cols || ', is_sso_user, is_anonymous';
+        ins_vals := ins_vals || ', false, false';
     END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'auth' AND table_name = 'users'
-          AND column_name = 'aud' AND is_generated = 'NEVER'
-    ) THEN
-        extra_cols := extra_cols || ', aud';
-        extra_vals := extra_vals || ', ''authenticated''';
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'raw_user_meta_data' AND is_generated = 'NEVER') THEN
+        ins_cols := ins_cols || ', raw_user_meta_data';
+        ins_vals := ins_vals || ', ''{}''::jsonb';
     END IF;
 
-    -- INSERT into auth.users (omit generated columns)
-    EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at, updated_at'
-        || extra_cols || ')
-        VALUES ($1, $2, crypt($3, gen_salt(''bf'')), $4, NOW(), NOW()'
-        || extra_vals || ')'
-        USING new_user_id, email, password,
-              jsonb_build_object('role', role, 'provider', 'email');
+    IF v_instance_id IS NOT NULL THEN
+        EXECUTE 'INSERT INTO auth.users (' || ins_cols || ') VALUES (' || ins_vals || ')'
+            USING new_user_id, email, password,
+                  jsonb_build_object('role', role, 'provider', 'email'),
+                  v_instance_id;
+    ELSE
+        EXECUTE 'INSERT INTO auth.users (' || ins_cols || ') VALUES (' || ins_vals || ')'
+            USING new_user_id, email, password,
+                  jsonb_build_object('role', role, 'provider', 'email');
+    END IF;
 
     -- Insert auth.identities
     INSERT INTO auth.identities
@@ -68,8 +69,7 @@ BEGIN
          jsonb_build_object('sub', new_user_id, 'email', email),
          'email', email, NOW(), NOW(), NOW());
 
-    -- Confirm the user: set email_confirmed_at (verified writable on this instance)
-    -- Clear tokens where columns exist — skip those that don't
+    -- Confirm the user: set email_confirmed_at + clear tokens
     upd_cols := 'email_confirmed_at = NOW()';
 
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmation_token') THEN
@@ -80,29 +80,9 @@ BEGIN
         upd_cols := upd_cols || ', confirmation_sent_at = NOW()';
     END IF;
 
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'recovery_token') THEN
-        upd_cols := upd_cols || ', recovery_token = ''''';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_current') THEN
-        upd_cols := upd_cols || ', email_change_token_current = ''''';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_new') THEN
-        upd_cols := upd_cols || ', email_change_token_new = ''''';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change') THEN
-        upd_cols := upd_cols || ', email_change = ''''';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_sent_at') THEN
-        upd_cols := upd_cols || ', email_change_sent_at = NOW()';
-    END IF;
-
     EXECUTE 'UPDATE auth.users SET ' || upd_cols || ', updated_at = NOW() WHERE id = $1' USING new_user_id;
 
-    -- Create the app profile
+    -- Create app profile
     INSERT INTO public.app_users (id, email, role, district, region, is_active)
     VALUES (new_user_id, email, role, district, region, true);
 
