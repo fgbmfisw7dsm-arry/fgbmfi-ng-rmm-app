@@ -1,17 +1,13 @@
 -- ============================================================
--- FGBMFI Nigeria EMS — Final Fix: Single RPC User Creation
+-- FGBMFI Nigeria EMS — Final Fix: Single RPC User Creation (v2)
 -- Run this in Supabase SQL Editor.
---
--- Replaces the broken signUp → restore → confirm → insert chain
--- with a single SECURITY DEFINER RPC that runs everything server-side.
--- No admin session hijacking. No DNS email validation. No auto-delete.
 -- ============================================================
 
 -- 1. Drop old versions
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_app_user(TEXT, TEXT, TEXT, TEXT, TEXT);
 
--- 2. Single RPC: INSERT auth.users + identities + confirm + app_users
+-- 2. Single RPC — dynamically builds UPDATE to skip missing columns
 CREATE OR REPLACE FUNCTION create_app_user(
     email TEXT, password TEXT, role TEXT,
     district TEXT DEFAULT NULL, region TEXT DEFAULT NULL
@@ -23,10 +19,11 @@ DECLARE
     new_user_id UUID;
     extra_cols TEXT := '';
     extra_vals TEXT := '';
+    upd_cols TEXT := '';
 BEGIN
     new_user_id := gen_random_uuid();
 
-    -- Optional GoTrue v3 columns (is_sso_user, is_anonymous)
+    -- Optional GoTrue v3 columns
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'auth' AND table_name = 'users'
@@ -36,8 +33,7 @@ BEGIN
         extra_vals := ', false, false';
     END IF;
 
-    -- INSERT into auth.users — omit confirmed_at (GENERATED ALWAYS) and
-    -- email_confirmed_at (set via UPDATE below to avoid INSERT ordering issues)
+    -- INSERT into auth.users (omit generated columns)
     EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at, updated_at'
         || extra_cols || ')
         VALUES ($1, $2, crypt($3, gen_salt(''bf'')), $4, NOW(), NOW()'
@@ -45,7 +41,7 @@ BEGIN
         USING new_user_id, email, password,
               jsonb_build_object('role', role, 'provider', 'email');
 
-    -- Insert auth.identities (required by GoTrue for sign-in)
+    -- Insert auth.identities
     INSERT INTO auth.identities
         (id, user_id, identity_data, provider, provider_id,
          last_sign_in_at, created_at, updated_at)
@@ -54,17 +50,39 @@ BEGIN
          jsonb_build_object('sub', new_user_id, 'email', email),
          'email', email, NOW(), NOW(), NOW());
 
-    -- Confirm the user: set email_confirmed_at (GoTrue checks this)
-    -- Clear confirmation tokens so GoTrue's generated confirmed_at computes cleanly
-    UPDATE auth.users SET
-        email_confirmed_at = NOW(),
-        confirmation_token = '',
-        confirmation_sent_at = NOW(),
-        recovery_token = '',
-        email_change_token = '',
-        email_change = '',
-        updated_at = NOW()
-    WHERE id = new_user_id;
+    -- Confirm the user: set email_confirmed_at (verified writable on this instance)
+    -- Clear tokens where columns exist — skip those that don't
+    upd_cols := 'email_confirmed_at = NOW()';
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmation_token') THEN
+        upd_cols := upd_cols || ', confirmation_token = ''''';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmation_sent_at') THEN
+        upd_cols := upd_cols || ', confirmation_sent_at = NOW()';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'recovery_token') THEN
+        upd_cols := upd_cols || ', recovery_token = ''''';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_current') THEN
+        upd_cols := upd_cols || ', email_change_token_current = ''''';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_new') THEN
+        upd_cols := upd_cols || ', email_change_token_new = ''''';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change') THEN
+        upd_cols := upd_cols || ', email_change = ''''';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_sent_at') THEN
+        upd_cols := upd_cols || ', email_change_sent_at = NOW()';
+    END IF;
+
+    EXECUTE 'UPDATE auth.users SET ' || upd_cols || ', updated_at = NOW() WHERE id = $1' USING new_user_id;
 
     -- Create the app profile
     INSERT INTO public.app_users (id, email, role, district, region, is_active)
