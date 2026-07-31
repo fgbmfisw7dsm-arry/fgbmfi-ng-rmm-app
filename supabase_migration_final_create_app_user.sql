@@ -33,6 +33,24 @@ BEGIN
         extra_vals := ', false, false';
     END IF;
 
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'auth' AND table_name = 'users'
+          AND column_name = 'role' AND is_generated = 'NEVER'
+    ) THEN
+        extra_cols := extra_cols || ', role';
+        extra_vals := extra_vals || ', ''authenticated''';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'auth' AND table_name = 'users'
+          AND column_name = 'aud' AND is_generated = 'NEVER'
+    ) THEN
+        extra_cols := extra_cols || ', aud';
+        extra_vals := extra_vals || ', ''authenticated''';
+    END IF;
+
     -- INSERT into auth.users (omit generated columns)
     EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at, updated_at'
         || extra_cols || ')
