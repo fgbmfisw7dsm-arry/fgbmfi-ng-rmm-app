@@ -291,23 +291,24 @@ AS $func$
 $func$;
 
 -- 3i. Auto-confirm a user (handles GoTrue v2, v3, and v3+ GENERATED ALWAYS columns)
+-- GoTrue checks BOTH email_confirmed_at AND confirmed_at for IsConfirmed()
 CREATE OR REPLACE FUNCTION auto_confirm_user(user_id UUID)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
 DECLARE
-  v_found BOOLEAN;
+  v_confirmed BOOLEAN := false;
 BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
+    EXECUTE 'UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
+    v_confirmed := true;
+  END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
     EXECUTE 'UPDATE auth.users SET confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
-  ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
-    EXECUTE 'UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
-  ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at') THEN
-    EXECUTE 'UPDATE auth.users SET confirmation_token = '''', confirmation_sent_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
+    v_confirmed := true;
   END IF;
-  GET DIAGNOSTICS v_found = ROW_COUNT;
-  IF NOT v_found THEN RETURN json_build_object('status', 'error', 'message', 'User not found'); END IF;
-  RETURN json_build_object('status', 'success');
+  EXECUTE 'UPDATE auth.users SET confirmation_token = '''', confirmation_sent_at = COALESCE(confirmation_sent_at, NOW()), recovery_token = '''', email_change_token = '''', email_change = '''', updated_at = NOW() WHERE id = $1' USING user_id;
+  RETURN json_build_object('status', 'success', 'confirmed', v_confirmed);
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('status', 'ok', 'message', SQLERRM);
 END;

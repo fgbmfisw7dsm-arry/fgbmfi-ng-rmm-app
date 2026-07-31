@@ -276,9 +276,13 @@ export const db = {
         const newUserId = signUpData.user.id;
 
         try {
-            await supabase.rpc('auto_confirm_user', { user_id: newUserId });
-        } catch (e) {
-            /* generated-column GoTrue handles confirmation internally */
+            await supabase.rpc('update_auth_user_email', { user_id: newUserId, new_email: email });
+        } catch (e1) {
+            try {
+                await supabase.rpc('auto_confirm_user', { user_id: newUserId });
+            } catch (e2) {
+                /* GoTrue may already have confirmed the user or columns are unmodifiable */
+            }
         }
 
         const { error: profileError } = await supabase.from('app_users').insert({
