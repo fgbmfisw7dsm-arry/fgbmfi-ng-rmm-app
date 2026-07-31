@@ -33,6 +33,9 @@ const SessionMinistryPage: React.FC = () => {
   const [vdValue, setVdValue] = useState<Record<string, string>>({});
   const [recordedIds, setRecordedIds] = useState<Set<string>>(new Set());
   const [summaryRef, setSummaryRef] = useState<HTMLDivElement | null>(null);
+  const [manualType, setManualType] = useState<SessionResponseType | null>(null);
+  const [manualValue, setManualValue] = useState('');
+  const [savingManual, setSavingManual] = useState(false);
 
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
@@ -51,7 +54,7 @@ const SessionMinistryPage: React.FC = () => {
     }
   }, [sessions, selectedSessionId]);
 
-  const { dashboard, recordResponse, recordVD } = useMinistry(activeEventId, user);
+  const { dashboard, recordResponse, recordVD, recordSummary } = useMinistry(activeEventId, user);
 
   const currentDashboard = dashboard.data?.find(d => d.session_id === selectedSessionId);
 
@@ -235,6 +238,19 @@ const SessionMinistryPage: React.FC = () => {
     setPendingReg(null);
   };
 
+  const handleManualSave = async () => {
+    if (!manualType || !selectedSessionId) return;
+    const count = parseInt(manualValue, 10);
+    if (isNaN(count) || count < 0) return;
+    setSavingManual(true);
+    try {
+      await recordSummary.mutateAsync({ sessionId: selectedSessionId, responseType: manualType, totalCount: count });
+      setManualType(null);
+      setManualValue('');
+    } catch {}
+    setSavingManual(false);
+  };
+
   const handleVDSave = async (sessionId: string) => {
     const val = parseInt(vdValue[sessionId] || '', 10);
     if (isNaN(val) || val < 0) return;
@@ -251,11 +267,19 @@ const SessionMinistryPage: React.FC = () => {
   };
 
   const handleExportPDF = () => {
-    if (summaryRef) exportToPDF(summaryRef, 'Sessions_Summary.pdf', 'landscape');
+    if (summaryRef) exportToPDF(summaryRef, `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.pdf`, 'landscape');
   };
 
   const handleExportCSV = () => {
-    const rows = (dashboard.data || []).map(d => ({
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const headerRows = [
+      { '': 'FGBMFI Nigeria — Events Management System' },
+      { '': activeEvent?.name || '' },
+      { '': 'Sessions Summary (All Sessions)' },
+      { '': `Generated: ${today}` },
+      { '': '' },
+    ];
+    const dataRows = (dashboard.data || []).map(d => ({
       Session: d.session_title,
       ATT: d.attendance,
       FT: (d.ft_count + d.ft_summary) || 0,
@@ -264,7 +288,7 @@ const SessionMinistryPage: React.FC = () => {
       HGB: (d.hgb_count + d.hgb_summary) || 0,
       VD: d.voice_distribution || 0,
     }));
-    exportToCSV(rows, 'Sessions_Summary.csv');
+    exportToCSV([...headerRows, ...dataRows], `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.csv`);
   };
 
   if (!activeEventId) {
@@ -314,6 +338,18 @@ const SessionMinistryPage: React.FC = () => {
                 <div className="text-[9px] tracking-wider">{RESPONSE_TYPE_LABELS[type]}</div>
               </button>
             ))}
+          </div>
+        )}
+        {selectedSessionId && (
+          <div className="flex justify-end">
+            <button
+              onClick={() => { setManualType(activeResponseType); setManualValue(''); }}
+              disabled={isLocked}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-800 disabled:bg-gray-400 text-white font-black rounded-xl text-[10px] uppercase tracking-wider shadow transition-all active:scale-95"
+              title="Enter aggregate total for the selected call type"
+            >
+              Enter Total ({RESPONSE_TYPE_LABELS[activeResponseType]})
+            </button>
           </div>
         )}
 
@@ -499,6 +535,12 @@ const SessionMinistryPage: React.FC = () => {
               </div>
             </div>
             <div ref={el => setSummaryRef(el)} className="overflow-x-auto">
+              <div className="hidden print-only mb-6 text-center border-b-4 border-blue-900 pb-4">
+                <div className="text-[8px] font-black text-gray-400 uppercase tracking-[0.3em] mb-1">FGBMFI Nigeria</div>
+                <h1 className="text-lg font-black uppercase text-blue-900">{activeEvent?.name}</h1>
+                <h3 className="text-[9px] font-black uppercase text-gray-600 tracking-widest mt-1">Sessions Summary (All Sessions)</h3>
+                <p className="text-[8px] font-bold text-gray-400 mt-2">Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+              </div>
               <table className="w-full text-xs">
                 <thead className="bg-slate-100 uppercase font-black text-gray-500">
                   <tr>
@@ -561,6 +603,31 @@ const SessionMinistryPage: React.FC = () => {
 
       {showScanner && (
         <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />
+      )}
+
+      {manualType && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setManualType(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black uppercase text-blue-900 mb-1">Enter Manual Total</h3>
+            <p className="text-xs text-gray-500 mb-4">{RESPONSE_TYPE_LABELS[manualType]} | {sessions.find(s => s.session_id === selectedSessionId)?.title}</p>
+            <input
+              type="number"
+              min="0"
+              className="w-full border-2 border-gray-200 rounded-xl p-3 text-2xl font-black text-center"
+              placeholder="Enter count..."
+              value={manualValue}
+              onChange={e => setManualValue(e.target.value)}
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleManualSave()}
+            />
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setManualType(null)} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-black uppercase text-sm">Cancel</button>
+              <button onClick={handleManualSave} disabled={savingManual || recordSummary.isPending} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black uppercase text-sm hover:bg-blue-700 disabled:opacity-50">
+                {savingManual || recordSummary.isPending ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

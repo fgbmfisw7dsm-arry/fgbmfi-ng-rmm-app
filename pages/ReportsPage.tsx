@@ -202,7 +202,7 @@ const ReportsPage = () => {
                     return (
                         <div key={sessionId} className="mb-8">
                             <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between">
-                                <span>{group.title} {alterCallFilter ? `— ${RESPONSE_TYPE_LABELS[alterCallFilter]}` : ''}</span>
+                                <span>{group.title}{alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</span>
                                 <span className="opacity-70">
                                     ATT: {group.att || '-'} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
                                 </span>
@@ -449,7 +449,7 @@ const ReportsPage = () => {
                     <div className="flex justify-center items-center gap-3 mt-2">
                         <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
                             {activeTab === 'ministryReport' && selectedSessionId
-                                ? `Session: ${sessions.find(s => s.session_id === selectedSessionId)?.title || 'Ministry'}`
+                                ? `Session: ${sessions.find(s => s.session_id === selectedSessionId)?.title}${alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}`
                                 : activeTab.replace(/([A-Z])/g, ' $1')}
                         </h3>
                         {isLocked && (
