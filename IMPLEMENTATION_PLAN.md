@@ -1,8 +1,8 @@
 # FGBMFI Nigeria EMS — Implementation Plan
 
 **Project:** FGBMFI Nigeria Events Management System
-**Version:** 1.6 (Phase 1) → 2.0 (Target)
-**Last Updated:** July 25, 2026 (Convention Accreditation Complete)
+**Version:** 1.7 (Phase 1) → 2.0 (Target)
+**Last Updated:** July 31, 2026 (Session Ministry Tracking Complete)
 
 ---
 
@@ -42,6 +42,96 @@
 
 ---
 
+## Session Summary (July 31, 2026) — Session Ministry Tracking
+
+### What Was Delivered
+
+| # | Item | Type | Commit |
+|---|------|------|--------|
+| 1 | `session_responses` table (FT, SLV, MI, HGB per-delegate) | Schema | `af0785d` |
+| 2 | `session_response_summaries` table (manual bulk totals) | Schema | `af0785d` |
+| 3 | `session_voice_distribution` table (VD aggregate) | Schema | `af0785d` |
+| 4 | `get_session_ministry_stats` + `get_ministry_export_data` RPCs | RPC | `af0785d` → `3677ced` |
+| 5 | Session Details page (`#/ministry`) — CheckInPage-style workflow | Page | `af0785d` → `03e0c46` |
+| 6 | QR scan, 4-digit code, and manual search for alter call recording | UI | `03e0c46` |
+| 7 | Manual totals entry modal for open-air sessions (MPO/FTO) | UI | `3e7ed24` |
+| 8 | Voice Distribution per-session number input | UI | `af0785d` |
+| 9 | Sessions Summary table with ATT attendance column | UI + RPC | `3677ced` |
+| 10 | Sessions Report tab on Reports Center with Alter Call filter | Page | `af0785d` → `3677ced` |
+| 11 | Individual alter call respondent CSV export | Page | `03e0c46` |
+| 12 | Sessions Summary PDF + Excel export with professional headings | Page | `03e0c46` → `3e7ed24` |
+| 13 | Badge reprint: 60×70mm badge, 25-28mm QR, actual-size print | Page | `68a8d6e` |
+| 14 | Badge PDF download, PNG image download, native share (e-badge) | Page | `ae17a0e` |
+| 15 | User manual update: QR, Session Details, Sessions Report, E-Badge | Docs | `7cc248d` |
+| 16 | `html2canvas` CDN for badge image capture | Infra | `ae17a0e` |
+
+### Database Migration Results
+
+| Migration | Content | Status |
+|-----------|---------|--------|
+| `supabase_migration_sprint10_ministry.sql` | 3 new tables + indexes + RLS + 2 RPCs | To run by user |
+| `supabase_migration_sprint10_attendance.sql` | Updated RPCs with attendance column | To run by user |
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `session_responses` table from `checkins` | Different business semantics — alter call response ≠ session attendance. Clean UNIQUE constraint per delegate per type per session |
+| `session_response_summaries` for manual totals | Open-air sessions (MPO/FTO) track only aggregate headcounts. Separate table avoids polluting individual records with summary data |
+| 4 response types (FT, SLV, MI, HGB) as `CHECK` enum | Fixed taxonomy for FGBMFI Nigeria events. Extensible by adding new CHECK values |
+| Voice Distribution as separate table | VD is always aggregate (no per-delegate tracking). Single UNIQUE constraint per session |
+| CheckInPage-style workflow on Session Details page | Proven battle-tested pattern: search bar + QR scanner + manual code + new delegate registration. Operators already trained on this UX |
+| 60×70mm badge with 25-28mm QR | Fits standard badge holders. QR at 25mm prints clearly and scans reliably from phone screens at arm's length |
+| Native Web Share API for e-badge distribution | Zero-save workflow: officer taps Share → native sheet opens → WhatsApp → delegate receives instantly — no intermediate file management |
+
+### Key Files Changed
+
+| File | Changes |
+|------|---------|
+| `types.ts` | Added `SessionResponseType` enum, `SessionResponse`, `SessionResponseSummary`, `VoiceDistribution`, `SessionMinistryDashboard`, `MinistryExportData` |
+| `services/supabaseService.ts` | Added 10 new methods: record/min/get for all session tables, dashboard + export fallbacks, `getSessionResponseIds` |
+| `hooks/useMinistry.ts` | TanStack Query hook: dashboard, recordResponse, recordSummary, recordVD mutations |
+| `pages/SessionMinistryPage.tsx` | Full page: session selector, response type tabs, QR scan + code entry + search bar, results with Record buttons, registration form, Sessions Summary table, VD input, PDF/CSV export |
+| `pages/ReportsPage.tsx` | Renamed to "Reports Center", added Sessions tab with ATT column, Alter Call filter dropdown, CSV export per individual records list |
+| `pages/CheckInPage.tsx` | Badge modal: Print + PDF + Image + Share buttons (4 export options, 60×70mm badge) |
+| `components/Layout.tsx` | Added "Session Details" nav link under Operations |
+| `pages/UserManualModule.tsx` | Sections 6A (Session Details), 8A (Badge Management), updated 04/06/08, 5 new training scenarios, 4 new troubleshooting items |
+| `index.html` | Added `html2canvas` CDN script |
+| `supabase_migration_sprint10_ministry.sql` | 3 new tables, indexes, RLS, 2 RPCs |
+| `supabase_migration_sprint10_attendance.sql` | Updated RPCs with attendance JOIN |
+
+### Route Additions
+
+| Route | Page | Roles |
+|-------|------|-------|
+| `#/ministry` | SessionMinistryPage | admin, registrar |
+
+### Dashboard Data Flow
+
+```
+SessionMinistryPage
+    ↕ useMinistry() TanStack Query hook
+    ↕ supabaseService.ts
+        ├── recordSessionResponse()    → session_responses table
+        ├── recordSessionResponseSummary() → session_response_summaries table
+        ├── recordVoiceDistribution()  → session_voice_distribution table
+        ├── getSessionMinistryDashboard()  → RPC get_session_ministry_stats (with ATT)
+        ├── getMinistryDataForExport()    → RPC get_ministry_export_data (with ATT)
+        └── getSessionResponseIds()       → direct query (for duplicate check)
+    ↕ Report display
+        ├── Sessions tab (Reports Center)
+        │   ├── Summary table with ATT column
+        │   ├── Per-session response type breakdown
+        │   ├── Individual delegate lists per call type
+        │   ├── Alter Call filter dropdown (All / FT / SLV / MI / HGB)
+        │   └── CSV export per individual records list
+        └── Sessions Summary table (Session Details page)
+            ├── PDF export with FGBMFI header
+            └── Excel (CSV) export with metadata
+```
+
+---
+
 ## Phased Roadmap
 
 ### Phase 1 — Core Event Management (6–8 weeks) ← **Current**
@@ -56,7 +146,8 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 | **Sprint 4** | Dashboard & Reports | Summary PDF only, CSV/JSON export, RPC-based dashboard | 20 hrs | ✅ Done |
 | **Sprint 5** | Hardening & Deployment | 50-concurrent-user load test, error recovery, operator training | 24 hrs | ✅ Done |
 | **Sprint 6** | Convention Accreditation | Native QR scanner, event-scoped delegates, 4-pass code resolution, multi-format QR parser, auto-registration flow, event isolation queries, report/master list fixes | 32 hrs | ✅ Done |
-| **Total** | | | **~136 hrs** | |
+| **Sprint 10** | Session Ministry Tracking | session_responses/summaries/VD tables, Session Details page (#/ministry) with CheckInPage workflow, alter call recording (FT/SLV/MI/HGB), manual totals for MPO/FTO, Voice Distribution tracking, Sessions Summary with ATT column, Sessions Report tab with Alter Call filter + CSV export, badge reprint (60×70mm), e-badge PDF/PNG/Share, user manual update | 48 hrs | ✅ Done |
+| **Total** | | | **~184 hrs** | |
 
 ### Phase 2 — Finance & Communications (4–6 weeks)
 
@@ -247,6 +338,8 @@ Sprint 5 (Load Test + Hardening) ✅ Done
         ↓
 Sprint 6 (Convention Accreditation) ✅ Done
         ↓
+Sprint 10 (Session Ministry Tracking) ✅ Done
+        ↓
         READY FOR CONVENTION ✅
 ```
 
@@ -264,11 +357,14 @@ Sprint 6 (Convention Accreditation) ✅ Done
 
 | Risk | Likelihood | Impact | Mitigation | Owner |
 |------|-----------|--------|------------|-------|
-| QR collisions at 25K | Certain (10K slots) | Critical | UUID migration (Sprint 2) | Dev |
+| QR collisions at 25K | ~~Certain~~ Resolved | Critical | UUID migration (Sprint 2) — ✅ Done | Dev |
+| Confusion between alter call records and session attendance | Medium | High | Separate tables + UI labels, individual CSV exports clearly marked per response type — ✅ Done | Dev |
+| Manual totals conflated with individual scans | Low | Medium | Separate `session_response_summaries` table, reports show Scanned vs Manual columns distinctly — ✅ Done | Dev |
+| E-badge QR scan reliability on mobile | Low | Medium | 28mm QR at 3x retina capture (~1130px), tested ≤400px display equivalent | Product |
 | Dashboard OOM at 25K | High | Critical | RPC aggregation (Sprint 4) | Dev |
 | Search timeout at 25K | High | High | pg_trgm indexes (✅ Done) | Dev |
 | Connection pool exhaustion | Medium | High | TanStack Query + Pro tier (Sprint 3) | DevOps |
-| Officer training gaps | Medium | Medium | Quick reference guide (Sprint 5) | Product |
+| Officer training gaps | Medium | Medium | Quick reference guide + updated manual (✅ Done) | Product |
 
 ---
 
