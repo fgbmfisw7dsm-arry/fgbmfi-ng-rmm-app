@@ -23,12 +23,8 @@ DECLARE
 BEGIN
     new_user_id := gen_random_uuid();
 
-    -- Get project instance_id from caller's own auth record
-    BEGIN
-        SELECT instance_id INTO v_instance_id FROM auth.users WHERE id = auth.uid();
-    EXCEPTION WHEN OTHERS THEN
-        v_instance_id := NULL;
-    END;
+    -- Get project instance_id from any existing user (auth.uid() is NULL in SECURITY DEFINER)
+    SELECT instance_id INTO v_instance_id FROM auth.users WHERE instance_id IS NOT NULL LIMIT 1;
 
     -- Build INSERT column/value lists dynamically
     ins_cols := 'id, email, encrypted_password, created_at, updated_at, raw_app_meta_data, aud, role';
