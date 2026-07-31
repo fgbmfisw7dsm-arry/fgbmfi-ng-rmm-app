@@ -18,6 +18,7 @@ const ReportsPage = () => {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+    const [alterCallFilter, setAlterCallFilter] = useState<'' | SessionResponseType>('');
     const [loading, setLoading] = useState(false);
     const reportRef = useRef<HTMLDivElement>(null);
 
@@ -140,15 +141,19 @@ const ReportsPage = () => {
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
 
     const renderMinistryReport = () => {
-        if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading ministry data...</div>;
+        if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading sessions data...</div>;
         const { responses, summaries, voiceDistribution } = ministryData;
         const responseTypes: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
+
+        const attendanceArr: { session_id: string; attendance: number }[] = ministryData.attendance || [];
+        const attMap = new Map(attendanceArr.map(a => [a.session_id, a.attendance]));
 
         const groupedBySession = new Map<string, {
             title: string;
             responses: Map<SessionResponseType, typeof responses>;
             summaries: Map<SessionResponseType, number>;
             vd: number;
+            att: number;
         }>();
 
         sessions.forEach(s => {
@@ -157,6 +162,7 @@ const ReportsPage = () => {
                 responses: new Map(responseTypes.map(t => [t, [] as typeof responses])),
                 summaries: new Map(responseTypes.map(t => [t, 0])),
                 vd: voiceDistribution.find(v => v.session_id === s.session_id)?.total_distributed || 0,
+                att: attMap.get(s.session_id) || 0,
             });
         });
 
@@ -174,17 +180,31 @@ const ReportsPage = () => {
             if (g) g.summaries.set(s.response_type, (g.summaries.get(s.response_type) || 0) + s.total_count);
         });
 
+        const effectiveTypes = alterCallFilter ? responseTypes.filter(t => t === alterCallFilter) : responseTypes;
+
+        const getDelegateTypesForSession = (sessionId: string): SessionResponseType[] => {
+            if (!alterCallFilter) return effectiveTypes;
+            const g = groupedBySession.get(sessionId);
+            if (!g) return [];
+            const scanned = g.responses.get(alterCallFilter) || [];
+            return scanned.length > 0 ? [alterCallFilter] : [];
+        };
+
         return (
             <div className="space-y-8">
                 {Array.from(groupedBySession.entries()).map(([sessionId, group]) => {
-                    if (responseTypes.every(t => (group.responses.get(t) || []).length === 0 && (group.summaries.get(t) || 0) === 0) && group.vd === 0) return null;
+                    const typeForDisplay = alterCallFilter ? getDelegateTypesForSession(sessionId) : responseTypes;
+                    const hasDelegateData = typeForDisplay.some(t => (group.responses.get(t) || []).length > 0);
+
+                    const allEmpty = responseTypes.every(t => (group.responses.get(t) || []).length === 0 && (group.summaries.get(t) || 0) === 0) && group.vd === 0;
+                    if (allEmpty) return null;
 
                     return (
                         <div key={sessionId} className="mb-8">
                             <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between">
-                                <span>{group.title}</span>
+                                <span>{group.title} {alterCallFilter ? `— ${RESPONSE_TYPE_LABELS[alterCallFilter]}` : ''}</span>
                                 <span className="opacity-70">
-                                    {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
+                                    ATT: {group.att || '-'} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
                                 </span>
                             </div>
 
@@ -199,12 +219,19 @@ const ReportsPage = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
+                                        <tr className="border-b bg-gray-50">
+                                            <td className="border p-2 font-black uppercase text-blue-900">Attendance</td>
+                                            <td className="border p-2 text-center font-bold">{group.att || '-'}</td>
+                                            <td className="border p-2 text-center">-</td>
+                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.att || '-'}</td>
+                                        </tr>
                                         {responseTypes.map(type => {
                                             const scanned = (group.responses.get(type) || []).length;
                                             const manual = group.summaries.get(type) || 0;
                                             if (scanned === 0 && manual === 0) return null;
+                                            const isHighlighted = alterCallFilter && type === alterCallFilter;
                                             return (
-                                                <tr key={type} className="border-b hover:bg-gray-50">
+                                                <tr key={type} className={`border-b ${isHighlighted ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}>
                                                     <td className="border p-2 font-black uppercase text-blue-900">{RESPONSE_TYPE_LABELS[type]}</td>
                                                     <td className="border p-2 text-center font-bold">{scanned || '-'}</td>
                                                     <td className="border p-2 text-center font-bold">{manual || '-'}</td>
@@ -214,7 +241,7 @@ const ReportsPage = () => {
                                         })}
                                         {group.vd > 0 && (
                                             <tr className="border-b bg-gray-50">
-                                                <td className="border p-2 font-black uppercase">Voice Magazine Distribution</td>
+                                                <td className="border p-2 font-black uppercase">Voice Distribution</td>
                                                 <td className="border p-2" colSpan={2}></td>
                                                 <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.vd}</td>
                                             </tr>
@@ -223,7 +250,7 @@ const ReportsPage = () => {
                                 </table>
                             </div>
 
-                            {responseTypes.map(type => {
+                            {(!alterCallFilter ? responseTypes : [alterCallFilter]).map(type => {
                                 const scanned = group.responses.get(type) || [];
                                 if (scanned.length === 0) return null;
                                 return (
@@ -378,14 +405,14 @@ const ReportsPage = () => {
             <div className="bg-white p-6 rounded-2xl shadow-sm border no-print flex flex-wrap justify-between items-center gap-4">
                 <div className="flex-1">
                     <div className="flex items-center gap-3">
-                        <h2 className="text-xl font-black uppercase text-blue-900">Regional Reports</h2>
+                        <h2 className="text-xl font-black uppercase text-blue-900">Reports Center</h2>
                         {isLocked && (
                             <span className="bg-red-600 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase shadow-sm">FINALIZED</span>
                         )}
                     </div>
                     <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
                         {['attendanceList', 'attendanceMatrix', 'financialMatrix', 'pledgeSummary', 'pledgeList', 'ministryReport'].map(tab => {
-                            const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Ministry' };
+                            const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Sessions' };
                             return (
                             <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{labels[tab] || tab}</button>
                             );
@@ -397,6 +424,15 @@ const ReportsPage = () => {
                         <option value="">All Sessions</option>
                         {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
                     </select>
+                    {activeTab === 'ministryReport' && (
+                        <select className="p-2 border rounded-xl text-xs font-black uppercase text-blue-900" value={alterCallFilter} onChange={e => setAlterCallFilter(e.target.value as '' | SessionResponseType)}>
+                            <option value="">All Alter Calls</option>
+                            <option value={SessionResponseType.FT}>{RESPONSE_TYPE_LABELS[SessionResponseType.FT]}</option>
+                            <option value={SessionResponseType.SLV}>{RESPONSE_TYPE_LABELS[SessionResponseType.SLV]}</option>
+                            <option value={SessionResponseType.MI}>{RESPONSE_TYPE_LABELS[SessionResponseType.MI]}</option>
+                            <option value={SessionResponseType.HGB}>{RESPONSE_TYPE_LABELS[SessionResponseType.HGB]}</option>
+                        </select>
+                    )}
                     <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
                 </div>
             </div>

@@ -82,7 +82,7 @@ const getRoleLabel = () => {
                     Check-In
                   </Link>
                   <Link to="/ministry" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/ministry')}`}>
-                    Session Ministry
+                    Session Details
                   </Link>
                   <Link to="/register-new" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/register-new')}`}>
                     New Delegate

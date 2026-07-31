@@ -250,6 +250,7 @@ export interface SessionMinistryDashboard {
   session_title: string;
   start_time: string;
   end_time: string;
+  attendance: number;
   ft_count: number;
   slv_count: number;
   hgb_count: number;
@@ -265,4 +266,5 @@ export interface MinistryExportData {
   responses: SessionResponse[];
   summaries: SessionResponseSummary[];
   voiceDistribution: VoiceDistribution[];
+  attendance: { session_id: string; session_title: string; attendance: number }[];
 }

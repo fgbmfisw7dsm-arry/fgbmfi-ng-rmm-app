@@ -231,7 +231,7 @@ const SessionMinistryPage: React.FC = () => {
       <div className="bg-white p-6 rounded-2xl shadow-sm border no-print">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-black uppercase text-blue-900">Session Ministry Tracking</h2>
+            <h2 className="text-xl font-black uppercase text-blue-900">Session Details Tracking</h2>
             <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mt-1">
               Capture altar call responses via QR scan or manual entry
             </p>
@@ -317,12 +317,13 @@ const SessionMinistryPage: React.FC = () => {
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border">
-        <h3 className="text-lg font-black uppercase text-blue-900 mb-4">Ministry Summary (All Sessions)</h3>
+        <h3 className="text-lg font-black uppercase text-blue-900 mb-4">Sessions Summary (All Sessions)</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-slate-100 uppercase font-black text-gray-500">
               <tr>
                 <th className="p-3 text-left rounded-l-lg">Session</th>
+                <th className="p-3 text-center">ATT</th>
                 <th className="p-3 text-center">FT</th>
                 <th className="p-3 text-center">SLV</th>
                 <th className="p-3 text-center">MI</th>
@@ -337,6 +338,7 @@ const SessionMinistryPage: React.FC = () => {
                 return (
                   <tr key={d.session_id} className={`hover:bg-blue-50 transition-colors ${d.session_id === selectedSessionId ? 'bg-blue-50' : ''}`}>
                     <td className="p-3 font-bold uppercase text-blue-900">{d.session_title}</td>
+                    <td className="p-3 text-center font-bold">{d.attendance || '-'}</td>
                     <td className="p-3 text-center font-bold">{d.ft_count + d.ft_summary || '-'}</td>
                     <td className="p-3 text-center font-bold">{d.slv_count + d.slv_summary || '-'}</td>
                     <td className="p-3 text-center font-bold">{d.mi_count + d.mi_summary || '-'}</td>

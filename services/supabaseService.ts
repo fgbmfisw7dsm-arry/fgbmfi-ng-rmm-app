@@ -865,6 +865,7 @@ export const db = {
                         session_title: r.session_title,
                         start_time: r.start_time,
                         end_time: r.end_time,
+                        attendance: Number(r.attendance) || 0,
                         ft_count: Number(r.ft_count) || 0,
                         slv_count: Number(r.slv_count) || 0,
                         hgb_count: Number(r.hgb_count) || 0,
@@ -884,6 +885,7 @@ export const db = {
         if (!sessions?.length) return [];
 
         const sessionIds = sessions.map(s => s.session_id);
+        const { data: checkins } = await supabase.from('checkins').select('delegate_id, session_id').eq('event_id', eventId).in('session_id', sessionIds).not('session_id', 'is', null);
         const { data: responses } = await supabase.from('session_responses').select('*').eq('event_id', eventId).in('session_id', sessionIds);
         const { data: summaries } = await supabase.from('session_response_summaries').select('*').eq('event_id', eventId).in('session_id', sessionIds);
         const { data: vdEntries } = await supabase.from('session_voice_distribution').select('*').eq('event_id', eventId).in('session_id', sessionIds);
@@ -892,11 +894,13 @@ export const db = {
             const resp = (responses || []).filter(r => r.session_id === s.session_id);
             const sum = (summaries || []).filter(r => r.session_id === s.session_id);
             const vd = (vdEntries || []).find(v => v.session_id === s.session_id);
+            const att = new Set((checkins || []).filter(c => c.session_id === s.session_id).map(c => c.delegate_id));
             return {
                 session_id: s.session_id,
                 session_title: s.title,
                 start_time: s.start_time,
                 end_time: s.end_time,
+                attendance: att.size,
                 ft_count: resp.filter(r => r.response_type === 'FT').length,
                 slv_count: resp.filter(r => r.response_type === 'SLV').length,
                 hgb_count: resp.filter(r => r.response_type === 'HGB').length,
@@ -919,13 +923,14 @@ export const db = {
                     responses: Array.isArray(d.responses) ? d.responses : [],
                     summaries: Array.isArray(d.summaries) ? d.summaries : [],
                     voiceDistribution: Array.isArray(d.voiceDistribution) ? d.voiceDistribution : [],
+                    attendance: Array.isArray(d.attendance) ? d.attendance : [],
                 };
             }
         } catch {}
 
         const { data: sessions } = await supabase.from('sessions').select('*').eq('event_id', eventId);
         const sessionIds = (sessions || []).map(s => s.session_id);
-        if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [] };
+        if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [], attendance: [] };
 
         const { data: responses } = await supabase.from('session_responses')
             .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
@@ -934,8 +939,16 @@ export const db = {
             .select('*').eq('event_id', eventId).in('session_id', sessionIds);
         const { data: vd } = await supabase.from('session_voice_distribution')
             .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+        const { data: ck } = await supabase.from('checkins')
+            .select('delegate_id, session_id').eq('event_id', eventId).in('session_id', sessionIds).not('session_id', 'is', null);
 
         const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+        const attendance = (sessions || []).map(s => ({
+            session_id: s.session_id,
+            session_title: s.title,
+            attendance: new Set((ck || []).filter(c => c.session_id === s.session_id).map(c => c.delegate_id)).size,
+        }));
+
         return {
             responses: (responses || []).map((r: any) => ({
                 ...r,
@@ -951,6 +964,7 @@ export const db = {
             })),
             summaries: (summaries || []).map((s: any) => ({ ...s, session_title: sessionMap.get(s.session_id) || '' })),
             voiceDistribution: (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' })),
+            attendance,
         };
     },
 };
