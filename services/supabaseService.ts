@@ -251,55 +251,10 @@ export const db = {
         const district = user.district || null;
         const region = user.region || null;
 
-        const { data: { session: adminSession } } = await supabase.auth.getSession();
-
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { role } }
+        const result = await supabase.rpc('create_app_user', {
+            email, password, role, district, region
         });
-
-        if (adminSession) {
-            await supabase.auth.setSession({
-                access_token: adminSession.access_token,
-                refresh_token: adminSession.refresh_token,
-            });
-        }
-
-        if (signUpError) {
-            if (signUpError.message?.includes('already registered') || signUpError.message?.includes('already exists'))
-                throw new Error("A user with this email already exists.");
-            throw new Error(signUpError.message || "Account creation failed");
-        }
-        if (!signUpData.user?.id) throw new Error("Account creation failed: no user ID returned");
-
-        const newUserId = signUpData.user.id;
-
-        try {
-            await supabase.rpc('update_auth_user_email', { user_id: newUserId, new_email: email });
-        } catch (e1) {
-            try {
-                await supabase.rpc('auto_confirm_user', { user_id: newUserId });
-            } catch (e2) {
-                /* GoTrue may already have confirmed the user or columns are unmodifiable */
-            }
-        }
-
-        const { error: profileError } = await supabase.from('app_users').insert({
-            id: newUserId,
-            email,
-            role,
-            district,
-            region,
-            is_active: true
-        });
-
-        if (profileError) {
-            try { await supabase.rpc('delete_app_user', { user_id_to_delete: newUserId }); } catch {}
-            throw new Error(profileError.message || "Profile creation failed");
-        }
-
-        return { status: 'success', id: newUserId };
+        return handleRpcResponse(result, 'create_app_user');
     },
 
     updateUser: async (userId: string, updates: Partial<User>) => {

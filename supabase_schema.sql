@@ -129,9 +129,10 @@ DROP FUNCTION IF EXISTS deactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS reactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS deactivate_all_event_users();
 
--- 3b. Create User Profile & Auth Account (GoTrue v2/v3/v3+)
--- Confirmation timestamp set via UPDATE after INSERT with EXCEPTION handler.
--- Never includes generated columns (confirmed_at / email_confirmed_at) in INSERT.
+-- 3b. Create User Profile & Auth Account (SECURITY DEFINER, single RPC)
+-- Inserts into auth.users, sets email_confirmed_at (GoTrue confirmation),
+-- creates app_users profile — all in one atomic transaction.
+-- Bypasses signUp (avoids DNS email validation, session hijacking).
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
@@ -140,7 +141,6 @@ DECLARE
   new_user_id UUID;
   extra_cols TEXT := '';
   extra_vals TEXT := '';
-  confirm_ok BOOLEAN := false;
 BEGIN
   new_user_id := gen_random_uuid();
 
@@ -156,31 +156,13 @@ BEGIN
   INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
   VALUES (new_user_id, new_user_id, jsonb_build_object('sub', new_user_id, 'email', email), 'email', email, NOW(), NOW(), NOW());
 
-  BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
-      UPDATE auth.users SET confirmed_at = NOW(), updated_at = NOW() WHERE id = new_user_id;
-      confirm_ok := true;
-    ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
-      UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = new_user_id;
-      confirm_ok := true;
-    END IF;
-  EXCEPTION WHEN OTHERS THEN
-    confirm_ok := false;
-  END;
-
-  IF NOT confirm_ok THEN
-    BEGIN
-      UPDATE auth.users SET confirmation_token = '', recovery_token = '', email_change_token = '', email_change = '', updated_at = NOW()
-      WHERE id = new_user_id;
-    EXCEPTION WHEN OTHERS THEN
-      NULL;
-    END;
-  END IF;
+  UPDATE auth.users SET email_confirmed_at = NOW(), confirmation_token = '', confirmation_sent_at = NOW(), recovery_token = '', email_change_token = '', email_change = '', updated_at = NOW()
+  WHERE id = new_user_id;
 
   INSERT INTO public.app_users (id, email, role, district, region, is_active)
   VALUES (new_user_id, email, role, district, region, true);
 
-  RETURN json_build_object('status', 'success', 'id', new_user_id, 'confirmed', confirm_ok);
+  RETURN json_build_object('status', 'success', 'id', new_user_id);
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('error', SQLERRM);
 END;
