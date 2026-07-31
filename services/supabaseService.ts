@@ -75,12 +75,13 @@ const ensureEventActive = async (eventId: string) => {
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
         try {
-            const { data, error } = await supabase.from('app_users').select('*').eq('id', authId).maybeSingle();
-            if (data) {
-                if (data.is_active === false) {
+            const { data: profile, error } = await supabase.rpc('get_my_profile');
+
+            if (profile && typeof profile === 'object' && !(error)) {
+                if (profile.is_active === false) {
                     throw new Error("ACCOUNT_DEACTIVATED: Your account has been deactivated. Please contact your administrator.");
                 }
-                return data as User;
+                return profile as User;
             }
 
             const { data: tombstone } = await supabase.from('deleted_users').select('id').eq('id', authId).maybeSingle();
