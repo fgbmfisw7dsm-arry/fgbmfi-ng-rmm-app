@@ -98,7 +98,7 @@ const UsersModule = () => {
             } else {
                 const res = await db.createUser(form, form.password);
                 if (res && res.error) throw new Error(res.error);
-                setStatus({ type: 'success', msg: `Account ${form.email} created. Login with ${form.email.includes('@') ? form.email : form.email + '@fgbmfi.ng'}.` });
+                setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this username.` });
             }
             
             setEditingUserId(null);

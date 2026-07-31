@@ -111,18 +111,32 @@ export const auth = {
 
     login: async (email: string, password: string): Promise<User | null> => {
         try {
-            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
-                email: normalizeEmail(email), 
-                password 
-            });
-            
-            if (authError) {
-                if (authError.message && authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
-                throw new Error(authError.message || "Authentication service unavailable");
+            const normalized = normalizeEmail(email);
+            const authEmail = normalized.includes('@') ? normalized : `${normalized}@fgbmfi.ng`;
+
+            const trySignIn = async (loginEmail: string) => {
+                const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
+                    email: loginEmail, 
+                    password 
+                });
+                
+                if (authError) {
+                    if (authError.message && authError.message.includes('Invalid login credentials')) return { error: 'INVALID_CREDENTIALS' as const };
+                    throw new Error(authError.message || "Authentication service unavailable");
+                }
+                
+                if (!authData.user) return null;
+                return auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
+            };
+
+            const result = await trySignIn(authEmail);
+            if (result && typeof result === 'object' && 'error' in result && result.error === 'INVALID_CREDENTIALS' && authEmail !== normalized) {
+                const fallbackResult = await trySignIn(normalized);
+                if (fallbackResult && typeof fallbackResult === 'object' && 'error' in fallbackResult) throw new Error("INVALID_CREDENTIALS");
+                return fallbackResult as User | null;
             }
-            
-            if (!authData.user) return null;
-            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
+            if (result && typeof result === 'object' && 'error' in result) throw new Error("INVALID_CREDENTIALS");
+            return result as User | null;
         } catch (e: any) {
             if (!e.message || e.message === '{}') throw new Error("Authentication service returned an unexpected response. The user account may be incomplete.");
             throw e;
