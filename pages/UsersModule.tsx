@@ -60,7 +60,7 @@ const UsersModule = () => {
         setStatus(null);
 
         if (!form.email || form.email.trim().length < 3) {
-            setStatus({ type: 'error', msg: "Please enter a valid username." });
+            setStatus({ type: 'error', msg: "Please enter a valid email." });
             return;
         }
 
@@ -98,7 +98,7 @@ const UsersModule = () => {
             } else {
                 const res = await db.createUser(form, form.password);
                 if (res && res.error) throw new Error(res.error);
-                setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this username.` });
+                setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this email.` });
             }
             
             setEditingUserId(null);
@@ -235,11 +235,11 @@ const UsersModule = () => {
                 
                 <div className="space-y-4">
                     <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Login Username</label>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Login Email</label>
                         <input 
                             type="text" 
                             className="w-full p-4 border-2 border-gray-100 rounded-2xl bg-gray-50 font-bold focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-500 outline-none disabled:opacity-50 transition-all" 
-                            placeholder="e.g. jdoe_registrar" 
+                            placeholder="e.g. officer@fgbmfi.ng" 
                             value={form.email} 
                             onChange={e => setForm({...form, email: e.target.value})} 
                             disabled={!!editingUserId || loading} 

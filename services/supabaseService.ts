@@ -111,32 +111,18 @@ export const auth = {
 
     login: async (email: string, password: string): Promise<User | null> => {
         try {
-            const normalized = normalizeEmail(email);
-            const authEmail = normalized.includes('@') ? normalized : `${normalized}@fgbmfi.ng`;
-
-            const trySignIn = async (loginEmail: string) => {
-                const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
-                    email: loginEmail, 
-                    password 
-                });
-                
-                if (authError) {
-                    if (authError.message && authError.message.includes('Invalid login credentials')) return { error: 'INVALID_CREDENTIALS' as const };
-                    throw new Error(authError.message || "Authentication service unavailable");
-                }
-                
-                if (!authData.user) return null;
-                return auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
-            };
-
-            const result = await trySignIn(authEmail);
-            if (result && typeof result === 'object' && 'error' in result && result.error === 'INVALID_CREDENTIALS' && authEmail !== normalized) {
-                const fallbackResult = await trySignIn(normalized);
-                if (fallbackResult && typeof fallbackResult === 'object' && 'error' in fallbackResult) throw new Error("INVALID_CREDENTIALS");
-                return fallbackResult as User | null;
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
+                email: normalizeEmail(email), 
+                password 
+            });
+            
+            if (authError) {
+                if (authError.message && authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
+                throw new Error(authError.message || "Authentication service unavailable");
             }
-            if (result && typeof result === 'object' && 'error' in result) throw new Error("INVALID_CREDENTIALS");
-            return result as User | null;
+            
+            if (!authData.user) return null;
+            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
         } catch (e: any) {
             if (!e.message || e.message === '{}') throw new Error("Authentication service returned an unexpected response. The user account may be incomplete.");
             throw e;
@@ -264,12 +250,11 @@ export const db = {
         const role = user.role.toLowerCase();
         const district = user.district || null;
         const region = user.region || null;
-        const signUpEmail = email.includes('@') ? email : `${email}@fgbmfi.ng`;
 
         const { data: { session: adminSession } } = await supabase.auth.getSession();
 
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: signUpEmail,
+            email,
             password,
             options: { data: { role } }
         });
@@ -283,7 +268,7 @@ export const db = {
 
         if (signUpError) {
             if (signUpError.message?.includes('already registered') || signUpError.message?.includes('already exists'))
-                throw new Error("A user with this username already exists.");
+                throw new Error("A user with this email already exists.");
             throw new Error(signUpError.message || "Account creation failed");
         }
         if (!signUpData.user?.id) throw new Error("Account creation failed: no user ID returned");
@@ -298,7 +283,7 @@ export const db = {
 
         const { error: profileError } = await supabase.from('app_users').insert({
             id: newUserId,
-            email: signUpEmail,
+            email,
             role,
             district,
             region,

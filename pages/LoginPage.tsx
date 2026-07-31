@@ -32,9 +32,9 @@ const LoginPage = () => {
     } catch (e: any) {
       console.error("Login component caught error:", e);
       
-      // PRIORITY 1: Handle Typos/Invalid Credentials
-      if (e.message === 'INVALID_CREDENTIALS') {
-        setError('Login Failed: Invalid username or password. Please check for typos and try again.');
+        // PRIORITY 1: Handle Typos/Invalid Credentials
+        if (e.message === 'INVALID_CREDENTIALS') {
+          setError('Login Failed: Invalid email or password. Please check for typos and try again.');
       } 
       // PRIORITY 2: Diagnostics for developers (Stripe key check)
       else if (isStripeKeyDetected) {
@@ -82,14 +82,14 @@ const LoginPage = () => {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-              <label className="text-[10px] font-black text-gray-400 uppercase ml-2 mb-1 block tracking-widest">System Username</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase ml-2 mb-1 block tracking-widest">Login Email</label>
               <input 
                 type="text" 
                 required 
                 className="w-full px-5 py-4 bg-gray-50 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-500 outline-none transition-all font-bold" 
                 value={email} 
                 onChange={e => setEmail(e.target.value)} 
-                placeholder="Enter Username" 
+                placeholder="Enter your email" 
                 autoFocus
                 disabled={loading}
               />
