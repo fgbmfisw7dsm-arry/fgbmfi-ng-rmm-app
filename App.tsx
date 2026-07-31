@@ -25,6 +25,7 @@ import ImportModule from './pages/ImportModule';
 import SetupModule from './pages/SetupModule';
 import DataModule from './pages/DataModule';
 import UserManualModule from './pages/UserManualModule';
+import SessionMinistryPage from './pages/SessionMinistryPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const ALL_ADMIN_ROLES: UserRole[] = [
@@ -214,10 +215,13 @@ const AppContent = () => {
                     <Route path="/admin/financials" element={
                       <ProtectedRoute allowedRoles={ADMIN_AND_FINANCE}><FinancialsPage /></ProtectedRoute>
                     } />
-                    <Route path="/checkin" element={
-                      <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><CheckInPage /></ProtectedRoute>
-                    } />
-                    <Route path="/register-new" element={
+                     <Route path="/checkin" element={
+                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><CheckInPage /></ProtectedRoute>
+                     } />
+                     <Route path="/ministry" element={
+                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><SessionMinistryPage /></ProtectedRoute>
+                     } />
+                     <Route path="/register-new" element={
                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><NewDelegatePage /></ProtectedRoute>
                     } />
                     <Route path="/admin/delegates" element={

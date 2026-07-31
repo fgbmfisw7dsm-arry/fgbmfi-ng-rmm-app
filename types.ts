@@ -190,3 +190,79 @@ export interface SystemSettings {
   titles: string[];
   delegate_types: string[];
 }
+
+export enum SessionResponseType {
+  FT = 'FT',
+  SLV = 'SLV',
+  HGB = 'HGB',
+  MI = 'MI'
+}
+
+export const RESPONSE_TYPE_LABELS: Record<SessionResponseType, string> = {
+  [SessionResponseType.FT]: 'First Timers',
+  [SessionResponseType.SLV]: 'Salvation',
+  [SessionResponseType.HGB]: 'Holy Ghost Baptism',
+  [SessionResponseType.MI]: 'Membership Intention'
+};
+
+export interface SessionResponse {
+  response_id: string;
+  event_id: string;
+  delegate_id: string;
+  session_id: string;
+  response_type: SessionResponseType;
+  recorded_at: string;
+  recorded_by: string;
+  first_name?: string;
+  last_name?: string;
+  district?: string;
+  chapter?: string;
+  phone?: string;
+  rank?: string;
+  office?: string;
+  delegate_name?: string;
+  session_title?: string;
+}
+
+export interface SessionResponseSummary {
+  id: string;
+  session_id: string;
+  event_id: string;
+  response_type: SessionResponseType;
+  total_count: number;
+  entered_by: string;
+  entered_at: string;
+  session_title?: string;
+}
+
+export interface VoiceDistribution {
+  id: string;
+  event_id: string;
+  session_id: string;
+  total_distributed: number;
+  updated_at: string;
+  updated_by: string;
+  session_title?: string;
+}
+
+export interface SessionMinistryDashboard {
+  session_id: string;
+  session_title: string;
+  start_time: string;
+  end_time: string;
+  ft_count: number;
+  slv_count: number;
+  hgb_count: number;
+  mi_count: number;
+  ft_summary: number;
+  slv_summary: number;
+  hgb_summary: number;
+  mi_summary: number;
+  voice_distribution: number;
+}
+
+export interface MinistryExportData {
+  responses: SessionResponse[];
+  summaries: SessionResponseSummary[];
+  voiceDistribution: VoiceDistribution[];
+}

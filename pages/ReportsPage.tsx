@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
-import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole, getScopeFilter } from '../types';
+import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole, getScopeFilter, SessionResponseType, RESPONSE_TYPE_LABELS, MinistryExportData } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF } from '../services/utils';
 
@@ -12,10 +12,11 @@ const ReportsPage = () => {
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
     const [data, setData] = useState<any>(null);
+    const [ministryData, setMinistryData] = useState<MinistryExportData | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
     const [events, setEvents] = useState<Event[]>([]);
     const [settings, setSettings] = useState<SystemSettings | null>(null);
-    const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList'>('attendanceList');
+    const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const reportRef = useRef<HTMLDivElement>(null);
@@ -77,6 +78,15 @@ const ReportsPage = () => {
         return () => { mounted = false; };
     }, [activeEventId, user?.id]);
 
+    useEffect(() => {
+        if (!activeEventId || activeTab !== 'ministryReport') return;
+        let mounted = true;
+        db.getMinistryDataForExport(activeEventId).then(d => {
+            if (mounted) setMinistryData(d);
+        }).catch(() => {});
+        return () => { mounted = false; };
+    }, [activeEventId, activeTab]);
+
     const reportData = useMemo(() => {
         if (!data || !settings) return null;
         const { delegates = [], checkins = [], financials = [], pledges = [] } = data;
@@ -128,6 +138,134 @@ const ReportsPage = () => {
     }, [data, selectedSessionId, settings]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
+
+    const renderMinistryReport = () => {
+        if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading ministry data...</div>;
+        const { responses, summaries, voiceDistribution } = ministryData;
+        const responseTypes: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
+
+        const groupedBySession = new Map<string, {
+            title: string;
+            responses: Map<SessionResponseType, typeof responses>;
+            summaries: Map<SessionResponseType, number>;
+            vd: number;
+        }>();
+
+        sessions.forEach(s => {
+            groupedBySession.set(s.session_id, {
+                title: s.title,
+                responses: new Map(responseTypes.map(t => [t, [] as typeof responses])),
+                summaries: new Map(responseTypes.map(t => [t, 0])),
+                vd: voiceDistribution.find(v => v.session_id === s.session_id)?.total_distributed || 0,
+            });
+        });
+
+        responses.forEach(r => {
+            const g = groupedBySession.get(r.session_id);
+            if (g) {
+                const arr = g.responses.get(r.response_type) || [];
+                arr.push(r);
+                g.responses.set(r.response_type, arr);
+            }
+        });
+
+        summaries.forEach(s => {
+            const g = groupedBySession.get(s.session_id);
+            if (g) g.summaries.set(s.response_type, (g.summaries.get(s.response_type) || 0) + s.total_count);
+        });
+
+        return (
+            <div className="space-y-8">
+                {Array.from(groupedBySession.entries()).map(([sessionId, group]) => {
+                    if (responseTypes.every(t => (group.responses.get(t) || []).length === 0 && (group.summaries.get(t) || 0) === 0) && group.vd === 0) return null;
+
+                    return (
+                        <div key={sessionId} className="mb-8">
+                            <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between">
+                                <span>{group.title}</span>
+                                <span className="opacity-70">
+                                    {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
+                                </span>
+                            </div>
+
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[10px] border-collapse border border-gray-300">
+                                    <thead className="bg-gray-50 uppercase text-gray-400 font-black">
+                                        <tr>
+                                            <th className="border p-2 text-left">Category</th>
+                                            <th className="border p-2 text-center">Scanned</th>
+                                            <th className="border p-2 text-center">Manual</th>
+                                            <th className="border p-2 text-center bg-blue-50">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {responseTypes.map(type => {
+                                            const scanned = (group.responses.get(type) || []).length;
+                                            const manual = group.summaries.get(type) || 0;
+                                            if (scanned === 0 && manual === 0) return null;
+                                            return (
+                                                <tr key={type} className="border-b hover:bg-gray-50">
+                                                    <td className="border p-2 font-black uppercase text-blue-900">{RESPONSE_TYPE_LABELS[type]}</td>
+                                                    <td className="border p-2 text-center font-bold">{scanned || '-'}</td>
+                                                    <td className="border p-2 text-center font-bold">{manual || '-'}</td>
+                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned + manual}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {group.vd > 0 && (
+                                            <tr className="border-b bg-gray-50">
+                                                <td className="border p-2 font-black uppercase">Voice Magazine Distribution</td>
+                                                <td className="border p-2" colSpan={2}></td>
+                                                <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.vd}</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {responseTypes.map(type => {
+                                const scanned = group.responses.get(type) || [];
+                                if (scanned.length === 0) return null;
+                                return (
+                                    <div key={type} className="mt-4">
+                                        <div className="bg-blue-900 text-white p-2 font-black uppercase text-[9px] rounded-t-lg">
+                                            {RESPONSE_TYPE_LABELS[type]} — Individual Records ({scanned.length})
+                                        </div>
+                                        <table className="w-full text-[9px] border-collapse border border-gray-300">
+                                            <thead className="bg-gray-50 uppercase text-gray-400 font-black">
+                                                <tr>
+                                                    <th className="border p-1.5 w-8">S/N</th>
+                                                    <th className="border p-1.5">Name</th>
+                                                    <th className="border p-1.5">District</th>
+                                                    <th className="border p-1.5">Chapter</th>
+                                                    <th className="border p-1.5">Phone</th>
+                                                    <th className="border p-1.5">Rank</th>
+                                                    <th className="border p-1.5">Office</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {scanned.map((r, i) => (
+                                                    <tr key={r.response_id} className="border-b hover:bg-gray-50">
+                                                        <td className="border p-1.5 text-center">{i + 1}</td>
+                                                        <td className="border p-1.5 font-black uppercase text-blue-900">{r.delegate_name || `${r.first_name} ${r.last_name}`}</td>
+                                                        <td className="border p-1.5 font-bold uppercase">{r.district || '-'}</td>
+                                                        <td className="border p-1.5 font-bold uppercase">{r.chapter || '-'}</td>
+                                                        <td className="border p-1.5 font-mono">{r.phone || '-'}</td>
+                                                        <td className="border p-1.5 uppercase">{r.rank || '-'}</td>
+                                                        <td className="border p-1.5 uppercase">{r.office || '-'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
     if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Data...</div>;
@@ -246,14 +384,17 @@ const ReportsPage = () => {
                         )}
                     </div>
                     <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
-                        {['attendanceList', 'attendanceMatrix', 'financialMatrix', 'pledgeSummary', 'pledgeList'].map(tab => (
-                            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{tab.replace(/([A-Z])/g, ' $1')}</button>
-                        ))}
+                        {['attendanceList', 'attendanceMatrix', 'financialMatrix', 'pledgeSummary', 'pledgeList', 'ministryReport'].map(tab => {
+                            const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Ministry' };
+                            return (
+                            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{labels[tab] || tab}</button>
+                            );
+                        })}
                     </div>
                 </div>
                 <div className="flex gap-4 items-center">
                     <select className="p-2 border rounded-xl text-xs font-black uppercase text-blue-900" value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
-                        <option value="">Master Attendance</option>
+                        <option value="">All Sessions</option>
                         {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
                     </select>
                     <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
@@ -270,12 +411,16 @@ const ReportsPage = () => {
                 <div className="text-center mb-8 border-b-4 border-blue-900 pb-6 relative z-10">
                     <h1 className="text-2xl font-black uppercase text-blue-900">{events.find(e => e.event_id === activeEventId)?.name}</h1>
                     <div className="flex justify-center items-center gap-3 mt-2">
-                        <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">{activeTab.replace(/([A-Z])/g, ' $1')}</h3>
+                        <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                            {activeTab === 'ministryReport' && selectedSessionId
+                                ? `Session: ${sessions.find(s => s.session_id === selectedSessionId)?.title || 'Ministry'}`
+                                : activeTab.replace(/([A-Z])/g, ' $1')}
+                        </h3>
                         {isLocked && (
                             <span className="text-[8px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">Locked / Final Copy</span>
                         )}
                     </div>
-                    {selectedSessionId && <div className="text-xs font-black text-blue-700 uppercase mt-2">● Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}</div>}
+                    {selectedSessionId && activeTab !== 'ministryReport' && <div className="text-xs font-black text-blue-700 uppercase mt-2">Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}</div>}
                 </div>
                 
                 <div className="relative z-10">
@@ -367,6 +512,7 @@ const ReportsPage = () => {
                             })}
                         </div>
                     )}
+                    {activeTab === 'ministryReport' && renderMinistryReport()}
                 </div>
 
                 <div className="report-footer print-only mt-20 pt-10 border-t flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest relative z-10">

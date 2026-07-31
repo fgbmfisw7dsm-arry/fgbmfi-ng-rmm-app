@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType } from '../types';
 import { generateCodeFromId, generateQrHash } from './utils';
 
 /**
@@ -758,5 +758,199 @@ export const db = {
         const { error } = await supabase.from('delegates').update({ qr_hash: newHash }).eq('delegate_id', delegateId);
         if (error) throw error;
         return newHash;
-    }
+    },
+
+    recordSessionResponse: async (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User): Promise<{ success: boolean; message: string }> => {
+        return withRetry(async () => {
+            await ensureEventActive(eventId);
+
+            const { data: arrival } = await supabase.from('checkins')
+                .select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).is('session_id', null).maybeSingle();
+            if (!arrival) {
+                const { error: arrivalErr } = await supabase.from('checkins').insert({
+                    event_id: eventId, delegate_id: delegateId, session_id: null, checked_in_by: registrar.id
+                });
+                if (arrivalErr && !arrivalErr.message?.includes('duplicate')) throw arrivalErr;
+            }
+
+            const { data: existing } = await supabase.from('session_responses')
+                .select('response_id')
+                .eq('event_id', eventId).eq('delegate_id', delegateId)
+                .eq('session_id', sessionId).eq('response_type', responseType)
+                .maybeSingle();
+            if (existing) {
+                return { success: false, message: 'Already recorded' };
+            }
+
+            const { error } = await supabase.from('session_responses').insert({
+                event_id: eventId, delegate_id: delegateId, session_id: sessionId,
+                response_type: responseType, recorded_by: registrar.id
+            });
+            if (error) {
+                if (error.message?.includes('duplicate') || error.code === '23505') {
+                    return { success: false, message: 'Already recorded' };
+                }
+                throw error;
+            }
+            return { success: true, message: 'Saved' };
+        });
+    },
+
+    getSessionResponses: async (sessionId: string, responseType?: SessionResponseType): Promise<SessionResponse[]> => {
+        let q = supabase.from('session_responses')
+            .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
+            .eq('session_id', sessionId)
+            .order('recorded_at', { ascending: false })
+            .limit(500);
+        if (responseType) q = q.eq('response_type', responseType);
+        const { data, error } = await q;
+        if (error) throw error;
+        return (data || []).map((r: any) => ({
+            ...r,
+            first_name: r.delegates?.first_name,
+            last_name: r.delegates?.last_name,
+            district: r.delegates?.district,
+            chapter: r.delegates?.chapter,
+            phone: r.delegates?.phone,
+            rank: r.delegates?.rank,
+            office: r.delegates?.office,
+            delegate_name: r.delegates ? `${r.delegates.first_name} ${r.delegates.last_name}` : '',
+        }));
+    },
+
+    recordSessionResponseSummary: async (eventId: string, sessionId: string, responseType: SessionResponseType, totalCount: number, registrar: User): Promise<SessionResponseSummary> => {
+        await ensureEventActive(eventId);
+        const { data, error } = await supabase.from('session_response_summaries')
+            .upsert({
+                event_id: eventId, session_id: sessionId, response_type: responseType,
+                total_count: totalCount, entered_by: registrar.id
+            }, { onConflict: 'session_id,response_type' })
+            .select().single();
+        if (error) throw error;
+        return data as SessionResponseSummary;
+    },
+
+    getSessionResponseSummaries: async (sessionId: string): Promise<SessionResponseSummary[]> => {
+        const { data, error } = await supabase.from('session_response_summaries')
+            .select('*').eq('session_id', sessionId);
+        if (error) throw error;
+        return (data || []) as SessionResponseSummary[];
+    },
+
+    recordVoiceDistribution: async (eventId: string, sessionId: string, total: number, registrar: User): Promise<VoiceDistribution> => {
+        await ensureEventActive(eventId);
+        const { data, error } = await supabase.from('session_voice_distribution')
+            .upsert({
+                event_id: eventId, session_id: sessionId, total_distributed: total, updated_by: registrar.id
+            }, { onConflict: 'session_id' })
+            .select().single();
+        if (error) throw error;
+        return data as VoiceDistribution;
+    },
+
+    getVoiceDistribution: async (sessionId: string): Promise<VoiceDistribution | null> => {
+        const { data, error } = await supabase.from('session_voice_distribution')
+            .select('*').eq('session_id', sessionId).maybeSingle();
+        if (error) throw error;
+        return (data || null) as VoiceDistribution | null;
+    },
+
+    getSessionMinistryDashboard: async (eventId: string): Promise<SessionMinistryDashboard[]> => {
+        try {
+            const { data, error } = await supabase.rpc('get_session_ministry_stats', { p_event_id: eventId });
+            if (!error && data) {
+                const rows: SessionMinistryDashboard[] = Array.isArray(data) && data.length > 0
+                    ? data.map((r: any) => ({
+                        session_id: r.session_id,
+                        session_title: r.session_title,
+                        start_time: r.start_time,
+                        end_time: r.end_time,
+                        ft_count: Number(r.ft_count) || 0,
+                        slv_count: Number(r.slv_count) || 0,
+                        hgb_count: Number(r.hgb_count) || 0,
+                        mi_count: Number(r.mi_count) || 0,
+                        ft_summary: Number(r.ft_summary) || 0,
+                        slv_summary: Number(r.slv_summary) || 0,
+                        hgb_summary: Number(r.hgb_summary) || 0,
+                        mi_summary: Number(r.mi_summary) || 0,
+                        voice_distribution: Number(r.voice_distribution) || 0,
+                    }))
+                    : [];
+                return rows;
+            }
+        } catch {}
+
+        const { data: sessions } = await supabase.from('sessions').select('*').eq('event_id', eventId).order('start_time');
+        if (!sessions?.length) return [];
+
+        const sessionIds = sessions.map(s => s.session_id);
+        const { data: responses } = await supabase.from('session_responses').select('*').eq('event_id', eventId).in('session_id', sessionIds);
+        const { data: summaries } = await supabase.from('session_response_summaries').select('*').eq('event_id', eventId).in('session_id', sessionIds);
+        const { data: vdEntries } = await supabase.from('session_voice_distribution').select('*').eq('event_id', eventId).in('session_id', sessionIds);
+
+        return sessions.map(s => {
+            const resp = (responses || []).filter(r => r.session_id === s.session_id);
+            const sum = (summaries || []).filter(r => r.session_id === s.session_id);
+            const vd = (vdEntries || []).find(v => v.session_id === s.session_id);
+            return {
+                session_id: s.session_id,
+                session_title: s.title,
+                start_time: s.start_time,
+                end_time: s.end_time,
+                ft_count: resp.filter(r => r.response_type === 'FT').length,
+                slv_count: resp.filter(r => r.response_type === 'SLV').length,
+                hgb_count: resp.filter(r => r.response_type === 'HGB').length,
+                mi_count: resp.filter(r => r.response_type === 'MI').length,
+                ft_summary: sum.filter(r => r.response_type === 'FT').reduce((a, x) => a + (x.total_count || 0), 0),
+                slv_summary: sum.filter(r => r.response_type === 'SLV').reduce((a, x) => a + (x.total_count || 0), 0),
+                hgb_summary: sum.filter(r => r.response_type === 'HGB').reduce((a, x) => a + (x.total_count || 0), 0),
+                mi_summary: sum.filter(r => r.response_type === 'MI').reduce((a, x) => a + (x.total_count || 0), 0),
+                voice_distribution: vd?.total_distributed || 0,
+            } as SessionMinistryDashboard;
+        });
+    },
+
+    getMinistryDataForExport: async (eventId: string): Promise<MinistryExportData> => {
+        try {
+            const { data, error } = await supabase.rpc('get_ministry_export_data', { p_event_id: eventId });
+            if (!error && data) {
+                const d = data as any;
+                return {
+                    responses: Array.isArray(d.responses) ? d.responses : [],
+                    summaries: Array.isArray(d.summaries) ? d.summaries : [],
+                    voiceDistribution: Array.isArray(d.voiceDistribution) ? d.voiceDistribution : [],
+                };
+            }
+        } catch {}
+
+        const { data: sessions } = await supabase.from('sessions').select('*').eq('event_id', eventId);
+        const sessionIds = (sessions || []).map(s => s.session_id);
+        if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [] };
+
+        const { data: responses } = await supabase.from('session_responses')
+            .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
+            .eq('event_id', eventId).in('session_id', sessionIds).order('recorded_at', { ascending: false });
+        const { data: summaries } = await supabase.from('session_response_summaries')
+            .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+        const { data: vd } = await supabase.from('session_voice_distribution')
+            .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+
+        const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+        return {
+            responses: (responses || []).map((r: any) => ({
+                ...r,
+                first_name: r.delegates?.first_name,
+                last_name: r.delegates?.last_name,
+                district: r.delegates?.district,
+                chapter: r.delegates?.chapter,
+                phone: r.delegates?.phone,
+                rank: r.delegates?.rank,
+                office: r.delegates?.office,
+                delegate_name: r.delegates ? `${r.delegates.first_name} ${r.delegates.last_name}` : '',
+                session_title: sessionMap.get(r.session_id) || '',
+            })),
+            summaries: (summaries || []).map((s: any) => ({ ...s, session_title: sessionMap.get(s.session_id) || '' })),
+            voiceDistribution: (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' })),
+        };
+    },
 };
