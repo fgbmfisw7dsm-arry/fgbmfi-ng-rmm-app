@@ -248,6 +248,81 @@ const CheckInPage = () => {
     window.print();
   };
 
+  const downloadBadgePDF = async () => {
+    const badgeEl = document.getElementById('badge-print-area');
+    if (!badgeEl) return;
+    const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
+    try {
+      const opts = {
+        margin: 0,
+        filename: `FGBMFI_Badge_${nameSlug}.pdf`,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: { scale: 3, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm' as const, format: [60, 70] as [number, number], orientation: 'portrait' as const },
+      };
+      // @ts-ignore
+      await window.html2pdf().from(badgeEl).set(opts).save();
+    } catch (e) {
+      console.error('PDF generation failed:', e);
+    }
+  };
+
+  const downloadBadgeImage = async () => {
+    const badgeEl = document.getElementById('badge-print-area');
+    if (!badgeEl) return;
+    const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
+    try {
+      // @ts-ignore
+      const canvas = await window.html2canvas(badgeEl, { scale: 3, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+      canvas.toBlob((blob: Blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FGBMFI_Badge_${nameSlug}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+      setFeedback({ type: 'success', msg: 'Image downloaded!' });
+      setTimeout(() => setFeedback(null), 2000);
+    } catch (e) {
+      console.error('Image generation failed:', e);
+    }
+  };
+
+  const shareBadge = async () => {
+    const badgeEl = document.getElementById('badge-print-area');
+    if (!badgeEl) return;
+    const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
+    try {
+      // @ts-ignore
+      const canvas = await window.html2canvas(badgeEl, { scale: 3, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+      const blob: Blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const file = new File([blob], `FGBMFI_Badge_${nameSlug}.png`, { type: 'image/png' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'FGBMFI Badge' } as any);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FGBMFI_Badge_${nameSlug}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setFeedback({ type: 'success', msg: 'Share not supported — image downloaded instead' });
+        setTimeout(() => setFeedback(null), 3000);
+      }
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error('Share failed:', e);
+      }
+    }
+  };
+
   const clearSearch = () => {
     setQuery('');
     setResults([]);
@@ -567,14 +642,25 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                    <div className="text-[7px] font-black text-gray-400 uppercase tracking-widest">Backup Code: <span className="text-blue-900 text-xs tracking-[0.3em]">{badgeCode}</span></div>
                 </div>
 
-               <div className="mt-6 flex gap-3">
-                 <button onClick={printBadge} className="flex-1 py-4 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
-                   Print Badge
-                 </button>
-                 <button onClick={closeBadgeModal} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
-                   Close
-                 </button>
-               </div>
+                <div className="mt-6 grid grid-cols-2 gap-2">
+                  <button onClick={printBadge} className="py-3 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
+                    Print
+                  </button>
+                  <button onClick={downloadBadgePDF} className="py-3 bg-slate-700 hover:bg-slate-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
+                    PDF
+                  </button>
+                  <button onClick={downloadBadgeImage} className="py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
+                    Image
+                  </button>
+                  <button onClick={shareBadge} className="py-3 bg-purple-600 hover:bg-purple-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
+                    Share
+                  </button>
+                </div>
+                <div className="mt-2 flex gap-3">
+                  <button onClick={closeBadgeModal} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-xl text-[11px] uppercase tracking-widest transition-all">
+                    Close
+                  </button>
+                </div>
              </div>
             </div>
 
