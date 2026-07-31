@@ -914,6 +914,16 @@ export const db = {
         });
     },
 
+    getSessionResponseIds: async (eventId: string, sessionId: string, responseType: SessionResponseType): Promise<Set<string>> => {
+        const { data, error } = await supabase.from('session_responses')
+            .select('delegate_id')
+            .eq('event_id', eventId)
+            .eq('session_id', sessionId)
+            .eq('response_type', responseType);
+        if (error) return new Set();
+        return new Set((data || []).map(r => r.delegate_id));
+    },
+
     getMinistryDataForExport: async (eventId: string): Promise<MinistryExportData> => {
         try {
             const { data, error } = await supabase.rpc('get_ministry_export_data', { p_event_id: eventId });

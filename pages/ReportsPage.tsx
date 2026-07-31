@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { db } from '../services/supabaseService';
 import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole, getScopeFilter, SessionResponseType, RESPONSE_TYPE_LABELS, MinistryExportData } from '../types';
 import { AppContext } from '../context/AppContext';
-import { formatCurrency, exportToPDF } from '../services/utils';
+import { formatCurrency, exportToPDF, exportToCSV } from '../services/utils';
 
 const ReportsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
