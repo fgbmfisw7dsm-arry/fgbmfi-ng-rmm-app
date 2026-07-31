@@ -59,7 +59,7 @@ const UserManualModule = () => {
                             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">Regional Events Management System (EMS)</p>
                             <div className="mt-6 flex justify-center gap-4">
                                 <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.6</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.7</span>
                             </div>
                         </div>
 
@@ -112,11 +112,26 @@ const UserManualModule = () => {
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">04</span>
-                                Operations: Arrival of Existing Members
+                                Operations: Arrival & QR Code Verification
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600">The majority of delegates are already in the Master Database (via bulk import). Follow this process for their first arrival:</p>
+                            <p className="mb-4 text-sm text-gray-600">The majority of delegates are already in the Master Database (via bulk import). Three verification methods are supported:</p>
                             <div className="bg-slate-900 p-8 rounded-[2rem] text-white shadow-xl">
-                                <h4 className="text-xs font-black uppercase text-blue-400 mb-4 tracking-widest">Manual Lookup & Arrival Workflow</h4>
+                                <h4 className="text-xs font-black uppercase text-blue-400 mb-4 tracking-widest">Method 1: QR Code Scan (Fastest)</h4>
+                                <ol className="space-y-4">
+                                    <li className="flex gap-4 items-start text-sm">
+                                        <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">1</span>
+                                        <span>Each delegate has a <strong>name badge with a unique QR code</strong>. On the Check-In page, tap the <strong>"SCAN QR"</strong> button to activate the camera.</span>
+                                    </li>
+                                    <li className="flex gap-4 items-start text-sm">
+                                        <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">2</span>
+                                        <span>Point the camera at the delegate's badge QR code. The system auto-decodes it and verifies arrival instantly.</span>
+                                    </li>
+                                    <li className="flex gap-4 items-start text-sm">
+                                        <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">3</span>
+                                        <span>A green "Verified!" flash confirms success. The delegate's information and 4-digit backup code appear.</span>
+                                    </li>
+                                </ol>
+                                <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 2: Manual Lookup</h4>
                                 <ol className="space-y-4">
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">1</span>
@@ -130,9 +145,20 @@ const UserManualModule = () => {
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">3</span>
                                         <span>Find the matching record and click <strong>"Verify Entry"</strong>.</span>
                                     </li>
+                                </ol>
+                                <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 3: 4-Digit Code Entry</h4>
+                                <ol className="space-y-4">
+                                    <li className="flex gap-4 items-start text-sm">
+                                        <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">1</span>
+                                        <span>Type the delegate's <strong>4-Digit Backup Code</strong> into the large input field or scan it via QR.</span>
+                                    </li>
+                                    <li className="flex gap-4 items-start text-sm">
+                                        <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">2</span>
+                                        <span>The system auto-verifies the code and records the check-in instantly.</span>
+                                    </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-green-500/20 text-green-400 p-4 rounded-xl border border-green-500/30 font-black">
-                                            Step 4: The system will automatically generate a 4-Digit Delegate Code. Give this code to the delegate for all future session check-ins.
+                                            Step 3: The 4-Digit Code appears on the verified delegate's card. Give this code to the delegate for all future session check-ins. <strong>Badge Reprint:</strong> Tap "Reprint Badge" to print, download as PDF/image, or share the e-badge via WhatsApp.
                                         </span>
                                     </li>
                                 </ol>
@@ -166,16 +192,80 @@ const UserManualModule = () => {
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">06</span>
-                                Active Session Verification
+                                Active Session Verification (QR & Code)
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.).</p>
+                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.). QR scanning and 4-digit codes are both supported.</p>
                             <div className="bg-blue-900 p-8 rounded-2xl text-white shadow-xl">
                                 <ol className="space-y-3 text-sm">
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">1.</span> Go to <strong>"Check-In"</strong> and select the current session from the dropdown.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">2.</span> Enter the delegate's <strong>4-Digit Code</strong> into the large keypad, or use Manual Lookup.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>Auto-Arrival Cascade:</strong> If the delegate has NOT yet completed Event Arrival check-in, the system automatically records arrival first, then verifies the session attendance — all in one scan.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">4.</span> For new visitors not yet in the database, the Quick Registration form provides District and Chapter dropdowns populated from the official 25-district, 1,447-chapter registry.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">1.</span> Go to <strong>"Check-In"</strong> and select the current session from the dropdown. Sessions match the event program schedule.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">2.</span> <strong>QR Scan:</strong> Tap "SCAN QR" and point the camera at the delegate's badge. The system auto-decodes, auto-verifies arrival (if needed), and marks session attendance.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>4-Digit Code:</strong> Type the delegate's backup code into the input field — it auto-submits after the 4th digit.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">4.</span> <strong>Manual Lookup:</strong> Search by name or phone, then click "Verify Entry" for the current session.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">5.</span> <strong>Auto-Arrival Cascade:</strong> If the delegate has NOT yet completed Event Arrival check-in, the system automatically records arrival first, then verifies session attendance — all in one scan.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">6.</span> For new visitors not yet in the database, the Quick Registration form provides District and Chapter dropdowns populated from the 25-district, 1,447-chapter registry.</li>
                                 </ol>
+                            </div>
+                        </section>
+
+                        {/* Section 06A: Session Details Tracking (Alter Calls) */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">6A</span>
+                                Session Details: Alter Call Recording & Tracking
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">The <strong>Session Details</strong> page (<span className="font-mono bg-gray-100 px-1 rounded">#/ministry</span>) captures delegate responses to altar calls during each session. Four response types are tracked per delegate:</p>
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-bold">
+                                    <div className="p-4 border rounded-xl bg-amber-50"><span className="text-amber-700 block mb-1 font-black">FT — First Timers</span> Delegates attending for the first time. Tracked individually for follow-up.</div>
+                                    <div className="p-4 border rounded-xl bg-emerald-50"><span className="text-emerald-700 block mb-1 font-black">SLV — Salvation</span> Delegates who gave their life to Christ. Tracked individually for discipleship.</div>
+                                    <div className="p-4 border rounded-xl bg-blue-50"><span className="text-blue-700 block mb-1 font-black">MI — Membership Intention</span> Delegates intending to join FGBMFI. Tracked individually for follow-up.</div>
+                                    <div className="p-4 border rounded-xl bg-red-50"><span className="text-red-700 block mb-1 font-black">HGB — Holy Ghost Baptism</span> Delegates who received the Holy Ghost Baptism. Tracked individually.</div>
+                                </div>
+                                <div className="p-4 border rounded-xl bg-yellow-50">
+                                    <span className="text-yellow-700 block mb-1 text-xs font-black">VD — Voice Distribution (Aggregate)</span>
+                                    <span className="text-xs text-gray-600">Voice Magazine distribution is recorded as a total figure per session, not per-delegate. Enter the total number of copies distributed.</span>
+                                </div>
+                            </div>
+                            <div className="bg-slate-900 p-8 rounded-2xl text-white shadow-xl mt-6">
+                                <h4 className="text-xs font-black uppercase text-blue-400 mb-4 tracking-widest">Three Recording Methods</h4>
+                                <div className="space-y-6">
+                                    <div>
+                                        <h5 className="text-[10px] font-black text-green-400 uppercase mb-2">Method 1: QR Code Scan (Fastest)</h5>
+                                        <ol className="space-y-2 text-sm">
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">1.</span> Select the active session and the Alter Call type (FT/SLV/MI/HGB) from the selector buttons.</li>
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">2.</span> Tap <strong>"SCAN QR"</strong> and scan the delegate's badge QR code. The system auto-records the response for the selected call type instantly.</li>
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">3.</span> A green "Recorded!" flash confirms success. The counter updates immediately.</li>
+                                        </ol>
+                                    </div>
+                                    <div>
+                                        <h5 className="text-[10px] font-black text-green-400 uppercase mb-2">Method 2: 4-Digit Code or Manual Lookup</h5>
+                                        <ol className="space-y-2 text-sm">
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">1.</span> Type the delegate's 4-digit code or search by name/phone in the <strong>"Database Lookup & Manual Record"</strong> section.</li>
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">2.</span> Click <strong>"Record as FT/SLV/MI/HGB"</strong> for each delegate. The system prevents double-recording the same call type per session.</li>
+                                        </ol>
+                                    </div>
+                                    <div>
+                                        <h5 className="text-[10px] font-black text-green-400 uppercase mb-2">Method 3: Manual Totals Entry (Open-Air Sessions)</h5>
+                                        <ol className="space-y-2 text-sm">
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">1.</span> For sessions like Market Place Outreach (MPO) or Fire Team Outreach (FTO) where individual tracking is difficult, tap <strong>"Enter Total"</strong> for any call type.</li>
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">2.</span> Enter the aggregate headcount. This is recorded separately from individual scans and is clearly distinguished in all reports.</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mt-6 space-y-3 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">RULE: ONE PER TYPE</span>
+                                    A delegate can respond to <strong>multiple different</strong> altar calls in one session (FT + SLV + MI + HGB), but only <strong>once per call type</strong>. The system blocks duplicate recordings per delegate per type.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">SESSIONS SUMMARY TABLE</span>
+                                    At the bottom of the page, the <strong>"Sessions Summary (All Sessions)"</strong> table shows ATT, FT, SLV, MI, HGB, and VD totals for every session. Export to PDF or Excel using the buttons above the table.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">NEW DELEGATE REGISTRATION</span>
+                                    If a delegate's QR code is not found in the database, the system opens the Quick Registration form (same as Check-In). After registration, the alter call response is recorded automatically.
+                                </div>
                             </div>
                         </section>
 
@@ -205,16 +295,50 @@ const UserManualModule = () => {
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">08</span>
-                                Reporting & Master Export
+                                Reports Center
                             </h2>
-                            <p className="text-sm text-gray-600 mb-4">The Reports module generates the final Attendance List, Attendance Matrix, and Financial Ledger. Reports respect per-event field visibility settings.</p>
+                            <p className="text-sm text-gray-600 mb-4">The Reports Center (<span className="font-mono bg-gray-100 px-1 rounded">#/admin/reports</span>) generates Attendance Lists, Attendance Matrices, Financial Ledgers, Pledge Summaries, and Session Reports. Reports respect per-event field visibility settings.</p>
                             <ul className="space-y-4 text-xs font-bold text-gray-700">
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance List:</strong> Full list grouped by district with Name, Chapter, Rank, Office, Phone, and Check-in Time columns. Chapter column is always shown. Rank and Office columns are conditionally displayed based on event configuration.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance List:</strong> Full list grouped by district with Name, Chapter, Rank, Office, Phone, and Check-in Time columns. Chapter column is always shown. Rank and Office columns are conditionally displayed based on event configuration. Filter by session or view Master (All Sessions).</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Attendance Matrix:</strong> Grid views showing Rank vs District, Office vs District, and Delegate Type vs District headcounts. Each matrix is conditionally shown based on event configuration.</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Financial Matrix:</strong> A summary of funds collected across all sessions.</span></li>
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>CSV Export:</strong> The Delegate Master List supports CSV export for offline processing and integration with other systems.</span></li>
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Exporting:</strong> Switch to your desired report tab and click <strong>"Export Master PDF"</strong>. The system will generate a landscape-oriented document ready for printing.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Pledge Summary & Detail:</strong> Per-district pledge summary with pledged/redeemed/balance columns, plus detailed donor-level lists.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Sessions Report:</strong> Per-session breakdown with Attendance (ATT), FT, SLV, MI, HGB, and VD totals. The <strong>Alter Call</strong> dropdown filter isolates a specific call type (e.g., show only Salvation responders). Individual records per response type list each delegate with Name, District, Chapter, Phone, Rank, and Office — exportable to CSV via the <strong>"Export CSV"</strong> button for follow-up planning.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>PDF Export:</strong> Switch to your desired report tab and click <strong>"Export PDF"</strong>. The system generates a landscape-oriented document with the active filter settings applied.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>CSV Export:</strong> The Delegate Master List supports CSV export for offline processing. Alter Call respondent lists in the Sessions report are individually exportable to CSV.</span></li>
                             </ul>
+                        </section>
+
+                        {/* Section 08A: Badge Management & E-Badge Distribution */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">8A</span>
+                                Badge Management & E-Badge Distribution
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">Every verified delegate receives a 60mm × 70mm badge with a scannable QR code. The badge can be reprinted, downloaded, or shared digitally.</p>
+                            <div className="space-y-4">
+                                <div className="p-5 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Badge Reprint</h4>
+                                    <p className="text-xs text-gray-600">In the Check-In search results, a verified delegate shows a <strong>"Reprint Badge"</strong> button. Tap it to open the badge preview modal showing the FGBMFI Nigeria header, delegate name, district, chapter, rank, 28mm QR code, and 4-digit backup code.</p>
+                                </div>
+                                <div className="p-5 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Four Export Options</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-bold mt-3">
+                                        <div className="p-3 border rounded-xl bg-blue-50"><span className="text-blue-800 block mb-1">Print</span> Opens the browser print dialog. Select "Actual Size" (100% scale) for the exact 60×70mm badge. Use for physical badge printing.</div>
+                                        <div className="p-3 border rounded-xl bg-slate-100"><span className="text-slate-800 block mb-1">PDF</span> Downloads the badge as a 60×70mm PDF at exact scale. Ready for emailing or professional printing.</div>
+                                        <div className="p-3 border rounded-xl bg-emerald-50"><span className="text-emerald-800 block mb-1">Image</span> Downloads a high-resolution PNG image of the badge. Perfect for saving to a mobile gallery and displaying at check-in points.</div>
+                                        <div className="p-3 border rounded-xl bg-purple-50"><span className="text-purple-800 block mb-1">Share</span> Opens the native device share sheet (WhatsApp, Telegram, email, etc.). The officer can instantly send the e-badge to the delegate's phone without saving a file first.</div>
+                                    </div>
+                                </div>
+                                <div className="p-5 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">E-Badge for Delegates</h4>
+                                    <p className="text-xs text-gray-600">Delegates receive the badge image via WhatsApp or Telegram, save it to their phone gallery, and display it full-screen at check-in points. The 28mm QR code renders clearly on mobile screens (approx. 300-400px on standard devices) for reliable scanning at arm's length. The badge includes the delegate's name, district, and backup code for verification.</p>
+                                </div>
+                                <div className="p-5 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Lost Badge Recovery</h4>
+                                    <p className="text-xs text-gray-600">If a delegate loses their physical badge, tap the <strong>"Lost Badge"</strong> button. This generates a new QR code (invalidating the old one) and reprints the badge. The 4-digit backup code remains unchanged.</p>
+                                </div>
+                            </div>
                         </section>
 
                         {/* Section 09: Admin Configuration */}
@@ -292,34 +416,56 @@ const UserManualModule = () => {
                             
                             <div className="space-y-6">
                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 1: The "Fast-Track" Member</h4>
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 1: The "QR Scan" Fast-Track</h4>
+                                    <p className="text-sm text-gray-600 italic">"The delegate has their printed badge with QR code."</p>
+                                    <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
+                                        <p>1. Open Check-In Tab.</p>
+                                        <p>2. Select active session (e.g., Banquet).</p>
+                                        <p>3. Tap "SCAN QR" and scan the badge. Arrival auto-verifies if needed. Done.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 2: The "I Have My Code" Member</h4>
                                     <p className="text-sm text-gray-600 italic">"I have my 4-digit code from the last session."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
                                         <p>1. Open Check-In Tab.</p>
                                         <p>2. Select active session (e.g. Banquet).</p>
-                                        <p>3. Type the 4 digits on the large keypad.</p>
+                                        <p>3. Type the 4 digits on the keypad — auto-submits on 4th digit.</p>
                                         <p>4. System auto-verifies arrival if not already done. Done.</p>
                                     </div>
                                 </div>
 
                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 2: The "Forgotten Code" Member</h4>
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 3: The "Forgotten Code" Member</h4>
                                     <p className="text-sm text-gray-600 italic">"I forgot my code or lost my slip."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
-                                        <p>1. Use the "Manual Lookup" search bar.</p>
+                                        <p>1. Use the "Database Lookup" search bar.</p>
                                         <p>2. Search by Name or Phone.</p>
-                                        <p>3. Verify arrival. Code will appear on screen—issue it again.</p>
+                                        <p>3. Verify arrival. Code appears on screen — issue it again.</p>
                                     </div>
                                 </div>
 
                                 <div className="p-6 bg-blue-900 text-white rounded-2xl shadow-xl">
-                                    <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 3: The "New Visitor" (External)</h4>
+                                    <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 4: The "New Visitor" (External)</h4>
                                     <p className="text-sm text-gray-300 italic">"I'm from a different region/national office and not in the database."</p>
                                     <div className="mt-3 text-[11px] font-black uppercase space-y-1">
-                                        <p>1. Go to "New Delegate" page.</p>
+                                        <p>1. Scan the badge QR — system opens Quick Registration form.</p>
                                         <p>2. Select District from dropdown (25 options).</p>
                                         <p>3. Chapter field auto-filters to that district only.</p>
                                         <p>4. Fill remaining details and click "Register & Verify".</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-green-900 text-white rounded-2xl shadow-xl mt-6">
+                                    <h4 className="text-xs font-black text-green-400 uppercase mb-2">Scenario 5: The "Altar Call Response" Recording</h4>
+                                    <p className="text-sm text-gray-300 italic">"A delegate has responded to the altar call — I need to record it."</p>
+                                    <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+                                        <p>1. Go to <strong>"Session Details"</strong> page (sidebar).</p>
+                                        <p>2. Select the active session. Choose the response type: FT/SLV/MI/HGB.</p>
+                                        <p>3. Scan the delegate's QR code — the response is recorded instantly.</p>
+                                        <p>4. For open-air sessions (MPO/FTO), use <strong>"Enter Total"</strong> to record aggregate headcounts.</p>
+                                        <p>5. Enter Voice Distribution totals at the bottom of the page.</p>
                                     </div>
                                 </div>
                             </div>
@@ -373,6 +519,22 @@ const UserManualModule = () => {
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: Session time shows wrong hour!</p>
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Refresh the page. Session times are now stored as UTC and should display correctly in Nigeria time (UTC+1).</p>
                                 </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: QR scanner won't open!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure camera permission is granted in your browser settings. Tap "SCAN QR" — the camera should activate. If on desktop, ensure a webcam is connected.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: "Already Recorded" for alter call!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: A delegate can only be recorded once per call type (FT/SLV/MI/HGB) per session. They can still respond to other call types. Use the search results — "Recorded" status is shown for each type.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: E-badge sharing doesn't work!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: On desktop browsers without native share support, the Share button falls back to downloading the image. Share the downloaded file manually via WhatsApp or email.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: Voice Distribution count not saving!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure you've selected a session first. Enter the total number and click "Save". For locked events, all writes are blocked — check if the event is finalized.</p>
+                                </div>
                             </div>
                         </section>
                     </>
@@ -381,7 +543,7 @@ const UserManualModule = () => {
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>© 2025 FGBMFI Nigeria EMS</span>
-                    <span>Document: EMS-USER-V2.6</span>
+                    <span>Document: EMS-USER-V2.7</span>
                     <span>System Training & Operations Reference</span>
                 </div>
             </div>
