@@ -539,11 +539,13 @@ const SessionMinistryPage: React.FC = () => {
               </div>
             </div>
             <div ref={el => setSummaryRef(el)} className="overflow-x-auto">
-              <div className="hidden print-only mb-6 text-center border-b-4 border-blue-900 pb-4">
-                <div className="text-[8px] font-black text-gray-400 uppercase tracking-[0.3em] mb-1">FGBMFI Nigeria</div>
-                <h1 className="text-lg font-black uppercase text-blue-900">{activeEvent?.name}</h1>
-                <h3 className="text-[9px] font-black uppercase text-gray-600 tracking-widest mt-1">Sessions Summary (All Sessions)</h3>
-                <p className="text-[8px] font-bold text-gray-400 mt-2">Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+              <div className="hidden print-only mb-8 text-center border-b-4 border-blue-900 pb-6">
+                <div className="text-[11px] font-black text-gray-400 uppercase tracking-[0.15em] mb-1">FGBMFI Nigeria — Events Management System</div>
+                <h1 className="text-2xl font-black uppercase text-blue-900 tracking-tight">{activeEvent?.name}</h1>
+                <div className="inline-block mt-2 px-4 py-1 bg-blue-50 rounded-full">
+                  <h3 className="text-[11px] font-black uppercase text-blue-700 tracking-widest">Sessions Summary (All Sessions)</h3>
+                </div>
+                <p className="text-[9px] font-bold text-gray-400 mt-4 uppercase tracking-wider">Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
               </div>
               <table className="w-full text-xs">
                 <thead className="bg-slate-100 uppercase font-black text-gray-500">
