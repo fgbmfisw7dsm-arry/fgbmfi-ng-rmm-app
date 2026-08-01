@@ -197,16 +197,12 @@ const ReportsPage = () => {
                 {Array.from(groupedBySession.entries()).map(([sessionId, group]) => {
                     const typeForDisplay = alterCallFilter ? getDelegateTypesForSession(sessionId) : responseTypes;
                     const hasDelegateData = typeForDisplay.some(t => (group.responses.get(t) || []).length > 0);
-
-                    const allEmpty = responseTypes.every(t => (group.responses.get(t) || []).length === 0 && (group.summaries.get(t) || 0) === 0) && group.vd === 0;
-                    if (allEmpty) return null;
-
                     return (
                         <div key={sessionId} className="mb-8">
                             <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between">
                                 <span>{group.title}{alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</span>
                                 <span className="opacity-70">
-                                    ATT: {group.att || '-'} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
+                                    ATT: {group.att} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
                                 </span>
                             </div>
 
@@ -223,31 +219,28 @@ const ReportsPage = () => {
                                     <tbody>
                                         <tr className="border-b bg-gray-50">
                                             <td className="border p-2 font-black uppercase text-blue-900">Attendance</td>
-                                            <td className="border p-2 text-center font-bold">{group.att || '-'}</td>
+                                            <td className="border p-2 text-center font-bold">{group.att}</td>
                                             <td className="border p-2 text-center">-</td>
-                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.att || '-'}</td>
+                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.att}</td>
                                         </tr>
                                         {responseTypes.map(type => {
                                             const scanned = (group.responses.get(type) || []).length;
                                             const manual = group.summaries.get(type) || 0;
-                                            if (scanned === 0 && manual === 0) return null;
                                             const isHighlighted = alterCallFilter && type === alterCallFilter;
                                             return (
                                                 <tr key={type} className={`border-b ${isHighlighted ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}>
                                                     <td className="border p-2 font-black uppercase text-blue-900">{RESPONSE_TYPE_LABELS[type]}</td>
-                                                    <td className="border p-2 text-center font-bold">{scanned || '-'}</td>
-                                                    <td className="border p-2 text-center font-bold">{manual || '-'}</td>
+                                                    <td className="border p-2 text-center font-bold">{scanned}</td>
+                                                    <td className="border p-2 text-center font-bold">{manual}</td>
                                                     <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned + manual}</td>
                                                 </tr>
                                             );
                                         })}
-                                        {group.vd > 0 && (
-                                            <tr className="border-b bg-gray-50">
+                                        <tr className="border-b bg-gray-50">
                                                 <td className="border p-2 font-black uppercase">Voice Distribution</td>
                                                 <td className="border p-2" colSpan={2}></td>
                                                 <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.vd}</td>
                                             </tr>
-                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -455,6 +448,7 @@ const ReportsPage = () => {
                         <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
                             {activeTab === 'ministryReport' && selectedSessionId
                                 ? `Session: ${sessions.find(s => s.session_id === selectedSessionId)?.title}${alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}`
+                                : activeTab === 'ministryReport' ? 'Sessions Report'
                                 : activeTab.replace(/([A-Z])/g, ' $1')}
                         </h3>
                         {isLocked && (
