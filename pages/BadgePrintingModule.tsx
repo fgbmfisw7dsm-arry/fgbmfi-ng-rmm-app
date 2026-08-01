@@ -2,7 +2,7 @@ import React, { useState, useContext, useEffect, useCallback, useRef } from 'rea
 import { db } from '../services/supabaseService';
 import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress } from '../types';
 import { AppContext } from '../context/AppContext';
-import { getBadgePageCount } from '../services/badgePdfGenerator';
+import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
 import { useQuery } from '@tanstack/react-query';
 import BadgePreview from '../components/BadgePreview';
 import BatchStatusBadge from '../components/BatchStatusBadge';
@@ -77,7 +77,7 @@ const BadgePrintingModule = () => {
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
-  const workerRef = useRef<Worker | null>(null);
+  const cancellationRef = useRef(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const previewUrlRef = useRef<string | null>(null);
 
@@ -150,7 +150,6 @@ const BadgePrintingModule = () => {
 
   useEffect(() => {
     return () => {
-      terminateWorker();
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     };
   }, []);
@@ -317,128 +316,110 @@ const BadgePrintingModule = () => {
         fetchLogoAsBase64('/event-logo.png'),
       ]);
 
-      const worker = new Worker(
-        new URL('../workers/badgeWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
-      workerRef.current = worker;
+      const decodeBase64Img = (base64: string): Uint8Array | undefined => {
+        try {
+          const raw = base64.includes(',') ? base64.split(',')[1] : base64;
+          const binary = atob(raw);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return bytes;
+        } catch {
+          return undefined;
+        }
+      };
 
-      let currentBatchIdx = 0;
-      const totalBatches = batches.length;
-      const currentBatchDelegatesRef: { current: Delegate[] } = { current: [] };
+      const fgbmfiLogoBytes = fgbmfiLogoBase64 ? decodeBase64Img(fgbmfiLogoBase64) : undefined;
+      const eventLogoBytes = eventLogoBase64 ? decodeBase64Img(eventLogoBase64) : undefined;
+
+      cancellationRef.current = false;
       let hasError = false;
 
-      const processNextBatch = () => {
-        if (currentBatchIdx >= totalBatches) {
-          setGenerating(false);
-          setProgress(null);
-          loadBatches();
-          loadPrintLogs();
-          if (!hasError) {
-            setFeedback({
-              type: 'success',
-              msg: `All ${totalBatches} batch(es) generated and uploaded successfully.`,
-            });
-            setTimeout(() => {
-              resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 200);
-          }
-          terminateWorker();
-          return;
-        }
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        if (cancellationRef.current) break;
 
-        const batchDelegates = batches[currentBatchIdx];
-        currentBatchDelegatesRef.current = batchDelegates;
-        worker.postMessage({
-          type: 'GENERATE',
-          delegates: batchDelegates,
+        const batchDelegates = batches[batchIdx];
+        const idxOffset = batchIdx * batchSize;
+
+        const pdfBytes = await generateBadgePDF(
+          batchDelegates,
           layout,
-          event: activeEvent,
-          fgbmfiLogoBase64,
-          eventLogoBase64,
-        });
-      };
-
-      worker.onmessage = async (e: MessageEvent) => {
-        const msg = e.data;
-        if (msg.type === 'PROGRESS') {
-          setProgress({
-            current: msg.progress.current + currentBatchIdx * batchSize,
-            total: totalBatches * batchSize,
-            phase: msg.progress.phase,
-          } as unknown as BadgeGenerationProgress);
-        } else if (msg.type === 'COMPLETE') {
-          const pdfBytes = new Uint8Array(msg.pdfBytes);
-          const batchDelegates = currentBatchDelegatesRef.current;
-
-          try {
-            const filtersForBatch: BadgeFilter = {
-              ...filters,
-              selectedIds: selectedDelegates.length
-                ? selectedDelegates.map((d) => d.delegate_id)
-                : undefined,
-            };
-
-            const batch = await db.createBadgeBatch({
-              event_id: activeEventId,
-              batch_number: 0,
-              badge_count: batchDelegates.length,
-              page_count: getBadgePageCount(batchDelegates.length, layout),
-              layout,
-              sort_field: sortBy,
-              filters: filtersForBatch,
-              status: 'generating',
-              generated_by: user.id,
-            });
-
-            const pdfUrl = await db.uploadBadgePDF(batch.batch_id, pdfBytes);
-            await db.updateBadgeBatchStatus(batch.batch_id, 'ready', pdfUrl);
-
-            const printLogs = batchDelegates.map((d) => ({
-              batch_id: batch.batch_id,
-              event_id: activeEventId,
-              delegate_id: d.delegate_id,
-              action: 'generated' as const,
-              performed_by: user.id,
-            }));
-            await db.createBadgePrintLogsBatch(printLogs);
-
-            setGeneratedPdfBytes(pdfBytes);
-            setGeneratedBatchId(batch.batch_id);
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-            const previewUrl = URL.createObjectURL(blob);
-            if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-            previewUrlRef.current = previewUrl;
-            setPdfPreviewUrl(previewUrl);
-          } catch (uploadErr: any) {
-            hasError = true;
-            setFeedback({
-              type: 'error',
-              msg: `Batch ${currentBatchIdx + 1} generated but upload failed: ${uploadErr.message}`,
-            });
+          activeEvent,
+          fgbmfiLogoBytes,
+          eventLogoBytes,
+          (pg) => {
+            if (cancellationRef.current) return;
+            setProgress({
+              current: pg.current + idxOffset,
+              total: batches.length * batchSize,
+              phase: pg.phase,
+            } as unknown as BadgeGenerationProgress);
           }
+        );
 
-          currentBatchIdx++;
-          processNextBatch();
-        } else if (msg.type === 'ERROR') {
-          setGenerating(false);
-          setProgress(null);
-          setFeedback({ type: 'error', msg: msg.message });
-          terminateWorker();
+        if (cancellationRef.current) break;
+
+        try {
+          const filtersForBatch: BadgeFilter = {
+            ...filters,
+            selectedIds: selectedDelegates.length
+              ? selectedDelegates.map((d) => d.delegate_id)
+              : undefined,
+          };
+
+          const batch = await db.createBadgeBatch({
+            event_id: activeEventId,
+            batch_number: 0,
+            badge_count: batchDelegates.length,
+            page_count: getBadgePageCount(batchDelegates.length, layout),
+            layout,
+            sort_field: sortBy,
+            filters: filtersForBatch,
+            status: 'generating',
+            generated_by: user.id,
+          });
+
+          const pdfUrl = await db.uploadBadgePDF(batch.batch_id, pdfBytes);
+          await db.updateBadgeBatchStatus(batch.batch_id, 'ready', pdfUrl);
+
+          const printLogs = batchDelegates.map((d) => ({
+            batch_id: batch.batch_id,
+            event_id: activeEventId,
+            delegate_id: d.delegate_id,
+            action: 'generated' as const,
+            performed_by: user.id,
+          }));
+          await db.createBadgePrintLogsBatch(printLogs);
+
+          setGeneratedPdfBytes(pdfBytes);
+          setGeneratedBatchId(batch.batch_id);
+          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const previewUrl = URL.createObjectURL(blob);
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = previewUrl;
+          setPdfPreviewUrl(previewUrl);
+        } catch (uploadErr: any) {
+          hasError = true;
+          setFeedback({
+            type: 'error',
+            msg: `Batch ${batchIdx + 1} generated but upload failed: ${uploadErr.message}`,
+          });
         }
-      };
+      }
 
-      worker.onerror = (err) => {
-        setGenerating(false);
-        setProgress(null);
+      setGenerating(false);
+      setProgress(null);
+      loadBatches();
+      loadPrintLogs();
+
+      if (!hasError && !cancellationRef.current) {
         setFeedback({
-          type: 'error',
-          msg: `Worker error: ${err.message || 'Unexpected error'}`,
+          type: 'success',
+          msg: `All ${batches.length} batch(es) generated and uploaded successfully.`,
         });
-        terminateWorker();
-      };
-
-      processNextBatch();
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+      }
     } catch (err: any) {
       setGenerating(false);
       setProgress(null);
@@ -460,22 +441,8 @@ const BadgePrintingModule = () => {
     loadPrintLogs,
   ]);
 
-  const terminateWorker = () => {
-    if (workerRef.current) {
-      workerRef.current.terminate();
-      workerRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      terminateWorker();
-      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
-    };
-  });
-
   const handleCancelGeneration = () => {
-    terminateWorker();
+    cancellationRef.current = true;
     setGenerating(false);
     setProgress(null);
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
