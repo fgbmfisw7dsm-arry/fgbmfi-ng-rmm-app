@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction } from '../types';
 import { generateCodeFromId, generateQrHash } from './utils';
 
 /**
@@ -1114,5 +1114,137 @@ export const db = {
             voiceDistribution: (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' })),
             attendance,
         };
+    },
+
+    getBadgeBatches: async (eventId: string): Promise<BadgeBatch[]> => {
+        const { data, error } = await supabase.from('badge_batches')
+            .select('*')
+            .eq('event_id', eventId)
+            .order('batch_number', { ascending: false });
+        if (error) return [];
+        return (data || []) as BadgeBatch[];
+    },
+
+    createBadgeBatch: async (batch: Omit<BadgeBatch, 'batch_id' | 'created_at' | 'generated_at' | 'pdf_url'>): Promise<BadgeBatch> => {
+        const nextNum = await supabase.rpc('get_next_batch_number', { p_event_id: batch.event_id });
+        handleSupabaseError(nextNum, 'Failed to get batch number');
+        const batchNumber = nextNum.data || 1;
+        const { data, error } = await supabase.from('badge_batches')
+            .insert({ ...batch, batch_number: batchNumber, status: 'pending' })
+            .select('*')
+            .single();
+        handleSupabaseError({ data, error }, 'Failed to create badge batch');
+        return data as BadgeBatch;
+    },
+
+    updateBadgeBatchStatus: async (batchId: string, status: BatchStatus, pdfUrl?: string): Promise<void> => {
+        const updates: Record<string, unknown> = { status };
+        if (status === 'ready' && pdfUrl) {
+            updates.pdf_url = pdfUrl;
+            updates.generated_at = new Date().toISOString();
+        }
+        const { error } = await supabase.from('badge_batches')
+            .update(updates)
+            .eq('batch_id', batchId);
+        handleSupabaseError({ data: null, error }, 'Failed to update batch status');
+    },
+
+    getBadgePrintLogs: async (eventId: string, delegateId?: string): Promise<BadgePrintLog[]> => {
+        let query = supabase.from('badge_print_logs')
+            .select('*, delegates(first_name, last_name)')
+            .eq('event_id', eventId)
+            .order('created_at', { ascending: false })
+            .limit(500);
+        if (delegateId) query = query.eq('delegate_id', delegateId);
+        const { data, error } = await query;
+        if (error) return [];
+        return (data || []).map((r: any) => ({
+            ...r,
+            delegate_name: r.delegates ? `${r.delegates.first_name} ${r.delegates.last_name}` : '',
+        }));
+    },
+
+    createBadgePrintLog: async (log: Omit<BadgePrintLog, 'log_id' | 'created_at'>): Promise<void> => {
+        const { error } = await supabase.from('badge_print_logs').insert(log);
+        handleSupabaseError({ data: null, error }, 'Failed to create print log');
+    },
+
+    createBadgePrintLogsBatch: async (logs: Omit<BadgePrintLog, 'log_id' | 'created_at'>[]): Promise<void> => {
+        for (let i = 0; i < logs.length; i += 500) {
+            const chunk = logs.slice(i, i + 500);
+            const { error } = await supabase.from('badge_print_logs').insert(chunk);
+            handleSupabaseError({ data: null, error }, 'Failed to batch-create print logs');
+        }
+    },
+
+    getFilteredDelegates: async (
+        eventId: string,
+        filters: BadgeFilter,
+        sortBy: BadgeSortField = 'surname',
+        limit: number = 500,
+        offset: number = 0
+    ): Promise<Delegate[]> => {
+        try {
+            const { data, error } = await supabase.rpc('get_filtered_delegates', {
+                p_event_id: eventId,
+                p_district: filters.district || null,
+                p_chapter: filters.chapter || null,
+                p_delegate_type: filters.delegateType || null,
+                p_registration_status: filters.registrationStatus || null,
+                p_name_from: filters.surnameFrom || null,
+                p_name_to: filters.surnameTo || null,
+                p_external_from: filters.delegateNumberFrom || null,
+                p_external_to: filters.delegateNumberTo || null,
+                p_selected_ids: filters.selectedIds?.length ? filters.selectedIds : null,
+                p_sort_by: sortBy,
+                p_limit: limit,
+                p_offset: offset,
+            });
+            if (!error && data) return data as Delegate[];
+        } catch {}
+        return [];
+    },
+
+    getFilteredDelegateCount: async (eventId: string, filters: BadgeFilter): Promise<number> => {
+        try {
+            const { data, error } = await supabase.rpc('get_filtered_delegate_count', {
+                p_event_id: eventId,
+                p_district: filters.district || null,
+                p_chapter: filters.chapter || null,
+                p_delegate_type: filters.delegateType || null,
+                p_registration_status: filters.registrationStatus || null,
+                p_name_from: filters.surnameFrom || null,
+                p_name_to: filters.surnameTo || null,
+                p_external_from: filters.delegateNumberFrom || null,
+                p_external_to: filters.delegateNumberTo || null,
+                p_selected_ids: filters.selectedIds?.length ? filters.selectedIds : null,
+            });
+            if (!error && data != null) return data as number;
+        } catch {}
+        return 0;
+    },
+
+    uploadBadgePDF: async (batchId: string, pdfBytes: Uint8Array): Promise<string> => {
+        const fileName = `badge-batch-${batchId}.pdf`;
+        const bucketName = 'badge-pdfs';
+
+        try {
+            const { data: buckets } = await supabase.storage.listBuckets();
+            const bucketExists = (buckets || []).some(b => b.name === bucketName);
+            if (!bucketExists) {
+                await supabase.storage.createBucket(bucketName, { public: false });
+            }
+        } catch {}
+
+        const { data, error } = await supabase.storage
+            .from(bucketName)
+            .upload(fileName, pdfBytes, {
+                contentType: 'application/pdf',
+                upsert: true,
+            });
+        handleSupabaseError({ data, error }, 'Failed to upload badge PDF');
+
+        const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(fileName);
+        return urlData.publicUrl;
     },
 };

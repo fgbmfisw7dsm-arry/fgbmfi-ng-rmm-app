@@ -1,0 +1,409 @@
+import { PDFDocument, StandardFonts, rgb, PDFPage } from 'pdf-lib';
+import { Delegate, Event, BadgeLayout, BadgeLayoutConfig, BadgeGenerationProgress } from '../types';
+import QRCode from 'qrcode';
+
+const PT_PER_MM = 72 / 25.4;
+const mmToPt = (mm: number) => mm * PT_PER_MM;
+
+const A4 = { w: mmToPt(210), h: mmToPt(297) };
+
+const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
+  '8-up': { cols: 2, rows: 4, badgeW: 90, badgeH: 60, cutGap: 3 },
+  '10-up': { cols: 2, rows: 5, badgeW: 80, badgeH: 55, cutGap: 3 },
+};
+
+const ZONES = {
+  headerFraction: 0.17,
+  bodyFraction: 0.66,
+  bandFraction: 0.17,
+};
+
+const BAND_COLORS: Record<string, readonly [number, number, number]> = {
+  'Member': [0.20, 0.40, 0.80],
+  'Delegate': [0.18, 0.70, 0.30],
+  'VIP': [0.80, 0.55, 0.05],
+  'Gold': [0.80, 0.55, 0.05],
+  'Speaker': [0.60, 0.10, 0.10],
+  'Volunteer': [0.20, 0.30, 0.55],
+  'Staff': [0.45, 0.15, 0.45],
+  'Minister': [0.12, 0.12, 0.12],
+  'Exhibitor': [0.80, 0.35, 0.10],
+  'Press': [0.05, 0.05, 0.05],
+};
+const DEFAULT_BAND: readonly [number, number, number] = [0.35, 0.35, 0.40];
+const HEADER_BG = rgb(0.227, 0.000, 0.027);
+const HEADER_TEXT = rgb(1, 1, 1);
+const ACCENT_GOLD = rgb(0.784, 0.588, 0.047);
+const BODY_BG = rgb(1, 1, 1);
+const TEXT_PRIMARY = rgb(0.06, 0.09, 0.16);
+const TEXT_SECONDARY = rgb(0.39, 0.45, 0.55);
+const QR_DARK = rgb(0.12, 0.16, 0.22);
+const CROP_COLOR = rgb(0, 0, 0);
+const HEADER_STRIP_BG = rgb(0.027, 0.000, 0.000);
+
+function encodeQRData(delegate: Delegate, event: Event): string {
+  return [
+    delegate.delegate_id,
+    delegate.qr_hash || delegate.delegate_id,
+    `${delegate.first_name} ${delegate.last_name}`,
+    delegate.district,
+    delegate.delegate_type || 'Member',
+    event.event_id,
+  ].join('|');
+}
+
+function drawCropMarks(page: PDFPage, x: number, y: number, w: number, h: number) {
+  const markLen = mmToPt(5);
+  const overhang = mmToPt(3);
+  const lineW = 0.25;
+
+  const corners = [
+    { cx: x, cy: y, dx1: 1, dy1: 0, dx2: 0, dy2: 1 },
+    { cx: x + w, cy: y, dx1: -1, dy1: 0, dx2: 0, dy2: 1 },
+    { cx: x, cy: y + h, dx1: 1, dy1: 0, dx2: 0, dy2: -1 },
+    { cx: x + w, cy: y + h, dx1: -1, dy1: 0, dx2: 0, dy2: -1 },
+  ];
+
+  for (const corner of corners) {
+    const cx = corner.cx;
+    const cy = corner.cy;
+
+    page.drawLine({
+      start: { x: cx, y: cy },
+      end: { x: cx + markLen * corner.dx1, y: cy + overhang * corner.dx1 },
+      color: CROP_COLOR,
+      thickness: lineW,
+    });
+    page.drawLine({
+      start: { x: cx, y: cy },
+      end: { x: cx + overhang * corner.dx2, y: cy + markLen * corner.dy1 },
+      color: CROP_COLOR,
+      thickness: lineW,
+    });
+
+    const innerX = cx + overhang * corner.dx2;
+    const innerY = cy + overhang * corner.dy1;
+    const extX = cx + (markLen + overhang) * corner.dx2;
+    const extY = cy + (markLen + overhang) * corner.dy1;
+
+    if (Math.abs(corner.dx2) > 0) {
+      page.drawLine({
+        start: { x: innerX, y: innerY },
+        end: { x: extX, y: extY },
+        color: CROP_COLOR,
+        thickness: lineW,
+      });
+    } else {
+      page.drawLine({
+        start: { x: innerX, y: innerY },
+        end: { x: extX, y: extY },
+        color: CROP_COLOR,
+        thickness: lineW,
+      });
+    }
+  }
+}
+
+function drawQRCode(
+  page: PDFPage,
+  data: string,
+  qrX: number,
+  qrY: number,
+  qrSize: number
+) {
+  try {
+    const qr = QRCode.create(data, { errorCorrectionLevel: 'M' });
+    const moduleCount = qr.modules.size;
+    const moduleSize = qrSize / moduleCount;
+
+    for (let row = 0; row < moduleCount; row++) {
+      for (let col = 0; col < moduleCount; col++) {
+        if (qr.modules.get(row, col)) {
+          const mx = qrX + col * moduleSize;
+          const my = qrY + qrSize - (row + 1) * moduleSize;
+          page.drawRectangle({
+            x: mx,
+            y: my,
+            width: moduleSize,
+            height: moduleSize,
+            color: QR_DARK,
+          });
+        }
+      }
+    }
+  } catch {
+    page.drawRectangle({
+      x: qrX,
+      y: qrY,
+      width: qrSize,
+      height: qrSize,
+      borderColor: QR_DARK,
+      borderWidth: 1,
+      color: BODY_BG,
+    });
+  }
+}
+
+function drawBadge(
+  page: PDFPage,
+  delegate: Delegate,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+  headerH: number,
+  bodyH: number,
+  bandH: number,
+  event: Event,
+  fontBold: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
+  font: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
+  fontOblique: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
+  logoImage?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never
+) {
+  const badgeBottom = by;
+  const badgeLeft = bx;
+
+  // Header
+  page.drawRectangle({
+    x: badgeLeft,
+    y: badgeBottom + bh - headerH,
+    width: bw,
+    height: headerH,
+    color: HEADER_BG,
+  });
+
+  page.drawRectangle({
+    x: badgeLeft,
+    y: badgeBottom + bh - headerH,
+    width: bw,
+    height: mmToPt(0.5),
+    color: ACCENT_GOLD,
+  });
+
+  const headerCenterY = badgeBottom + bh - headerH / 2;
+  const logoSize = headerH * 0.65;
+
+  if (logoImage) {
+    try {
+      const logoAspect = logoImage.width / logoImage.height;
+      let logoW = logoSize * logoAspect;
+      const logoH = logoSize;
+      if (logoW > bw * 0.28) logoW = bw * 0.28;
+      const logoX = badgeLeft + mmToPt(2);
+      const logoY = headerCenterY - logoH / 2;
+      page.drawImage(logoImage as any, {
+        x: logoX,
+        y: logoY,
+        width: logoW,
+        height: logoH,
+      });
+    } catch {}
+  }
+
+  const textX = badgeLeft + bw * 0.3;
+  const eventName = event.name || '2026 LAGOS NATIONAL CONVENTION';
+  const fontSize = bh > mmToPt(55) ? 5.5 : 4.5;
+  page.drawText(eventName.toUpperCase(), {
+    x: textX,
+    y: headerCenterY - fontSize * 0.35,
+    size: fontSize,
+    font: fontBold as any,
+    color: HEADER_TEXT,
+    maxWidth: bw * 0.65,
+  });
+
+  // Body
+  page.drawRectangle({
+    x: badgeLeft,
+    y: badgeBottom + bandH,
+    width: bw,
+    height: bodyH,
+    color: BODY_BG,
+  });
+
+  const bodyTop = badgeBottom + bandH + bodyH;
+  const qrSize = bodyH * 0.72;
+  const qrX = badgeLeft + mmToPt(3);
+  const qrY = badgeBottom + bandH + (bodyH - qrSize) / 2;
+
+  const qrData = encodeQRData(delegate, event);
+  drawQRCode(page, qrData, qrX, qrY, qrSize);
+
+  // Delegate details
+  const detailX = qrX + qrSize + mmToPt(3);
+  const detailW = bw - (detailX - badgeLeft) - mmToPt(2);
+  const isSmall = bw < mmToPt(85);
+
+  const nameSize = isSmall ? 5.5 : 6.5;
+  const fieldSize = isSmall ? 4.0 : 4.8;
+  const labelSize = isSmall ? 3.0 : 3.5;
+
+  const fullName = [delegate.title, delegate.first_name, delegate.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
+
+  let textY = bodyTop - mmToPt(2);
+
+  page.drawText(fullName, {
+    x: detailX,
+    y: textY,
+    size: nameSize,
+    font: fontBold as any,
+    color: TEXT_PRIMARY,
+    maxWidth: detailW,
+  });
+
+  textY -= nameSize * 2;
+
+  const fields: [string, string][] = [
+    ['District', delegate.district || 'N/A'],
+    ['Chapter', delegate.chapter || 'N/A'],
+    ['Type', delegate.delegate_type || 'Member'],
+    ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
+  ];
+
+  if (delegate.rank && delegate.rank !== 'CP') {
+    fields.push(['Rank', delegate.rank]);
+  }
+  if (delegate.office && delegate.office !== 'OTHER') {
+    fields.push(['Office', delegate.office]);
+  }
+
+  for (const [label, value] of fields) {
+    if (textY < badgeBottom + bandH + mmToPt(3)) break;
+    const labelWidth = font.widthOfTextAtSize(label + ': ', labelSize);
+    page.drawText(label + ': ', {
+      x: detailX,
+      y: textY,
+      size: labelSize,
+      font: fontBold as any,
+      color: TEXT_SECONDARY,
+    });
+    page.drawText(value, {
+      x: detailX + labelWidth,
+      y: textY,
+      size: fieldSize,
+      font: font as any,
+      color: TEXT_PRIMARY,
+      maxWidth: detailW - labelWidth,
+    });
+    textY -= fieldSize * 1.5;
+  }
+
+  // Category band
+  const delegateType = delegate.delegate_type || 'Member';
+  const bandColor = BAND_COLORS[delegateType] || DEFAULT_BAND;
+
+  page.drawRectangle({
+    x: badgeLeft,
+    y: badgeBottom,
+    width: bw,
+    height: bandH,
+    color: rgb(bandColor[0], bandColor[1], bandColor[2]),
+  });
+
+  const bandTextSize = isSmall ? 4.5 : 5.5;
+  const bandText = delegateType.toUpperCase();
+  const bandTextW = fontBold.widthOfTextAtSize(bandText, bandTextSize);
+  page.drawText(bandText, {
+    x: badgeLeft + (bw - bandTextW) / 2,
+    y: badgeBottom + (bandH - bandTextSize) / 2,
+    size: bandTextSize,
+    font: fontBold as any,
+    color: HEADER_TEXT,
+  });
+}
+
+export async function generateBadgePDF(
+  delegates: Delegate[],
+  layout: BadgeLayout,
+  event: Event,
+  logoImageBytes?: Uint8Array,
+  onProgress?: (progress: BadgeGenerationProgress) => void
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+
+  let logoImage;
+  if (logoImageBytes) {
+    try {
+      logoImage = await pdfDoc.embedPng(logoImageBytes);
+    } catch {}
+  }
+
+  const config = LAYOUTS[layout];
+  const badgeW = mmToPt(config.badgeW);
+  const badgeH = mmToPt(config.badgeH);
+  const cutGapW = mmToPt(config.cutGap);
+  const cutGapH = mmToPt(config.cutGap);
+
+  const headerH = badgeH * ZONES.headerFraction;
+  const bodyH = badgeH * ZONES.bodyFraction;
+  const bandH = badgeH * ZONES.bandFraction;
+
+  const totalW = config.cols * badgeW + (config.cols - 1) * cutGapW;
+  const totalH = config.rows * badgeH + (config.rows - 1) * cutGapH;
+  const marginX = (A4.w - totalW) / 2;
+  const marginY = (A4.h - totalH) / 2;
+
+  const totalPages = Math.ceil(delegates.length / (config.cols * config.rows));
+  const badgesPerPage = config.cols * config.rows;
+
+  onProgress?.({ current: 0, total: totalPages, phase: 'composing_pages' });
+
+  for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+    const page = pdfDoc.addPage([A4.w, A4.h]);
+    const pageDelegates = delegates.slice(
+      pageIdx * badgesPerPage,
+      (pageIdx + 1) * badgesPerPage
+    );
+
+    for (let i = 0; i < pageDelegates.length; i++) {
+      const row = Math.floor(i / config.cols);
+      const col = i % config.cols;
+      const bx = marginX + col * (badgeW + cutGapW);
+      const by = marginY + (config.rows - 1 - row) * (badgeH + cutGapH);
+
+      drawBadge(
+        page as any,
+        pageDelegates[i],
+        bx,
+        by,
+        badgeW,
+        badgeH,
+        headerH,
+        bodyH,
+        bandH,
+        event,
+        fontBold as any,
+        font as any,
+        fontOblique as any,
+        logoImage as any
+      );
+      drawCropMarks(page, bx, by, badgeW, badgeH);
+    }
+
+    onProgress?.({ current: pageIdx + 1, total: totalPages, phase: 'composing_pages' });
+
+    if (pageIdx % 5 === 0) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  onProgress?.({ current: totalPages, total: totalPages, phase: 'saving' });
+  const pdfBytes = await pdfDoc.save();
+  return pdfBytes;
+}
+
+export function getBadgePageCount(
+  delegateCount: number,
+  layout: BadgeLayout
+): number {
+  const config = LAYOUTS[layout];
+  return Math.ceil(delegateCount / (config.cols * config.rows));
+}
+
+export { LAYOUTS, encodeQRData };

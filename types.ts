@@ -268,3 +268,63 @@ export interface MinistryExportData {
   voiceDistribution: VoiceDistribution[];
   attendance: { session_id: string; session_title: string; attendance: number }[];
 }
+
+export type BadgeLayout = '8-up' | '10-up';
+export type BadgeBatchSize = 250 | 500 | 1000;
+export type BatchStatus = 'pending' | 'generating' | 'ready' | 'printing' | 'printed' | 'failed';
+export type BadgeSortField = 'delegate_number' | 'surname' | 'district' | 'chapter' | 'category' | 'registration_date';
+export type BadgePrintAction = 'generated' | 'reprinted' | 'replaced_lost';
+
+export interface BadgeFilter {
+  district?: string;
+  chapter?: string;
+  delegateType?: string;
+  registrationStatus?: 'checked_in' | 'not_checked_in' | 'all';
+  delegateNumberFrom?: string;
+  delegateNumberTo?: string;
+  surnameFrom?: string;
+  surnameTo?: string;
+  selectedIds?: string[];
+}
+
+export interface BadgeBatch {
+  batch_id: string;
+  event_id: string;
+  batch_number: number;
+  badge_count: number;
+  page_count: number;
+  layout: BadgeLayout;
+  sort_field: BadgeSortField;
+  filters: BadgeFilter;
+  status: BatchStatus;
+  pdf_url: string | null;
+  generated_by: string;
+  generated_at: string | null;
+  created_at: string;
+}
+
+export interface BadgePrintLog {
+  log_id: string;
+  batch_id: string | null;
+  event_id: string;
+  delegate_id: string;
+  action: BadgePrintAction;
+  performed_by: string;
+  performed_by_email?: string;
+  delegate_name?: string;
+  created_at: string;
+}
+
+export interface BadgeGenerationProgress {
+  current: number;
+  total: number;
+  phase: 'generating_qr' | 'composing_pages' | 'saving';
+}
+
+export interface BadgeLayoutConfig {
+  cols: number;
+  rows: number;
+  badgeW: number;
+  badgeH: number;
+  cutGap: number;
+}
