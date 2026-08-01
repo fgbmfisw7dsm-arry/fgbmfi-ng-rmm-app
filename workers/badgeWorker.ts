@@ -6,7 +6,8 @@ interface WorkerMessage {
   delegates: Delegate[];
   layout: BadgeLayout;
   event: Event;
-  logoBase64?: string;
+  fgbmfiLogoBase64?: string;
+  eventLogoBase64?: string;
 }
 
 interface WorkerResponse {
@@ -30,25 +31,27 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   if (msg.type !== 'GENERATE') return;
 
   try {
-    let logoBytes: Uint8Array | undefined;
-    if (msg.logoBase64) {
+    const decodeBase64 = (base64: string): Uint8Array | undefined => {
       try {
-        const base64 = msg.logoBase64.includes(',')
-          ? msg.logoBase64.split(',')[1]
-          : msg.logoBase64;
-        const binary = atob(base64);
-        logoBytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          logoBytes[i] = binary.charCodeAt(i);
-        }
-      } catch {}
-    }
+        const raw = base64.includes(',') ? base64.split(',')[1] : base64;
+        const binary = atob(raw);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const fgbmfiLogoBytes = msg.fgbmfiLogoBase64 ? decodeBase64(msg.fgbmfiLogoBase64) : undefined;
+    const eventLogoBytes = msg.eventLogoBase64 ? decodeBase64(msg.eventLogoBase64) : undefined;
 
     const pdfBytes = await generateBadgePDF(
       msg.delegates,
       msg.layout,
       msg.event,
-      logoBytes,
+      fgbmfiLogoBytes,
+      eventLogoBytes,
       (progress: BadgeGenerationProgress) => {
         const response: WorkerResponse = {
           type: 'PROGRESS',

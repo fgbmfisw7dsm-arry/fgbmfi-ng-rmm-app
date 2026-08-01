@@ -158,12 +158,12 @@ function drawBadge(
   fontBold: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
   font: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
   fontOblique: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
-  logoImage?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never
+  fgbmfiLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
+  eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never
 ) {
   const badgeBottom = by;
   const badgeLeft = bx;
 
-  // Header
   page.drawRectangle({
     x: badgeLeft,
     y: badgeBottom + bh - headerH,
@@ -181,17 +181,16 @@ function drawBadge(
   });
 
   const headerCenterY = badgeBottom + bh - headerH / 2;
-  const logoSize = headerH * 0.65;
 
-  if (logoImage) {
+  if (eventLogo) {
     try {
-      const logoAspect = logoImage.width / logoImage.height;
-      let logoW = logoSize * logoAspect;
-      const logoH = logoSize;
-      if (logoW > bw * 0.28) logoW = bw * 0.28;
-      const logoX = badgeLeft + mmToPt(2);
+      const logoAspect = eventLogo.width / eventLogo.height;
+      const logoH = headerH * 0.66;
+      let logoW = logoH * logoAspect;
+      if (logoW > bw * 0.25) logoW = bw * 0.25;
+      const logoX = badgeLeft + bw - logoW - mmToPt(1.5);
       const logoY = headerCenterY - logoH / 2;
-      page.drawImage(logoImage as any, {
+      page.drawImage(eventLogo as any, {
         x: logoX,
         y: logoY,
         width: logoW,
@@ -200,16 +199,38 @@ function drawBadge(
     } catch {}
   }
 
-  const textX = badgeLeft + bw * 0.3;
+  const logoSize = headerH * 0.55;
+
+  if (fgbmfiLogo) {
+    try {
+      const logoAspect = fgbmfiLogo.width / fgbmfiLogo.height;
+      let logoW = logoSize * logoAspect;
+      const logoH = logoSize;
+      if (logoW > bw * 0.25) logoW = bw * 0.25;
+      const logoX = badgeLeft + mmToPt(1.5);
+      const logoY = headerCenterY - logoH / 2;
+      page.drawImage(fgbmfiLogo as any, {
+        x: logoX,
+        y: logoY,
+        width: logoW,
+        height: logoH,
+      });
+    } catch {}
+  }
+
+  const eventLogoWidth = eventLogo ? bw * 0.25 : 0;
+  const fgbmfiLogoWidth = fgbmfiLogo ? bw * 0.22 : 0;
+  const textX = badgeLeft + fgbmfiLogoWidth + mmToPt(3);
+  const textMaxW = bw - fgbmfiLogoWidth - eventLogoWidth - mmToPt(6);
   const eventName = event.name || '2026 LAGOS NATIONAL CONVENTION';
-  const fontSize = bh > mmToPt(55) ? 5.5 : 4.5;
+  const fontSize = bh > mmToPt(55) ? 5.2 : 4.2;
   page.drawText(eventName.toUpperCase(), {
     x: textX,
     y: headerCenterY - fontSize * 0.35,
     size: fontSize,
     font: fontBold as any,
     color: HEADER_TEXT,
-    maxWidth: bw * 0.65,
+    maxWidth: textMaxW > 0 ? textMaxW : bw * 0.4,
   });
 
   // Body
@@ -319,7 +340,8 @@ export async function generateBadgePDF(
   delegates: Delegate[],
   layout: BadgeLayout,
   event: Event,
-  logoImageBytes?: Uint8Array,
+  fgbmfiLogoBytes?: Uint8Array,
+  eventLogoBytes?: Uint8Array,
   onProgress?: (progress: BadgeGenerationProgress) => void
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
@@ -327,10 +349,17 @@ export async function generateBadgePDF(
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
 
-  let logoImage;
-  if (logoImageBytes) {
+  let fgbmfiLogo;
+  if (fgbmfiLogoBytes) {
     try {
-      logoImage = await pdfDoc.embedPng(logoImageBytes);
+      fgbmfiLogo = await pdfDoc.embedPng(fgbmfiLogoBytes);
+    } catch {}
+  }
+
+  let eventLogo;
+  if (eventLogoBytes) {
+    try {
+      eventLogo = await pdfDoc.embedPng(eventLogoBytes);
     } catch {}
   }
 
@@ -381,7 +410,8 @@ export async function generateBadgePDF(
         fontBold as any,
         font as any,
         fontOblique as any,
-        logoImage as any
+        fgbmfiLogo as any,
+        eventLogo as any
       );
       drawCropMarks(page, bx, by, badgeW, badgeH);
     }

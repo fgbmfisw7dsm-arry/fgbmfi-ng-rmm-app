@@ -238,9 +238,9 @@ const BadgePrintingModule = () => {
     return count;
   };
 
-  const fetchLogoAsBase64 = async (): Promise<string | undefined> => {
+  const fetchLogoAsBase64 = async (path: string): Promise<string | undefined> => {
     try {
-      const resp = await fetch('/logo-fgbmfi.png');
+      const resp = await fetch(path);
       if (!resp.ok) return undefined;
       const blob = await resp.blob();
       return new Promise((resolve) => {
@@ -321,9 +321,10 @@ const BadgePrintingModule = () => {
     setGeneratedBatchId(null);
 
     try {
-      const logoBase64 = await fetchLogoAsBase64();
-
-      terminateWorker();
+      const [fgbmfiLogoBase64, eventLogoBase64] = await Promise.all([
+        fetchLogoAsBase64('/logo-fgbmfi.png'),
+        fetchLogoAsBase64('/event-logo.png'),
+      ]);
 
       const worker = new Worker(
         new URL('../workers/badgeWorker.ts', import.meta.url),
@@ -356,7 +357,8 @@ const BadgePrintingModule = () => {
           delegates: batchDelegates,
           layout,
           event: activeEvent,
-          logoBase64,
+          fgbmfiLogoBase64,
+          eventLogoBase64,
         });
       };
 
