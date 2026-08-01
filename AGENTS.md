@@ -136,9 +136,20 @@ CREATE INDEX idx_pledges_event ON pledges(event_id);
 ```
 
 ### Supabase RPCs (3)
-- `create_app_user(email, password, role, district)` — creates auth.users + app_users row
+- `create_app_user(email, password, role, district)` — creates auth.users + app_users row. **MUST set `aud='authenticated'`, `role='authenticated'`, pull `instance_id` from existing user, use `gen_random_uuid()` for `auth.identities.id`.** See `supabase_migration_2026_08_fix_auth_row_integrity.sql` for the reference implementation.
 - `delete_app_user(user_id_to_delete)` — deletes from app_users + auth.users
-- `reset_user_password(user_id, new_password)` — updates auth.users password
+- `reset_user_password(user_id, new_password)` — updates auth.users password. **MUST use `crypt()` and re-stamp confirmation via `COALESCE` to never un-confirm a user.**
+- `get_my_profile()` — returns the caller's `app_users` row (used by `auth.diagnoseLoginFailure` for descriptive login error messages)
+- `v_auth_integrity_check` (view) — audit view: `SELECT * FROM v_auth_integrity_check WHERE NOT has_email_identity;` identifies broken users
+
+### Auth Row Integrity (2026-08-01 fix)
+Historical `create_app_user` rewrites dropped the `aud`, `instance_id`, and `role` columns on `auth.users`, causing `signInWithPassword()` to silently fail with "Invalid login credentials" for every newly-created user. The fix in `supabase_migration_2026_08_fix_auth_row_integrity.sql` is the reference implementation. **Any future rewrite of `create_app_user` must:**
+1. Always set `aud='authenticated'` and `role='authenticated'`
+2. Pull `instance_id` from a healthy existing user (or omit if none exists)
+3. Use `gen_random_uuid()` for `auth.identities.id` (not `new_user_id`) to avoid PK collision with non-email identities
+4. Confirm the user via `email_confirmed_at` (NEVER) → `confirmed_at` (NEVER) → token-clear fallback, each in its own EXCEPTION block
+5. Use dynamic SQL (`EXECUTE`) for all UPDATE statements on `auth.users` to tolerate GENERATED ALWAYS columns
+6. Build the SET clause dynamically using `information_schema.columns` checks (newer GoTrue versions drop `email_change_token`, `email_change`, `recovery_token`, etc.)
 
 ## Authentication & Authorization
 
@@ -420,3 +431,5 @@ All v1 business logic (event lifecycle, district scoping, deduplication, harmoni
 - [ ] No secrets in code or responses
 - [ ] Input validation before Supabase insert/update
 - [ ] Supabase RLS policies cover the operation (check `supabase_schema.sql`)
+- [ ] `create_app_user` RPC: always set `aud='authenticated'`, `role='authenticated'`, pull `instance_id` from existing user, use `gen_random_uuid()` for `auth.identities.id`
+- [ ] `auth.users` rows have `aud`, `instance_id`, `role`, `email_confirmed_at`/`confirmed_at`, and a matching `auth.identities` row (verify via `v_auth_integrity_check`)

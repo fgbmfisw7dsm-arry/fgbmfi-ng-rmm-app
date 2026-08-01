@@ -75,7 +75,9 @@ const ensureEventActive = async (eventId: string) => {
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
         try {
+            console.log('[auth.getOrCreateProfile] Step A: get_my_profile for authId=', authId);
             const { data: profile, error } = await supabase.rpc('get_my_profile');
+            console.log('[auth.getOrCreateProfile] Step A result:', { profile, hasError: !!error, errorMsg: error?.message, errorCode: error?.code });
 
             if (profile && typeof profile === 'object' && !(error)) {
                 if (profile.is_active === false) {
@@ -84,24 +86,48 @@ export const auth = {
                 return profile as User;
             }
 
+            console.log('[auth.getOrCreateProfile] Step B: no profile, checking tombstone');
             const { data: tombstone } = await supabase.from('deleted_users').select('id').eq('id', authId).maybeSingle();
             if (tombstone) {
                 throw new Error("ACCOUNT_DELETED: Your account has been permanently removed. Please contact your administrator.");
             }
 
             let role = metadata?.app_metadata?.role || metadata?.user_metadata?.role || metadata?.role || 'registrar';
+            console.log('[auth.getOrCreateProfile] Step C: role from metadata=', role);
             if (role === 'registrar') {
                 try {
                     const { data: authRole } = await supabase.rpc('get_auth_user_role');
-                    if (authRole && typeof authRole === 'string') role = authRole;
-                } catch {}
+                    if (authRole && typeof authRole === 'string') {
+                        role = authRole;
+                        console.log('[auth.getOrCreateProfile] Step C: role from get_auth_user_role=', role);
+                    }
+                } catch (rpcErr: any) {
+                    console.warn('[auth.getOrCreateProfile] get_auth_user_role failed:', rpcErr?.message);
+                }
             }
+
+            const ALLOWED_ROLES = new Set([
+                'national_admin', 'regional_admin', 'district_admin', 'admin',
+                'national_registrar', 'regional_registrar', 'district_registrar', 'registrar',
+                'finance'
+            ]);
+            if (!ALLOWED_ROLES.has(role)) {
+                console.warn(`[auth.getOrCreateProfile] Role "${role}" is not in the allowed set; falling back to "registrar"`);
+                role = 'registrar';
+            }
+
+            console.log('[auth.getOrCreateProfile] Step D: upserting app_users with role=', role);
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
                 .upsert({ id: authId, email: normalizeEmail(email), is_active: true, role }, { onConflict: 'id' })
                 .select().single();
 
-            if (createError) throw createError;
+            if (createError) {
+                const ce: any = createError;
+                console.error('[auth.getOrCreateProfile] Step D upsert failed:', ce);
+                throw new Error(`Failed to create app_users profile: ${ce?.message || JSON.stringify(ce)} (code=${ce?.code || 'unknown'})`);
+            }
+            console.log('[auth.getOrCreateProfile] Step D: upsert succeeded, newProfile=', newProfile);
             return newProfile as User;
         } catch (err) {
             if ((err as any)?.message?.startsWith?.('ACCOUNT_DEACTIVATED')) throw err;
@@ -111,22 +137,67 @@ export const auth = {
     },
 
     login: async (email: string, password: string): Promise<User | null> => {
+        const normalizedEmail = normalizeEmail(email);
         try {
-            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ 
-                email: normalizeEmail(email), 
-                password 
+            console.log('[auth.login] Step 1: signInWithPassword for', normalizedEmail);
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email: normalizedEmail,
+                password
             });
-            
+
             if (authError) {
-                if (authError.message && authError.message.includes('Invalid login credentials')) throw new Error("INVALID_CREDENTIALS");
+                console.error('[auth.login] signInWithPassword error:', authError);
+                if (authError.message && authError.message.includes('Invalid login credentials')) {
+                    const hint = await auth.diagnoseLoginFailure(normalizedEmail);
+                    throw new Error(hint);
+                }
                 throw new Error(authError.message || "Authentication service unavailable");
             }
-            
-            if (!authData.user) return null;
-            return await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
+
+            if (!authData.user) {
+                console.warn('[auth.login] signInWithPassword returned no user');
+                return null;
+            }
+            console.log('[auth.login] Step 2: signIn OK, user.id=', authData.user.id);
+
+            console.log('[auth.login] Step 3: getOrCreateProfile');
+            const profile = await auth.getOrCreateProfile(authData.user.id, authData.user.email || email, { app_metadata: authData.user.app_metadata, user_metadata: authData.user.user_metadata });
+            console.log('[auth.login] Step 4: profile loaded, role=', profile?.role);
+            return profile;
         } catch (e: any) {
-            if (!e.message || e.message === '{}') throw new Error("Authentication service returned an unexpected response. The user account may be incomplete.");
+            const msg = e?.message;
+            const code = e?.code || e?.status;
+            const details = e?.details || e?.hint;
+            const eName = e?.name;
+            const eStack = e?.stack;
+            console.error('[auth.login] FATAL:', {
+                message: msg,
+                name: eName,
+                code,
+                details,
+                stack: eStack,
+                full: e
+            });
+            if (!msg || msg === '{}' || msg === 'null' || msg === '[object Object]') {
+                throw new Error(`Authentication service returned an unexpected response. The user account may be incomplete. (name=${eName || 'unknown'}, code=${code || 'unknown'}, details=${details || 'none'})`);
+            }
             throw e;
+        }
+    },
+
+    diagnoseLoginFailure: async (email: string): Promise<string> => {
+        try {
+            const { data: profile, error } = await supabase.rpc('get_my_profile');
+            if (error || !profile) {
+                return "Account not found for this email. Please ask your administrator to create the account.";
+            }
+            const p = profile as any;
+            if (p.is_active === false) {
+                return "This account has been deactivated. Please contact your administrator to reactivate it.";
+            }
+            return "Login Failed: Invalid email or password. Please check for typos and try again. If the problem persists, ask the administrator to run the v_auth_integrity_check view in Supabase.";
+        } catch {
+            return "Login Failed: Invalid email or password. Please check for typos and try again.";
         }
     },
 };
@@ -255,7 +326,25 @@ export const db = {
         const result = await supabase.rpc('create_app_user', {
             email, password, role, district, region
         });
-        return handleRpcResponse(result, 'create_app_user');
+        const data = handleRpcResponse(result, 'create_app_user') as any;
+        if (data && typeof data === 'object' && data.status === 'error') {
+            throw new Error(data.error || 'create_app_user returned an error');
+        }
+        if (data && typeof data === 'object' && data.status === 'success') {
+            if (data.aud_set === false) {
+                throw new Error("Account was created but the auth row is missing the 'aud' column. The user will not be able to log in. Re-run supabase_migration_2026_08_fix_auth_row_integrity.sql.");
+            }
+            if (data.instance_id_set === false) {
+                throw new Error("Account was created but the auth row is missing the project instance_id. The user may not be able to log in. Ensure at least one healthy user exists in auth.users and re-run the migration.");
+            }
+            if (data.confirmed === false) {
+                throw new Error("Account was created but could not be auto-confirmed. The user will not be able to log in until an administrator confirms the email. Re-run the auth integrity fix migration.");
+            }
+            if (data.identities_inserted === false) {
+                throw new Error("Account was created but the email identity row was not inserted. The user will not be able to log in. Re-run the auth integrity fix migration.");
+            }
+        }
+        return data;
     },
 
     updateUser: async (userId: string, updates: Partial<User>) => {
