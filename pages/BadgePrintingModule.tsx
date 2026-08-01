@@ -510,7 +510,7 @@ const BadgePrintingModule = () => {
 
       {feedback && (
         <div
-          className={`p-4 rounded-2xl text-center font-black uppercase text-xs tracking-wider ${
+          className={`relative p-4 pr-12 rounded-2xl text-center font-black uppercase text-xs tracking-wider ${
             feedback.type === 'success'
               ? 'bg-green-500 text-white shadow-lg shadow-green-200'
               : 'bg-red-500 text-white shadow-lg shadow-red-200'
@@ -518,6 +518,15 @@ const BadgePrintingModule = () => {
         >
           {feedback.type === 'success' && <span className="mr-1">&#10003;</span>}
           {feedback.msg}
+          <button
+            onClick={() => setFeedback(null)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors"
+            title="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
