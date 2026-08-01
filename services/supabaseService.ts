@@ -74,10 +74,27 @@ const ensureEventActive = async (eventId: string) => {
 
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
+        let profile: any = null;
+        let rpcError: any = null;
         try {
             console.log('[auth.getOrCreateProfile] Step A: get_my_profile for authId=', authId);
-            const { data: profile, error } = await supabase.rpc('get_my_profile');
-            console.log('[auth.getOrCreateProfile] Step A result:', { profile, hasError: !!error, errorMsg: error?.message, errorCode: error?.code });
+            try {
+                const rpcResult = await supabase.rpc('get_my_profile');
+                profile = rpcResult.data;
+                rpcError = rpcResult.error;
+            } catch (rpcThrown: any) {
+                console.error('[auth.getOrCreateProfile] Step A rpc THREW:', rpcThrown);
+                rpcError = rpcThrown;
+            }
+            console.log('[auth.getOrCreateProfile] Step A result:', {
+                profile,
+                profileType: typeof profile,
+                isArray: Array.isArray(profile),
+                hasError: !!rpcError,
+                errorMsg: rpcError?.message,
+                errorCode: rpcError?.code,
+                errorFull: rpcError
+            });
 
             // Handle the case where profile is a stringified JSON (Supabase sometimes returns this)
             let parsedProfile: any = profile;
@@ -96,7 +113,7 @@ export const auth = {
                 console.log('[auth.getOrCreateProfile] Step A: unwrapped array, now =', parsedProfile);
             }
 
-            if (parsedProfile && typeof parsedProfile === 'object' && !(error)) {
+            if (parsedProfile && typeof parsedProfile === 'object' && !rpcError) {
                 if (parsedProfile.is_active === false) {
                     throw new Error("ACCOUNT_DEACTIVATED: Your account has been deactivated. Please contact your administrator.");
                 }
