@@ -194,7 +194,7 @@ const ReportsPage = () => {
 
         return (
             <div className="space-y-8">
-                {Array.from(groupedBySession.entries()).map(([sessionId, group]) => {
+                {Array.from(groupedBySession.entries()).filter(([sessionId]) => !selectedSessionId || sessionId === selectedSessionId).map(([sessionId, group]) => {
                     const typeForDisplay = alterCallFilter ? getDelegateTypesForSession(sessionId) : responseTypes;
                     const hasDelegateData = typeForDisplay.some(t => (group.responses.get(t) || []).length > 0);
                     return (
@@ -446,16 +446,13 @@ const ReportsPage = () => {
                     <h1 className="text-2xl font-black uppercase text-blue-900">{events.find(e => e.event_id === activeEventId)?.name}</h1>
                     <div className="flex justify-center items-center gap-3 mt-2">
                         <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
-                            {activeTab === 'ministryReport' && selectedSessionId
-                                ? `Session: ${sessions.find(s => s.session_id === selectedSessionId)?.title}${alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}`
-                                : activeTab === 'ministryReport' ? 'Sessions Report'
-                                : activeTab.replace(/([A-Z])/g, ' $1')}
+                            {activeTab === 'ministryReport' ? 'Sessions Report' : activeTab.replace(/([A-Z])/g, ' $1')}
                         </h3>
                         {isLocked && (
                             <span className="text-[8px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">Locked / Final Copy</span>
                         )}
                     </div>
-                    {selectedSessionId && activeTab !== 'ministryReport' && <div className="text-xs font-black text-blue-700 uppercase mt-2">Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}</div>}
+                    {selectedSessionId && <div className="text-xs font-black text-blue-700 uppercase mt-2">Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}{alterCallFilter && activeTab === 'ministryReport' ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</div>}
                 </div>
                 
                 <div className="relative z-10">
