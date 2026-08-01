@@ -554,13 +554,11 @@ const SessionMinistryPage: React.FC = () => {
                     <th className="p-3 text-center">SLV</th>
                     <th className="p-3 text-center">MI</th>
                     <th className="p-3 text-center">HGB</th>
-                    <th className="p-3 text-center">VD</th>
-                    <th className="p-3 text-center rounded-r-lg bg-blue-50">Total</th>
+                    <th className="p-3 text-center rounded-r-lg">VD</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {(dashboard.data || []).map(d => {
-                    const rowTotal = (d.ft_count + d.ft_summary) + (d.slv_count + d.slv_summary) + (d.mi_count + d.mi_summary) + (d.hgb_count + d.hgb_summary);
                     return (
                       <tr key={d.session_id} className={`hover:bg-blue-50 transition-colors ${d.session_id === selectedSessionId ? 'bg-blue-50' : ''}`}>
                         <td className="p-3 font-bold uppercase text-blue-900">{d.session_title}</td>
@@ -570,7 +568,6 @@ const SessionMinistryPage: React.FC = () => {
                         <td className="p-3 text-center font-bold">{d.mi_count + d.mi_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.hgb_count + d.hgb_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.voice_distribution || '-'}</td>
-                        <td className="p-3 text-center font-black bg-blue-50 text-blue-900">{rowTotal || '-'}</td>
                       </tr>
                     );
                   })}
@@ -584,7 +581,6 @@ const SessionMinistryPage: React.FC = () => {
                     const sumMI = data.reduce((s, d) => s + (d.mi_count + d.mi_summary), 0);
                     const sumHGB = data.reduce((s, d) => s + (d.hgb_count + d.hgb_summary), 0);
                     const sumVD = data.reduce((s, d) => s + (d.voice_distribution || 0), 0);
-                    const grandTotal = sumFT + sumSLV + sumMI + sumHGB;
                     return (
                       <tr className="bg-blue-900 text-white font-black">
                         <td className="p-3 uppercase">Totals</td>
@@ -594,7 +590,6 @@ const SessionMinistryPage: React.FC = () => {
                         <td className="p-3 text-center">{sumMI || '-'}</td>
                         <td className="p-3 text-center">{sumHGB || '-'}</td>
                         <td className="p-3 text-center">{sumVD || '-'}</td>
-                        <td className="p-3 text-center bg-yellow-400 text-blue-900 print-gold">{grandTotal || '-'}</td>
                       </tr>
                     );
                   })()}
