@@ -1130,7 +1130,7 @@ export const db = {
         handleSupabaseError(nextNum, 'Failed to get batch number');
         const batchNumber = nextNum.data || 1;
         const { data, error } = await supabase.from('badge_batches')
-            .insert({ ...batch, batch_number: batchNumber, status: 'pending' })
+            .insert({ ...batch, batch_number: batchNumber, status: batch.status || 'pending' })
             .select('*')
             .single();
         handleSupabaseError({ data, error }, 'Failed to create badge batch');

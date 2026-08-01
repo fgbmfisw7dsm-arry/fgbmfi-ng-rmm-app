@@ -326,6 +326,7 @@ const BadgePrintingModule = () => {
       let currentBatchIdx = 0;
       const totalBatches = batches.length;
       const currentBatchDelegatesRef: { current: Delegate[] } = { current: [] };
+      let hasError = false;
 
       const processNextBatch = () => {
         if (currentBatchIdx >= totalBatches) {
@@ -333,14 +334,16 @@ const BadgePrintingModule = () => {
           setProgress(null);
           loadBatches();
           loadPrintLogs();
-          setFeedback({
-            type: 'success',
-            msg: `All ${totalBatches} batch(es) generated and uploaded successfully.`,
-          });
+          if (!hasError) {
+            setFeedback({
+              type: 'success',
+              msg: `All ${totalBatches} batch(es) generated and uploaded successfully.`,
+            });
+            setTimeout(() => {
+              resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 200);
+          }
           terminateWorker();
-          setTimeout(() => {
-            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 200);
           return;
         }
 
@@ -408,6 +411,7 @@ const BadgePrintingModule = () => {
             previewUrlRef.current = previewUrl;
             setPdfPreviewUrl(previewUrl);
           } catch (uploadErr: any) {
+            hasError = true;
             setFeedback({
               type: 'error',
               msg: `Batch ${currentBatchIdx + 1} generated but upload failed: ${uploadErr.message}`,
