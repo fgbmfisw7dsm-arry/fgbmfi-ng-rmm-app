@@ -177,28 +177,14 @@ const BadgePrintingModule = () => {
       }
       setSearching(true);
       try {
-        const results = await db.getFilteredDelegates(
-          activeEventId,
-          { district: q },
-          'surname',
-          50,
-          0
-        );
-        const query = q.toLowerCase();
-        const filtered = results.filter(
-          (d: Delegate) =>
-            d.first_name?.toLowerCase().includes(query) ||
-            d.last_name?.toLowerCase().includes(query) ||
-            d.external_id?.toLowerCase().includes(query) ||
-            d.phone?.includes(query)
-        );
-        setSearchResults(filtered);
+        const results = await db.searchDelegates(q, activeEventId, districtFilter);
+        setSearchResults(results as Delegate[]);
       } catch {
         setSearchResults([]);
       }
       setSearching(false);
     },
-    [activeEventId]
+    [activeEventId, districtFilter]
   );
 
   useEffect(() => {
@@ -272,7 +258,8 @@ const BadgePrintingModule = () => {
         activeFilters.surnameFrom ||
         activeFilters.surnameTo ||
         activeFilters.delegateNumberFrom ||
-        activeFilters.delegateNumberTo;
+        activeFilters.delegateNumberTo ||
+        (activeFilters.registrationStatus && activeFilters.registrationStatus !== 'all');
 
       if (!hasFilters) {
         setFeedback({
