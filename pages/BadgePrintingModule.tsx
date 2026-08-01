@@ -33,6 +33,18 @@ const BadgePrintingModule = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
   const [activeTab, setActiveTab] = useState<Tab>('generate');
 
+  const scope = getScopeFilter(user);
+  const districtFilter = scope.district;
+  const isLocked = activeEvent?.is_active === false;
+  const isAdmin = isAdminRole(user?.role || '');
+  const isRegistrar = isRegistrarRole(user?.role || '');
+  const isNationalOrRegional =
+    user?.role === UserRole.NATIONAL_ADMIN ||
+    user?.role === UserRole.REGIONAL_ADMIN ||
+    user?.role === UserRole.NATIONAL_REGISTRAR ||
+    user?.role === UserRole.REGIONAL_REGISTRAR ||
+    user?.role === UserRole.ADMIN;
+
   const [filters, setFilters] = useState<BadgeFilter>({
     district: '',
     chapter: '',
@@ -49,40 +61,25 @@ const BadgePrintingModule = () => {
   const [layout, setLayout] = useState<BadgeLayout>('8-up');
   const [batchSize, setBatchSize] = useState<BadgeBatchSize>(500);
   const [previewCount, setPreviewCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Delegate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedDelegates, setSelectedDelegates] = useState<Delegate[]>([]);
 
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<BadgeGenerationProgress | null>(null);
   const [generatedPdfBytes, setGeneratedPdfBytes] = useState<Uint8Array | null>(null);
   const [generatedBatchId, setGeneratedBatchId] = useState<string | null>(null);
-  const workerRef = useRef<Worker | null>(null);
-
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [batches, setBatches] = useState<BadgeBatch[]>([]);
   const [printLogs, setPrintLogs] = useState<BadgePrintLog[]>([]);
-
   const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Delegate[]>([]);
-  const [selectedDelegates, setSelectedDelegates] = useState<Delegate[]>([]);
-  const [searching, setSearching] = useState(false);
-
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(
-    null
-  );
-
-  const isLocked = activeEvent?.is_active === false;
-  const isAdmin = isAdminRole(user?.role || '');
-  const isRegistrar = isRegistrarRole(user?.role || '');
-  const scope = getScopeFilter(user);
-  const districtFilter = scope.district;
-
-  const isNationalOrRegional =
-    user?.role === UserRole.NATIONAL_ADMIN ||
-    user?.role === UserRole.REGIONAL_ADMIN ||
-    user?.role === UserRole.NATIONAL_REGISTRAR ||
-    user?.role === UserRole.REGIONAL_REGISTRAR ||
-    user?.role === UserRole.ADMIN;
+  const workerRef = useRef<Worker | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     db.getSettings()
@@ -150,6 +147,13 @@ const BadgePrintingModule = () => {
     const timeout = setTimeout(handlePreviewCount, 300);
     return () => clearTimeout(timeout);
   }, [handlePreviewCount]);
+
+  useEffect(() => {
+    return () => {
+      terminateWorker();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   const clearAllFilters = () => {
     setFilters({
@@ -334,6 +338,9 @@ const BadgePrintingModule = () => {
             msg: `All ${totalBatches} batch(es) generated and uploaded successfully.`,
           });
           terminateWorker();
+          setTimeout(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 200);
           return;
         }
 
@@ -395,6 +402,11 @@ const BadgePrintingModule = () => {
 
             setGeneratedPdfBytes(pdfBytes);
             setGeneratedBatchId(batch.batch_id);
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const previewUrl = URL.createObjectURL(blob);
+            if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+            previewUrlRef.current = previewUrl;
+            setPdfPreviewUrl(previewUrl);
           } catch (uploadErr: any) {
             setFeedback({
               type: 'error',
@@ -452,8 +464,11 @@ const BadgePrintingModule = () => {
   };
 
   useEffect(() => {
-    return () => terminateWorker();
-  }, []);
+    return () => {
+      terminateWorker();
+      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    };
+  });
 
   const handleCancelGeneration = () => {
     terminateWorker();
@@ -892,15 +907,61 @@ const BadgePrintingModule = () => {
             >
               {generating ? 'Generating...' : `Generate ${previewCount || ''} Badges`}
             </button>
-            {generatedPdfBytes && (
-              <button
-                onClick={() => handleDownload()}
-                className="px-8 py-5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95"
-              >
-                Download PDF
-              </button>
-            )}
           </div>
+
+          {generatedPdfBytes && pdfPreviewUrl && (
+            <div ref={resultsRef} className="bg-white p-6 rounded-3xl shadow-sm border border-emerald-200 mt-6">
+              <h2 className="text-[10px] font-black text-emerald-600 uppercase mb-4 tracking-[0.2em]">
+                Generated PDF
+              </h2>
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden">
+                  <iframe
+                    src={pdfPreviewUrl}
+                    className="w-full h-full min-h-[400px]"
+                    title="Badge PDF Preview"
+                  />
+                </div>
+                <div className="lg:w-64 space-y-2">
+                  <button
+                    onClick={() => handleDownload()}
+                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (pdfPreviewUrl) window.open(pdfPreviewUrl, '_blank');
+                    }}
+                    className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Open in New Tab
+                  </button>
+                  <button
+                    onClick={() => {
+                      const iframe = document.querySelector('iframe[title="Badge PDF Preview"]') as HTMLIFrameElement | null;
+                      iframe?.contentWindow?.print();
+                    }}
+                    className="w-full py-4 bg-gray-700 hover:bg-gray-600 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Print PDF
+                  </button>
+                  <p className="text-[9px] text-gray-400 text-center leading-relaxed mt-2">
+                    Click <strong>Print PDF</strong> to send directly to your printer. Use <strong>Download PDF</strong> to save for commercial printing.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
