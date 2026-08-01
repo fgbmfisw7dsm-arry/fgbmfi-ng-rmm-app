@@ -125,7 +125,12 @@ export const auth = {
             if (createError) {
                 const ce: any = createError;
                 console.error('[auth.getOrCreateProfile] Step D upsert failed:', ce);
-                throw new Error(`Failed to create app_users profile: ${ce?.message || JSON.stringify(ce)} (code=${ce?.code || 'unknown'})`);
+                const ceMessage = ce?.message || ce?.error_description || ce?.hint || ce?.details || JSON.stringify(ce) || 'unknown error';
+                throw new Error(`Failed to create app_users profile: ${ceMessage} (code=${ce?.code || 'unknown'})`);
+            }
+            if (!newProfile) {
+                console.error('[auth.getOrCreateProfile] Step D upsert returned no data');
+                throw new Error('Failed to create app_users profile: upsert returned no data (likely RLS policy blocked the write)');
             }
             console.log('[auth.getOrCreateProfile] Step D: upsert succeeded, newProfile=', newProfile);
             return newProfile as User;
@@ -170,16 +175,26 @@ export const auth = {
             const details = e?.details || e?.hint;
             const eName = e?.name;
             const eStack = e?.stack;
+            // Try multiple serialization strategies
+            let serialized = '';
+            try { serialized = JSON.stringify(e, Object.getOwnPropertyNames(e || {})); } catch {}
             console.error('[auth.login] FATAL:', {
                 message: msg,
                 name: eName,
                 code,
                 details,
                 stack: eStack,
+                serialized,
+                e_type: typeof e,
+                e_isArray: Array.isArray(e),
+                e_isError: e instanceof Error,
+                e_constructor: e?.constructor?.name,
+                e_stringified: String(e),
                 full: e
             });
             if (!msg || msg === '{}' || msg === 'null' || msg === '[object Object]') {
-                throw new Error(`Authentication service returned an unexpected response. The user account may be incomplete. (name=${eName || 'unknown'}, code=${code || 'unknown'}, details=${details || 'none'})`);
+                const diagnostic = `name=${eName || 'unknown'}, code=${code || 'unknown'}, details=${details || 'none'}, type=${typeof e}, ctor=${e?.constructor?.name || 'unknown'}, stringified=${String(e)?.slice(0, 200)}`;
+                throw new Error(`Authentication service returned an unexpected response. The user account may be incomplete. (${diagnostic})`);
             }
             throw e;
         }
