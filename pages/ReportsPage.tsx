@@ -16,7 +16,7 @@ const ReportsPage = () => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [events, setEvents] = useState<Event[]>([]);
     const [settings, setSettings] = useState<SystemSettings | null>(null);
-    const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
+    const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'sessionsSummary' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
     const [alterCallFilter, setAlterCallFilter] = useState<'' | SessionResponseType>('');
     const [loading, setLoading] = useState(false);
@@ -266,8 +266,9 @@ const ReportsPage = () => {
                                                     <th className="border p-1.5">District</th>
                                                     <th className="border p-1.5">Chapter</th>
                                                     <th className="border p-1.5">Phone</th>
-                                                    <th className="border p-1.5">Rank</th>
-                                                    <th className="border p-1.5">Office</th>
+                                                    {showRank && <th className="border p-1.5">Rank</th>}
+                                                    {showOffice && <th className="border p-1.5">Office</th>}
+                                                    {showDelegateType && <th className="border p-1.5">Type</th>}
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -278,8 +279,9 @@ const ReportsPage = () => {
                                                         <td className="border p-1.5 font-bold uppercase">{r.district || '-'}</td>
                                                         <td className="border p-1.5 font-bold uppercase">{r.chapter || '-'}</td>
                                                         <td className="border p-1.5 font-mono">{r.phone || '-'}</td>
-                                                        <td className="border p-1.5 uppercase">{r.rank || '-'}</td>
-                                                        <td className="border p-1.5 uppercase">{r.office || '-'}</td>
+                                                        {showRank && <td className="border p-1.5 uppercase">{r.rank || '-'}</td>}
+                                                        {showOffice && <td className="border p-1.5 uppercase">{r.office || '-'}</td>}
+                                                        {showDelegateType && <td className="border p-1.5 uppercase">{(r as any).delegate_type || '-'}</td>}
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -321,7 +323,7 @@ const ReportsPage = () => {
                             </div>
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300">
                                 <thead className="bg-gray-50 uppercase text-gray-400 font-black">
-                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Chapter</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
+                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Chapter</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}{showDelegateType && <th className="border p-2">Type</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
                                 </thead>
                                 <tbody>
                                     {group.map((d, i) => (
@@ -331,6 +333,7 @@ const ReportsPage = () => {
                                             <td className="border p-2 font-bold uppercase">{d.chapter || '-'}</td>
                                             {showOffice && <td className="border p-2 font-bold uppercase">{d.office}</td>}
                                             {showRank && <td className="border p-2 uppercase">{d.rank}</td>}
+                                            {showDelegateType && <td className="border p-2 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                             <td className="border p-2 font-mono">{d.phone}</td>
                                             <td className="border p-2 text-center text-gray-400 uppercase leading-tight font-black">
                                                 {d.checked_in_at ? (
@@ -411,8 +414,8 @@ const ReportsPage = () => {
                         )}
                     </div>
                     <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
-                        {['attendanceList', 'attendanceMatrix', 'financialMatrix', 'pledgeSummary', 'pledgeList', 'ministryReport'].map(tab => {
-                            const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Sessions' };
+                        {['attendanceList', 'attendanceMatrix', 'sessionsSummary', 'financialMatrix', 'pledgeSummary', 'pledgeList', 'ministryReport'].map(tab => {
+                             const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', sessionsSummary: 'Sessions Summary', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Sessions Report' };
                             return (
                             <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{labels[tab] || tab}</button>
                             );
@@ -467,6 +470,43 @@ const ReportsPage = () => {
                             {showRank && renderMatrixTable("Attendance By Rank", rankColumns, 'rank')}
                             {showOffice && renderMatrixTable("Attendance By Office", officeColumns, 'office')}
                             {showDelegateType && renderMatrixTable("Attendance By Delegate Type", delegateTypeColumns, 'delegate_type')}
+                        </div>
+                    )}
+                    
+                    {activeTab === 'sessionsSummary' && (
+                        <div className="overflow-x-auto w-full">
+                            <table className="w-full text-sm border min-w-max">
+                                <thead className="bg-slate-100 uppercase font-black text-[10px]">
+                                    <tr><th className="p-3 border text-left">Session</th><th className="p-3 border text-center">Attendance</th><th className="p-3 border text-right">Offering</th><th className="p-3 border text-right">Pledge Redemption</th><th className="p-3 border text-right bg-blue-50">Total (NGN)</th></tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {sessions.map(s => {
+                                        const att = (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length;
+                                        const offering = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+                                        const redemption = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+                                        const rowTotal = offering + redemption;
+                                        if (att === 0 && offering === 0 && redemption === 0) return null;
+                                        return (
+                                            <tr key={s.session_id} className="hover:bg-gray-50 border-b">
+                                                <td className="p-3 border font-black uppercase text-xs">{s.title}</td>
+                                                <td className="p-3 border text-center font-bold">{att || '-'}</td>
+                                                <td className="p-3 border text-right font-bold">{formatCurrency(offering)}</td>
+                                                <td className="p-3 border text-right font-bold">{formatCurrency(redemption)}</td>
+                                                <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(rowTotal)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot>
+                                    <tr className="bg-blue-900 text-white font-black">
+                                        <td className="p-3 border uppercase">Totals</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length, 0)}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
+                                        <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
                         </div>
                     )}
                     

@@ -10,13 +10,20 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const AdminDashboard = () => {
-  const { activeEventId, activeEvent, user } = useContext(AppContext);
+  const { activeEventId, activeEvent, user, onEventChange, events } = useContext(AppContext);
   const queryClient = useQueryClient();
 
   const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
   const showRank = eventConfig.show_rank !== false;
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
+
+  useEffect(() => {
+    if (!activeEventId && Array.isArray(events)) {
+      const liveEvent = events.find(e => e.is_active !== false);
+      if (liveEvent) onEventChange(liveEvent.event_id);
+    }
+  }, [activeEventId, events, onEventChange]);
 
   const scope = getScopeFilter(user);
   const districtFilter = scope.district;

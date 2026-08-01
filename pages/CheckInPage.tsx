@@ -634,7 +634,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                   <div className="leading-tight">
                     <div className="text-sm font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
                    <div className="text-[7px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
-                     <div className="text-[7px] font-bold text-gray-500 uppercase tracking-wider">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
+                     <div className="text-[7px] font-bold text-gray-500 uppercase tracking-wider">{[badgeDelegate.chapter || 'INDIVIDUAL', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null, showDelegateType && badgeDelegate.delegate_type ? badgeDelegate.delegate_type : null].filter(Boolean).join(' • ')}</div>
                      {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
                        <div className="text-[6px] font-black text-gray-400 uppercase tracking-wider leading-tight">Conv ID: <span className="text-gray-700 font-mono text-[7px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
                      )}
@@ -683,7 +683,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
               <div className="leading-tight">
                 <div className="text-[9px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
                 <div className="text-[6px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
-                <div className="text-[5px] font-bold text-gray-500 uppercase">{badgeDelegate.chapter || 'INDIVIDUAL'} • {badgeDelegate.rank}</div>
+                <div className="text-[5px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || 'INDIVIDUAL', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null, showDelegateType && badgeDelegate.delegate_type ? badgeDelegate.delegate_type : null].filter(Boolean).join(' • ')}</div>
                 {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
                   <div className="text-[5px] font-black text-gray-400 uppercase leading-tight">Conv ID: <span className="text-gray-600 font-mono text-[7px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
                 )}

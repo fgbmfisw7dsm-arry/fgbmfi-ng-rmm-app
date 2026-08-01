@@ -16,6 +16,10 @@ const SessionMinistryPage: React.FC = () => {
   const isLocked = activeEvent?.is_active === false;
   const isAdmin = isAdminRole(user?.role || '');
   const isRegistrar = isRegistrarRole(user?.role || '');
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+  const showDelegateType = eventConfig.show_delegate_type !== false;
 
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [activeResponseType, setActiveResponseType] = useState<SessionResponseType>(SessionResponseType.FT);
@@ -499,9 +503,9 @@ const SessionMinistryPage: React.FC = () => {
                 <div className="flex-1 w-full text-left">
                   <div className="flex items-center flex-wrap gap-2">
                     <h3 className="font-black text-blue-900 uppercase text-lg leading-tight">{d.title} {d.first_name} {d.last_name}</h3>
-                    <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>
+                    {showRank && <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>}
                   </div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT &bull; {d.chapter || 'INDIVIDUAL'} &bull; {d.office}</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT &bull; {d.chapter || 'INDIVIDUAL'}{showOffice && d.office ? ` • ${d.office}` : ''}{showDelegateType && d.delegate_type ? ` • ${d.delegate_type}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-4 w-full md:w-auto justify-end">
                   {isRecorded ? (
@@ -571,6 +575,30 @@ const SessionMinistryPage: React.FC = () => {
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  {(() => {
+                    const data = dashboard.data || [];
+                    const sumAtt = data.reduce((s, d) => s + (d.attendance || 0), 0);
+                    const sumFT = data.reduce((s, d) => s + (d.ft_count + d.ft_summary), 0);
+                    const sumSLV = data.reduce((s, d) => s + (d.slv_count + d.slv_summary), 0);
+                    const sumMI = data.reduce((s, d) => s + (d.mi_count + d.mi_summary), 0);
+                    const sumHGB = data.reduce((s, d) => s + (d.hgb_count + d.hgb_summary), 0);
+                    const sumVD = data.reduce((s, d) => s + (d.voice_distribution || 0), 0);
+                    const grandTotal = sumFT + sumSLV + sumMI + sumHGB;
+                    return (
+                      <tr className="bg-blue-900 text-white font-black">
+                        <td className="p-3 uppercase">Totals</td>
+                        <td className="p-3 text-center">{sumAtt || '-'}</td>
+                        <td className="p-3 text-center">{sumFT || '-'}</td>
+                        <td className="p-3 text-center">{sumSLV || '-'}</td>
+                        <td className="p-3 text-center">{sumMI || '-'}</td>
+                        <td className="p-3 text-center">{sumHGB || '-'}</td>
+                        <td className="p-3 text-center">{sumVD || '-'}</td>
+                        <td className="p-3 text-center bg-yellow-400 text-blue-900 print-gold">{grandTotal || '-'}</td>
+                      </tr>
+                    );
+                  })()}
+                </tfoot>
               </table>
             </div>
 
