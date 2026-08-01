@@ -79,11 +79,28 @@ export const auth = {
             const { data: profile, error } = await supabase.rpc('get_my_profile');
             console.log('[auth.getOrCreateProfile] Step A result:', { profile, hasError: !!error, errorMsg: error?.message, errorCode: error?.code });
 
-            if (profile && typeof profile === 'object' && !(error)) {
-                if (profile.is_active === false) {
+            // Handle the case where profile is a stringified JSON (Supabase sometimes returns this)
+            let parsedProfile: any = profile;
+            if (typeof parsedProfile === 'string') {
+                try {
+                    parsedProfile = JSON.parse(parsedProfile);
+                    console.log('[auth.getOrCreateProfile] Step A: parsed stringified JSON, now =', parsedProfile);
+                } catch (parseErr) {
+                    console.error('[auth.getOrCreateProfile] Step A: failed to parse stringified JSON', parseErr);
+                }
+            }
+
+            // Handle the case where profile is an array (Supabase sometimes wraps in array)
+            if (Array.isArray(parsedProfile) && parsedProfile.length > 0) {
+                parsedProfile = parsedProfile[0];
+                console.log('[auth.getOrCreateProfile] Step A: unwrapped array, now =', parsedProfile);
+            }
+
+            if (parsedProfile && typeof parsedProfile === 'object' && !(error)) {
+                if (parsedProfile.is_active === false) {
                     throw new Error("ACCOUNT_DEACTIVATED: Your account has been deactivated. Please contact your administrator.");
                 }
-                return profile as User;
+                return parsedProfile as User;
             }
 
             console.log('[auth.getOrCreateProfile] Step B: no profile, checking tombstone');
