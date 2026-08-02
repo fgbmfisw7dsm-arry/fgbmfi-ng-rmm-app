@@ -19,6 +19,7 @@ const CheckInPage = () => {
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
   const [badgeQrSvg, setBadgeQrSvg] = useState<string>('');
   const [badgeBannerDataUrl, setBadgeBannerDataUrl] = useState<string>('');
+  const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
   const [badgeCode, setBadgeCode] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
@@ -81,6 +82,7 @@ const CheckInPage = () => {
       setBadgeDelegate(null);
       setBadgeQrSvg('');
       setBadgeBannerDataUrl('');
+      setBadgeCanvasUrl('');
       setBadgeCode('');
       setPendingReg(null);
     };
@@ -209,9 +211,9 @@ const CheckInPage = () => {
 
   const handleReprintBadge = useCallback(async (delegate: Delegate) => {
     try {
-      const canvas = document.createElement('canvas');
-      await QRCode.toCanvas(canvas, delegate.qr_hash, { width: 200, margin: 1, color: { dark: '#1e3a5f' } });
-      const qrDataUrl = canvas.toDataURL('image/png');
+      const qrCanvas = document.createElement('canvas');
+      await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 200, margin: 1, color: { dark: '#1e3a5f' } });
+      const qrDataUrl = qrCanvas.toDataURL('image/png');
 
       let bannerResp = '';
       try {
@@ -231,8 +233,11 @@ const CheckInPage = () => {
         console.warn('Banner fetch failed, badge will render without banner:', fetchErr);
       }
 
+      const badgeCanvasUrl = await generateBadgeCanvas(delegate, qrDataUrl, bannerResp);
+
       setBadgeQrSvg(qrDataUrl);
       setBadgeBannerDataUrl(bannerResp);
+      setBadgeCanvasUrl(badgeCanvasUrl);
       setBadgeDelegate(delegate);
       setBadgeCode(generateCodeFromId(delegate.delegate_id, activeEventId || ''));
     } catch (e) {
@@ -241,6 +246,94 @@ const CheckInPage = () => {
       setTimeout(() => setFeedback(null), 3000);
     }
   }, [activeEventId]);
+
+  const generateBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, bannerDataUrl: string): Promise<string> => {
+    const mmToPx = 3.779527559;
+    const scale = 3;
+    const bw = Math.round(63 * mmToPx);
+    const bh = Math.round(90 * mmToPx);
+    const canvas = document.createElement('canvas');
+    canvas.width = bw * scale;
+    canvas.height = bh * scale;
+    const ctx = canvas.getContext('2d')!;
+    ctx.scale(scale, scale);
+
+    const headerH = bh * 0.17;
+    ctx.fillStyle = '#3a0007';
+    ctx.fillRect(0, 0, bw, headerH);
+
+    if (bannerDataUrl) {
+      try {
+        const banner = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = bannerDataUrl;
+        });
+        const bannerAspect = banner.width / banner.height;
+        const bannerRenderH = bw / bannerAspect;
+        const padY = Math.max(0, (headerH - bannerRenderH) / 2);
+        ctx.drawImage(banner, 0, padY, bw, Math.min(bannerRenderH, headerH));
+      } catch {}
+    }
+
+    ctx.fillStyle = '#c8960c';
+    ctx.fillRect(0, headerH - Math.round(0.5 * mmToPx), bw, Math.round(0.5 * mmToPx));
+
+    const bodyTop = headerH;
+    const bodyH = bh * 0.66;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, bodyTop, bw, bodyH);
+
+    if (qrDataUrl) {
+      try {
+        const qr = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = qrDataUrl;
+        });
+        const qrSize = Math.min(bw * 0.30, bodyH * 0.32);
+        const qrX = (bw - qrSize) / 2;
+        const qrY = bodyTop + 8;
+        ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
+
+        const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+        const nameY = qrY + qrSize + 10;
+        ctx.fillStyle = '#1e3a5f';
+        ctx.font = 'bold 6px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(fullName, bw / 2, nameY);
+
+        ctx.fillStyle = '#4b5563';
+        ctx.font = 'bold 4.5px sans-serif';
+        ctx.fillText(delegate.district || '', bw / 2, nameY + 8);
+
+        const details = [delegate.chapter || '', delegate.office, delegate.rank].filter(Boolean).join('  •  ');
+        ctx.fillStyle = '#6b7280';
+        ctx.font = 'bold 4.5px sans-serif';
+        ctx.fillText(details, bw / 2, nameY + 14);
+
+        ctx.fillStyle = '#9ca3af';
+        ctx.font = 'bold 3.5px sans-serif';
+        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, nameY + 19);
+      } catch {}
+    }
+
+    const bandTop = bodyTop + bodyH;
+    const bandH = bh * 0.17;
+    const dt = delegate.delegate_type || 'Member';
+    const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' };
+    ctx.fillStyle = bc[dt] || '#595966';
+    ctx.fillRect(0, bandTop, bw, bandH);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(dt.toUpperCase(), bw / 2, bandTop + bandH / 2 + 3);
+
+    return canvas.toDataURL('image/png');
+  };
 
   const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!activeEventId || !user) return;
@@ -268,6 +361,7 @@ const CheckInPage = () => {
     setBadgeDelegate(null);
     setBadgeQrSvg('');
     setBadgeBannerDataUrl('');
+    setBadgeCanvasUrl('');
     setBadgeCode('');
   };
 
@@ -276,22 +370,22 @@ const CheckInPage = () => {
   };
 
   const downloadBadgePDF = async () => {
-    const badgeEl = document.getElementById('badge-print-area');
-    if (!badgeEl) return;
+    if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
-    const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
     try {
-      const opts = {
-        margin: 0,
-        filename: `FGBMFI_Badge_${nameSlug}.pdf`,
-        image: { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas: { scale: isMobile ? 2 : 3, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'mm' as const, format: [63, 90] as [number, number], orientation: 'portrait' as const },
-      };
-      // @ts-ignore
-      await window.html2pdf().from(badgeEl).set(opts).save();
+      const canvas = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = badgeCanvasUrl;
+      });
+      const pdf = new (window as any).jspdf.jsPDF('p', 'mm', [63, 90]);
+      pdf.addImage(canvas, 'PNG', 0, 0, 63, 90);
+      pdf.save(`FGBMFI_Badge_${nameSlug}.pdf`);
     } catch (e) {
       console.error('PDF generation failed:', e);
+      setFeedback({ type: 'error', msg: 'PDF generation failed. Please try again.' });
+      setTimeout(() => setFeedback(null), 3000);
     }
   };
 
@@ -708,30 +802,10 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
         )}
     </div>
 
-        {badgeDelegate && (
-          <div className="hidden print:block" style={{ margin: '0', padding: '0' }}>
-            <div style={{ width: '63mm', height: '90mm', position: 'relative' }} className="border-2 border-blue-900 rounded-xl mx-auto bg-white">
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '17%', backgroundColor: '#3a0007' }}>
-                {badgeBannerDataUrl && <img src={badgeBannerDataUrl} alt="Banner" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
-                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
-              </div>
-              <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '66%', textAlign: 'center', padding: '1mm 1.5mm' }}>
-                <div style={{ width: '18mm', height: '18mm', margin: '0 auto' }}>
-                  {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
-                </div>
-                <div style={{ marginTop: '0.5mm', lineHeight: '1.1' }}>
-                  <div className="text-[7px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                  <div className="text-[5px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
-                  <div className="text-[5px] font-bold text-gray-500">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
-                  {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                    <div className="text-[4px] font-black text-gray-400 uppercase">ID: <span className="text-gray-600 font-mono text-[5px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
-                  )}
-                </div>
-              </div>
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '17%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
-                <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '6px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
-              </div>
-            </div>
+        {badgeDelegate && badgeCanvasUrl && (
+          <div className="hidden print:block">
+            <style>{`@media print { html, body { margin: 0 !important; padding: 0 !important; background: white; } }`}</style>
+            <img src={badgeCanvasUrl} alt="Badge" style={{ width: '63mm', height: '90mm', display: 'block', margin: '0 auto' }} />
           </div>
         )}
     </>
