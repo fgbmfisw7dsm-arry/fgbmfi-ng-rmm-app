@@ -1127,6 +1127,32 @@ export const db = {
         return (data || []) as BadgeBatch[];
     },
 
+    deleteBadgeBatch: async (batchId: string): Promise<boolean> => {
+        const { data: batch } = await supabase.from('badge_batches').select('*').eq('batch_id', batchId).maybeSingle();
+        if (batch) {
+            const fileName = `badge-batch-${batchId}.pdf`;
+            await supabase.storage.from('badge-pdfs').remove([fileName]);
+        }
+        const { error } = await supabase.from('badge_batches').delete().eq('batch_id', batchId);
+        return !error;
+    },
+
+    listBadgePDFs: async (): Promise<{ name: string; size: number; created_at: string; batchId: string | null }[]> => {
+        const { data, error } = await supabase.storage.from('badge-pdfs').list();
+        if (error || !data) return [];
+        return data.map(f => ({
+            name: f.name,
+            size: f.metadata?.size || 0,
+            created_at: f.created_at || '',
+            batchId: f.name.replace('badge-batch-', '').replace('.pdf', ''),
+        }));
+    },
+
+    deleteStorageFile: async (fileName: string): Promise<boolean> => {
+        const { error } = await supabase.storage.from('badge-pdfs').remove([fileName]);
+        return !error;
+    },
+
     createBadgeBatch: async (batch: Omit<BadgeBatch, 'batch_id' | 'created_at' | 'generated_at' | 'pdf_url'>): Promise<BadgeBatch> => {
         const nextNum = await supabase.rpc('get_next_batch_number', { p_event_id: batch.event_id });
         handleSupabaseError(nextNum, 'Failed to get batch number');

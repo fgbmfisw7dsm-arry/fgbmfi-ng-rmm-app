@@ -119,6 +119,9 @@ const getRoleLabel = () => {
                <Link to="/admin/data" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/data')}`}>
                  Data Management
                </Link>
+               <Link to="/admin/storage" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/storage')}`}>
+                 Storage
+               </Link>
             </MenuSection>
           )}
 

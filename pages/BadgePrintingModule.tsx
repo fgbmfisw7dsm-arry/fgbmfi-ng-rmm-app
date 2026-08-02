@@ -99,11 +99,7 @@ const BadgePrintingModule = () => {
       .catch(() => {});
   }, [activeEventId]);
 
-  useEffect(() => {
-    if (districtFilter && !isNationalOrRegional) {
-      setFilters((f) => ({ ...f, district: districtFilter }));
-    }
-  }, [districtFilter, isNationalOrRegional]);
+
 
   useEffect(() => {
     db.getChapters(filters.district || undefined)
@@ -598,27 +594,25 @@ const BadgePrintingModule = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {(!districtFilter || isNationalOrRegional) && (
-                <div>
-                  <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
-                    District
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
-                    value={filters.district || ''}
-                    onChange={(e) =>
-                      setFilters((f) => ({ ...f, district: e.target.value || undefined, chapter: undefined }))
-                    }
-                  >
-                    <option value="">All Districts</option>
-                    {availableDistricts.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  District
+                </label>
+                <select
+                  className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={filters.district || ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, district: e.target.value || undefined, chapter: undefined }))
+                  }
+                >
+                  <option value="">All Districts</option>
+                  {availableDistricts.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div>
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
@@ -1080,6 +1074,18 @@ const BadgePrintingModule = () => {
                               className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
                             >
                               Reprint
+                            </button>
+                          )}
+                          {batch.status !== 'generating' && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Delete batch #${batch.batch_number}? This will remove the PDF and all logs.`)) {
+                                  db.deleteBadgeBatch(batch.batch_id).then(() => loadBatches()).catch(() => {});
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider ml-1"
+                            >
+                              Delete
                             </button>
                           )}
                         </div>

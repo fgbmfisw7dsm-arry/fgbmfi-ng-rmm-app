@@ -17,7 +17,8 @@ const CheckInPage = () => {
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
-  const [badgeQrDataUrl, setBadgeQrDataUrl] = useState<string>('');
+  const [badgeQrSvg, setBadgeQrSvg] = useState<string>('');
+  const [badgeBannerDataUrl, setBadgeBannerDataUrl] = useState<string>('');
   const [badgeCode, setBadgeCode] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
@@ -78,7 +79,8 @@ const CheckInPage = () => {
       setFeedback(null);
       setCode('');
       setBadgeDelegate(null);
-      setBadgeQrDataUrl('');
+      setBadgeQrSvg('');
+      setBadgeBannerDataUrl('');
       setBadgeCode('');
       setPendingReg(null);
     };
@@ -207,8 +209,16 @@ const CheckInPage = () => {
 
   const handleReprintBadge = useCallback(async (delegate: Delegate) => {
     try {
-      const dataUrl = await QRCode.toDataURL(delegate.qr_hash, { width: 400, margin: 2, color: { dark: '#1e3a5f' } });
-      setBadgeQrDataUrl(dataUrl);
+      const [svgString, bannerResp] = await Promise.all([
+        QRCode.toString(delegate.qr_hash, { type: 'svg', margin: 2, color: { dark: '#1e3a5f' } }),
+        fetch('/fgbmfi badge banner-2.png').then(r => r.blob()).then(b => new Promise<string>(resolve => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(b);
+        })),
+      ]);
+      setBadgeQrSvg(svgString);
+      setBadgeBannerDataUrl(bannerResp);
       setBadgeDelegate(delegate);
       setBadgeCode(generateCodeFromId(delegate.delegate_id, activeEventId || ''));
     } catch (e) {
@@ -240,7 +250,8 @@ const CheckInPage = () => {
 
   const closeBadgeModal = () => {
     setBadgeDelegate(null);
-    setBadgeQrDataUrl('');
+    setBadgeQrSvg('');
+    setBadgeBannerDataUrl('');
     setBadgeCode('');
   };
 
@@ -258,7 +269,7 @@ const CheckInPage = () => {
         filename: `FGBMFI_Badge_${nameSlug}.pdf`,
         image: { type: 'jpeg' as const, quality: 0.98 },
         html2canvas: { scale: 3, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'mm' as const, format: [60, 70] as [number, number], orientation: 'portrait' as const },
+        jsPDF: { unit: 'mm' as const, format: [63, 90] as [number, number], orientation: 'portrait' as const },
       };
       // @ts-ignore
       await window.html2pdf().from(badgeEl).set(opts).save();
@@ -625,22 +636,28 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                  <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
                </div>
 
-                <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl p-3 text-center space-y-1.5" style={{ width: '60mm', height: '70mm' }}>
-                  <div className="text-[7px] font-black text-blue-600 uppercase tracking-[0.2em]">FGBMFI Nigeria</div>
-                  <div className="text-[8px] font-black text-gray-500 uppercase tracking-wider leading-tight">{activeEvent?.name || 'Event'}</div>
-                  <div className="mx-auto bg-blue-50 rounded-lg flex items-center justify-center overflow-hidden border border-blue-100" style={{ width: '28mm', height: '28mm' }}>
-                    {badgeQrDataUrl && <img src={badgeQrDataUrl} alt="QR Code" className="w-full h-full object-contain" />}
-                  </div>
-                  <div className="leading-tight">
-                    <div className="text-sm font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                   <div className="text-[7px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
-                     <div className="text-[7px] font-bold text-gray-500 uppercase tracking-wider">{[badgeDelegate.chapter || 'INDIVIDUAL', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null, showDelegateType && badgeDelegate.delegate_type ? badgeDelegate.delegate_type : null].filter(Boolean).join(' • ')}</div>
-                     {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                       <div className="text-[6px] font-black text-gray-400 uppercase tracking-wider leading-tight">Conv ID: <span className="text-gray-700 font-mono text-[7px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
-                     )}
+                 <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl text-center" style={{ width: '63mm', height: '90mm', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                   <div style={{ height: '17%', backgroundColor: '#3a0007', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                     {badgeBannerDataUrl && <img src={badgeBannerDataUrl} alt="Banner" style={{ width: '100%', height: 'auto', maxHeight: '100%', objectFit: 'contain' }} />}
+                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
                    </div>
-                   <div className="text-[7px] font-black text-gray-400 uppercase tracking-widest">Backup Code: <span className="text-blue-900 text-xs tracking-[0.3em]">{badgeCode}</span></div>
-                </div>
+                   <div style={{ height: '66%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5mm 2mm', gap: '0.5mm', backgroundColor: '#ffffff' }}>
+                     <div className="mx-auto" style={{ width: '19mm', height: '19mm' }}>
+                       {badgeQrSvg && <div dangerouslySetInnerHTML={{ __html: badgeQrSvg }} style={{ width: '100%', height: '100%' }} />}
+                     </div>
+                     <div className="leading-tight" style={{ width: '100%' }}>
+                       <div className="text-[6px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
+                       <div className="text-[5px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
+                       <div className="text-[5px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
+                       {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                         <div className="text-[4px] font-black text-gray-400 uppercase leading-tight">ID: <span className="text-gray-600 font-mono text-[5px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
+                       )}
+                     </div>
+                   </div>
+                   <div style={{ height: '17%', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })(), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                     <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '7px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+                   </div>
+                 </div>
 
                 <div className="mt-6 grid grid-cols-2 gap-2">
                   <button onClick={printBadge} className="py-3 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
@@ -674,21 +691,27 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
 
         {badgeDelegate && (
           <div className="hidden print:block" style={{ margin: '0', padding: '0' }}>
-            <div style={{ width: '60mm', height: '70mm' }} className="border-2 border-blue-900 rounded-xl p-2 text-center flex flex-col justify-center gap-1 mx-auto bg-white">
-              <div className="text-[6px] font-black text-blue-600 uppercase tracking-[0.2em]">FGBMFI Nigeria</div>
-              <div className="text-[7px] font-black text-gray-500 uppercase tracking-wider leading-tight">{activeEvent?.name || 'Event'}</div>
-              <div style={{ width: '25mm', height: '25mm' }} className="mx-auto">
-                {badgeQrDataUrl && <img src={badgeQrDataUrl} alt="QR Code" style={{ width: '100%', height: '100%' }} />}
+            <div style={{ width: '63mm', height: '90mm' }} className="border-2 border-blue-900 rounded-xl text-center mx-auto bg-white" >
+              <div style={{ height: '17%', backgroundColor: '#3a0007', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                {badgeBannerDataUrl && <img src={badgeBannerDataUrl} alt="Banner" style={{ width: '100%', height: 'auto', maxHeight: '100%', objectFit: 'contain' }} />}
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
               </div>
-              <div className="leading-tight">
-                <div className="text-[9px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                <div className="text-[6px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district} DISTRICT</div>
-                <div className="text-[5px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || 'INDIVIDUAL', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null, showDelegateType && badgeDelegate.delegate_type ? badgeDelegate.delegate_type : null].filter(Boolean).join(' • ')}</div>
-                {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                  <div className="text-[5px] font-black text-gray-400 uppercase leading-tight">Conv ID: <span className="text-gray-600 font-mono text-[7px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id}</span></div>
-                )}
+              <div style={{ height: '66%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1mm 1.5mm', gap: '0.5mm' }}>
+                <div style={{ width: '18mm', height: '18mm' }}>
+                  {badgeQrSvg && <div dangerouslySetInnerHTML={{ __html: badgeQrSvg }} style={{ width: '100%', height: '100%' }} />}
+                </div>
+                <div className="leading-tight" style={{ width: '100%' }}>
+                  <div className="text-[7px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
+                  <div className="text-[5px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
+                  <div className="text-[5px] font-bold text-gray-500">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
+                  {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                    <div className="text-[4px] font-black text-gray-400 uppercase leading-tight">ID: <span className="text-gray-600 font-mono text-[5px] break-all">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
+                  )}
+                </div>
               </div>
-              <div className="text-[6px] font-black text-gray-400 uppercase">Code: <span className="text-blue-900 text-[8px] tracking-[0.2em]">{badgeCode}</span></div>
+              <div style={{ height: '17%', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })(), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '6px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+              </div>
             </div>
           </div>
         )}
