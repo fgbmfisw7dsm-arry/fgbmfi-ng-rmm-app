@@ -1177,6 +1177,16 @@ export const db = {
         }
     },
 
+    getDistinctDelegateDistricts: async (eventId: string): Promise<string[]> => {
+        if (!eventId) return [];
+        const { data } = await supabase.from('delegates')
+            .select('district')
+            .eq('event_id', eventId)
+            .not('district', 'is', null)
+            .order('district');
+        return [...new Set((data || []).map(d => d.district))];
+    },
+
     getFilteredDelegates: async (
         eventId: string,
         filters: BadgeFilter,
@@ -1190,8 +1200,8 @@ export const db = {
         if (filters.selectedIds?.length) {
             q = q.in('delegate_id', filters.selectedIds);
         } else {
-            if (filters.district) q = q.ilike('district', `*${normalize(filters.district)}*`);
-            if (filters.chapter) q = q.ilike('chapter', `*${normalize(filters.chapter)}*`);
+            if (filters.district) q = q.or(`district.ilike.%${normalize(filters.district)}%`);
+            if (filters.chapter) q = q.or(`chapter.ilike.%${normalize(filters.chapter)}%`);
             if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
             if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
             if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
@@ -1235,8 +1245,8 @@ export const db = {
 
         let q = supabase.from('delegates').select('delegate_id', { count: 'exact' }).eq('event_id', eventId);
 
-        if (filters.district) q = q.ilike('district', `*${normalize(filters.district)}*`);
-        if (filters.chapter) q = q.ilike('chapter', `*${normalize(filters.chapter)}*`);
+        if (filters.district) q = q.or(`district.ilike.%${normalize(filters.district)}%`);
+        if (filters.chapter) q = q.or(`chapter.ilike.%${normalize(filters.chapter)}%`);
         if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
         if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
         if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
