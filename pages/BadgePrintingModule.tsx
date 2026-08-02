@@ -14,6 +14,7 @@ const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '10-up', label: '10-up Landscape (80×55mm)' },
   { value: '6-up-portrait', label: '6-up Portrait (63×95mm)' },
   { value: '9-up-portrait', label: '9-up Portrait (55×80mm)' },
+  { value: '8-up-portrait', label: '8-up Portrait (63×90mm)' },
 ];
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
@@ -335,9 +336,10 @@ const BadgePrintingModule = () => {
     setGeneratedBatchId(null);
 
     try {
-      const [fgbmfiLogoBase64, eventLogoBase64] = await Promise.all([
+      const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64] = await Promise.all([
         fetchLogoAsBase64('/logo-fgbmfi.png'),
         fetchLogoAsBase64('/event-logo.png'),
+        fetchLogoAsBase64('/fgbmfi badge banner-2.png'),
       ]);
 
       const decodeBase64Img = (base64: string): Uint8Array | undefined => {
@@ -354,6 +356,7 @@ const BadgePrintingModule = () => {
 
       const fgbmfiLogoBytes = fgbmfiLogoBase64 ? decodeBase64Img(fgbmfiLogoBase64) : undefined;
       const eventLogoBytes = eventLogoBase64 ? decodeBase64Img(eventLogoBase64) : undefined;
+      const badgeBannerBytes = badgeBannerBase64 ? decodeBase64Img(badgeBannerBase64) : undefined;
 
       cancellationRef.current = false;
       let hasError = false;
@@ -370,6 +373,7 @@ const BadgePrintingModule = () => {
           activeEvent,
           fgbmfiLogoBytes,
           eventLogoBytes,
+          badgeBannerBytes,
           (pg) => {
             if (cancellationRef.current) return;
             setProgress({
