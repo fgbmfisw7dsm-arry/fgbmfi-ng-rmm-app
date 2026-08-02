@@ -76,6 +76,7 @@ const BadgePrintingModule = () => {
   const [batches, setBatches] = useState<BadgeBatch[]>([]);
   const [printLogs, setPrintLogs] = useState<BadgePrintLog[]>([]);
   const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
+  const [availableChapters, setAvailableChapters] = useState<{ chapter_name: string; chapter_code?: string }[]>([]);
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
@@ -99,6 +100,18 @@ const BadgePrintingModule = () => {
       setFilters((f) => ({ ...f, district: districtFilter }));
     }
   }, [districtFilter, isNationalOrRegional]);
+
+  useEffect(() => {
+    db.getChapters(filters.district || undefined)
+      .then((data) => {
+        setAvailableChapters(data || []);
+        if (filters.chapter) {
+          const stillValid = (data || []).some((c: any) => c.chapter_name === filters.chapter);
+          if (!stillValid) setFilters((f) => ({ ...f, chapter: undefined }));
+        }
+      })
+      .catch(() => setAvailableChapters([]));
+  }, [filters.district]);
 
   const loadBatches = useCallback(async () => {
     if (!activeEventId) return;
@@ -581,7 +594,7 @@ const BadgePrintingModule = () => {
                     className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
                     value={filters.district || ''}
                     onChange={(e) =>
-                      setFilters((f) => ({ ...f, district: e.target.value || undefined }))
+                      setFilters((f) => ({ ...f, district: e.target.value || undefined, chapter: undefined }))
                     }
                   >
                     <option value="">All Districts</option>
@@ -598,14 +611,20 @@ const BadgePrintingModule = () => {
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
                   Chapter
                 </label>
-                <input
+                <select
                   className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
-                  placeholder="Filter by chapter..."
                   value={filters.chapter || ''}
                   onChange={(e) =>
                     setFilters((f) => ({ ...f, chapter: e.target.value || undefined }))
                   }
-                />
+                >
+                  <option value="">All Chapters</option>
+                  {availableChapters.map((c) => (
+                    <option key={c.chapter_code || c.chapter_name} value={c.chapter_name}>
+                      {c.chapter_name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
