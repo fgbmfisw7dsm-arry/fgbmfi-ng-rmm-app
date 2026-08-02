@@ -497,6 +497,7 @@ export const db = {
 
     // Fix: Corrected variable name mismatch from event_id to eventId
     checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+        if (!delegateId) return { success: false, message: 'Invalid delegate ID.' };
         return withRetry(async () => {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
@@ -594,26 +595,26 @@ export const db = {
         // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
         if (code.length > 10 && code === lookupId) {
             const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
-            if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
         
         // Pass 2: External ID lookup (use extracted delegate ID, matches subsequent scans)
         if (lookupId.length > 4) {
             const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('external_id', lookupId).maybeSingle();
-            if (extMatch) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
+            if (extMatch && extMatch.delegate_id) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
         }
         
         // Pass 3: Delegate ID lookup
         if (lookupId.length > 4 && lookupId !== code) {
             const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('delegate_id', lookupId).maybeSingle();
-            if (idMatch) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
+            if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
         }
         
         // Pass 4: 4-digit deterministic code fallback (legacy)
         if (code.length <= 10) {
             const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
             const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
-            if (match) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
         
         // Not found — return parsed data for confirmation form
@@ -899,6 +900,7 @@ export const db = {
     },
 
     recordSessionResponse: async (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User): Promise<{ success: boolean; message: string }> => {
+        if (!delegateId) return { success: false, message: 'Invalid delegate ID.' };
         return withRetry(async () => {
             await ensureEventActive(eventId);
 
