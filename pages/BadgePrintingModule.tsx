@@ -87,17 +87,13 @@ const BadgePrintingModule = () => {
   const previewUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (activeEventId) {
-      db.getDistinctDelegateDistricts(activeEventId)
-        .then(setAvailableDistricts)
-        .catch(() => {});
-    }
     db.getSettings()
       .then((data) => {
+        if (data?.districts?.length) setAvailableDistricts(data.districts);
         if (data?.delegate_types?.length) setDelegateTypes(data.delegate_types);
       })
       .catch(() => {});
-  }, [activeEventId]);
+  }, []);
 
 
 
