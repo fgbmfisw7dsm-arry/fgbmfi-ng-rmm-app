@@ -373,14 +373,16 @@ const CheckInPage = () => {
     if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
     try {
-      const canvas = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = badgeCanvasUrl;
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = badgeCanvasUrl;
       });
-      const pdf = new (window as any).jspdf.jsPDF('p', 'mm', [63, 90]);
-      pdf.addImage(canvas, 'PNG', 0, 0, 63, 90);
+      const JsPDF = (window as any).jspdf?.jsPDF || (window as any).jsPDF;
+      if (!JsPDF) throw new Error('PDF library not loaded');
+      const pdf = new JsPDF('p', 'mm', [63, 90]);
+      pdf.addImage(img, 'PNG', 0, 0, 63, 90);
       pdf.save(`FGBMFI_Badge_${nameSlug}.pdf`);
     } catch (e) {
       console.error('PDF generation failed:', e);
