@@ -26,6 +26,7 @@ const LoginPage = () => {
       const user = await auth.login(email, password);
       if (user) {
         login(user);
+        window.location.hash = '#/admin';
       } else {
         setError('Verification rejected: User profile not found.');
       }

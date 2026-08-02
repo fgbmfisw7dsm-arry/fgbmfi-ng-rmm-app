@@ -212,7 +212,7 @@ const CheckInPage = () => {
   const handleReprintBadge = useCallback(async (delegate: Delegate) => {
     try {
       const qrCanvas = document.createElement('canvas');
-      await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 200, margin: 1, color: { dark: '#1e3a5f' } });
+      await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 400, margin: 1, color: { dark: '#1e3a5f' } });
       const qrDataUrl = qrCanvas.toDataURL('image/png');
 
       let bannerResp = '';
@@ -293,30 +293,30 @@ const CheckInPage = () => {
           img.onerror = reject;
           img.src = qrDataUrl;
         });
-        const qrSize = Math.min(bw * 0.30, bodyH * 0.32);
+        const qrSize = Math.min(bw * 0.48, bodyH * 0.55);
         const qrX = (bw - qrSize) / 2;
         const qrY = bodyTop + 8;
         ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
         const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-        const nameY = qrY + qrSize + 10;
+        const nameY = qrY + qrSize + 12;
         ctx.fillStyle = '#1e3a5f';
-        ctx.font = 'bold 6px sans-serif';
+        ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(fullName, bw / 2, nameY);
 
         ctx.fillStyle = '#4b5563';
-        ctx.font = 'bold 4.5px sans-serif';
-        ctx.fillText(delegate.district || '', bw / 2, nameY + 8);
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText(delegate.district || '', bw / 2, nameY + 18);
 
         const details = [delegate.chapter || '', delegate.office, delegate.rank].filter(Boolean).join('  •  ');
         ctx.fillStyle = '#6b7280';
-        ctx.font = 'bold 4.5px sans-serif';
-        ctx.fillText(details, bw / 2, nameY + 14);
+    ctx.font = 'bold 9px sans-serif';
+        ctx.fillText(details, bw / 2, nameY + 30);
 
         ctx.fillStyle = '#9ca3af';
-        ctx.font = 'bold 3.5px sans-serif';
-        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, nameY + 19);
+        ctx.font = 'bold 6px sans-serif';
+        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, nameY + 40);
       } catch {}
     }
 
@@ -757,20 +757,20 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
                     </div>
                     <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '66%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
-                      <div style={{ width: '19mm', height: '19mm', margin: '0 auto' }}>
+                       <div style={{ width: '30mm', height: '30mm', margin: '0 auto' }}>
                         {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
                       </div>
-                      <div style={{ marginTop: '0.5mm', lineHeight: '1.1' }}>
-                        <div className="text-[6px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                        <div className="text-[5px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
-                        <div className="text-[5px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
-                        {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                          <div className="text-[4px] font-black text-gray-400 uppercase">ID: <span className="text-gray-600 font-mono text-[5px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
+                       <div style={{ marginTop: '1mm', lineHeight: '1.3' }}>
+                         <div className="text-[14px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
+                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
+                         <div className="text-[7px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
+                         {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                           <div className="text-[6px] font-black text-gray-400 uppercase">ID: <span className="text-gray-600 font-mono text-[6px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
                         )}
                       </div>
                     </div>
                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '17%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
-                      <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '7px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+                      <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
                     </div>
                   </div>
 

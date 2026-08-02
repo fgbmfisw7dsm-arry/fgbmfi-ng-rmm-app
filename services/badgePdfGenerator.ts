@@ -190,20 +190,21 @@ function drawBadge(
       const bodyTop = badgeBottom + bh - headerH;
       page.drawRectangle({ x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG });
 
-      const qrSize = Math.min(bw * 0.48, (bodyTop - bodyBottom) * 0.38);
+      const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
       const qrX = badgeLeft + (bw - qrSize) / 2;
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
 
       const isSmall = bw < mmToPt(60);
-      const nameSize = isSmall ? 5.0 : 6.0;
-      const fieldSize = isSmall ? 3.8 : 4.5;
+      const nameSize = isSmall ? 9.0 : 12.0;
+      const fieldLabelSize = isSmall ? 6.0 : 7.0;
+      const fieldSize = isSmall ? 7.0 : 8.0;
 
       const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
       const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
       page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(4), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
 
-      let textY = qrY - mmToPt(4) - nameSize * 1.8;
+      let textY = qrY - mmToPt(4) - nameSize * 1.6;
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
@@ -214,18 +215,18 @@ function drawBadge(
       for (const [label, value] of fields) {
         if (textY < bodyBottom + mmToPt(3)) break;
         const labelText = label + ': ';
-        const lW = fontBold.widthOfTextAtSize(labelText, fieldSize - 0.5);
+        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
         const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
         const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
-        page.drawText(labelText, { x: sx, y: textY, size: fieldSize - 0.5, font: fontBold as any, color: TEXT_SECONDARY });
+        page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
         page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-        textY -= fieldSize * 1.4;
+    textY -= fieldSize * 1.6;
       }
 
       const dt = delegate.delegate_type || 'Member';
       const bc = BAND_COLORS[dt] || DEFAULT_BAND;
       page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-      const bts = isSmall ? 4.0 : 5.0;
+      const bts = isSmall ? 7.0 : 8.0;
       const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
       page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
       return;
@@ -257,7 +258,7 @@ function drawBadge(
     const textX = badgeLeft + fgLogoW + mmToPt(2);
     const textMaxW = bw - fgLogoW - evLogoW - mmToPt(4);
     const eventName = event.name || '2026 LAGOS NATIONAL CONVENTION';
-    const hFontSize = bh > mmToPt(90) ? 5.0 : 3.8;
+    const hFontSize = bh > mmToPt(90) ? 5.8 : 4.5;
     page.drawText(eventName.toUpperCase(), { x: textX, y: headerCenterY - hFontSize * 0.35, size: hFontSize, font: fontBold as any, color: HEADER_TEXT, maxWidth: textMaxW > 0 ? textMaxW : bw * 0.4 });
 
     // Body
@@ -301,7 +302,7 @@ function drawBadge(
     const dt = delegate.delegate_type || 'Member';
     const bc = BAND_COLORS[dt] || DEFAULT_BAND;
     page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-    const bts = isSmall ? 4.0 : 5.0;
+    const bts = isSmall ? 7.0 : 8.0;
     const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
     page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
     return;
@@ -383,7 +384,7 @@ function drawBadge(
     const textX = badgeLeft + fgbmfiLogoWidth + mmToPt(3);
     const textMaxW = bw - fgbmfiLogoWidth - eventLogoWidth - mmToPt(6);
     const eventName = event.name || '2026 LAGOS NATIONAL CONVENTION';
-    const fontSize = bh > mmToPt(55) ? 5.2 : 4.2;
+    const fontSize = bh > mmToPt(55) ? 6.0 : 5.0;
     page.drawText(eventName.toUpperCase(), {
       x: textX,
       y: headerCenterY - fontSize * 0.35,
@@ -404,7 +405,7 @@ function drawBadge(
   });
 
   const bodyTop = badgeBottom + bandH + bodyH;
-  const qrSize = bodyH * 0.72;
+  const qrSize = Math.min(bodyH * 0.83, mmToPt(30));
   const qrX = badgeLeft + mmToPt(3);
   const qrY = badgeBottom + bandH + (bodyH - qrSize) / 2;
 
@@ -416,9 +417,9 @@ function drawBadge(
   const detailW = bw - (detailX - badgeLeft) - mmToPt(2);
   const isSmall = bw < mmToPt(85);
 
-  const nameSize = isSmall ? 5.5 : 6.5;
-  const fieldSize = isSmall ? 4.0 : 4.8;
-  const labelSize = isSmall ? 3.0 : 3.5;
+  const nameSize = isSmall ? 9.0 : 12.0;
+  const fieldSize = isSmall ? 7.0 : 8.0;
+  const labelSize = isSmall ? 6.0 : 7.0;
 
   const fullName = [delegate.title, delegate.first_name, delegate.last_name]
     .filter(Boolean)
@@ -436,7 +437,7 @@ function drawBadge(
     maxWidth: detailW,
   });
 
-  textY -= nameSize * 2;
+  textY -= nameSize * 2.2;
 
   const fields: [string, string][] = [
     ['District', delegate.district || 'N/A'],
@@ -485,7 +486,7 @@ function drawBadge(
     color: rgb(bandColor[0], bandColor[1], bandColor[2]),
   });
 
-  const bandTextSize = isSmall ? 4.5 : 5.5;
+  const bandTextSize = isSmall ? 7.0 : 8.0;
   const bandText = delegateType.toUpperCase();
   const bandTextW = fontBold.widthOfTextAtSize(bandText, bandTextSize);
   page.drawText(bandText, {
