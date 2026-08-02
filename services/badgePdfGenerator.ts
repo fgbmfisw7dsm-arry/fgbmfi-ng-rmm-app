@@ -544,8 +544,12 @@ export async function generateBadgePDF(
 
   const totalW = config.cols * badgeW + (config.cols - 1) * cutGapW;
   const totalH = config.rows * badgeH + (config.rows - 1) * cutGapH;
-  const marginX = (A4.w - totalW) / 2;
-  const marginY = (A4.h - totalH) / 2;
+
+  const useLandscape = totalW > A4.w;
+  const pageW = useLandscape ? A4.h : A4.w;
+  const pageH = useLandscape ? A4.w : A4.h;
+  const marginX = (pageW - totalW) / 2;
+  const marginY = (pageH - totalH) / 2;
 
   const totalPages = Math.ceil(delegates.length / (config.cols * config.rows));
   const badgesPerPage = config.cols * config.rows;
@@ -553,7 +557,7 @@ export async function generateBadgePDF(
   onProgress?.({ current: 0, total: totalPages, phase: 'composing_pages' });
 
   for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
-    const page = pdfDoc.addPage([A4.w, A4.h]);
+    const page = pdfDoc.addPage([pageW, pageH]);
     const pageDelegates = delegates.slice(
       pageIdx * badgesPerPage,
       (pageIdx + 1) * badgesPerPage
