@@ -2,7 +2,7 @@
 
 **Project:** FGBMFI Nigeria Events Management System
 **Version:** 1.7 (Phase 1) → 2.0 (Target)
-**Last Updated:** July 31, 2026 (Session Ministry Tracking Complete)
+**Last Updated:** August 2, 2026 (Badge Printing Module + Check-in Reprint Complete)
 
 ---
 
@@ -132,6 +132,79 @@ SessionMinistryPage
 
 ---
 
+## Session Summary (August 2, 2026) — Badge Printing Module + Check-in Reprint
+
+### What Was Delivered
+
+| # | Item | Type | Commit |
+|---|------|------|--------|
+| 1 | 8-up Portrait layout (63×90mm, 4 cols × 2 rows, landscape A4) | Badge | `cca2f2b` |
+| 2 | Full-width banner header PNG (1800×250px) replacing logo-based header | Badge | `cca2f2b` |
+| 3 | Auto-detect paper orientation when grid exceeds 210mm width | Badge | `ab78496` |
+| 4 | DB fix: 8-up-portrait added to badge_batches layout CHECK constraint | Migration | `ff18f5` |
+| 5 | Banner copy updated in public/ + push | Asset | `05f589a` |
+| 6 | Session ministry scanning: delegate_id returned in checkInDelegate response | Fix | `8b343c3` |
+| 7 | Null-guards on delegate_id at all 4 checkInByCode passes + service entry points | Fix | `2b36042` |
+| 8 | DB unique constraints for concurrent scanner safety + graceful duplicate handling | DB | `6647887` |
+| 9 | District dropdown restored: system_settings.districts (25 presets), no auto-select | UX | `95c7e26` |
+| 10 | Badge batch delete button (storage cleanup + print log cascade) | Service | `95c7e26` |
+| 11 | StorageModule admin page (#/admin/storage) — badge-pdfs bucket file management | Page | `95c7e26` |
+| 12 | Badge Reprint: banner header PNG + colored delegate-type footer stamp (17% band) | CheckIn | `95c7e26` |
+| 13 | Badge Reprint: default badge size changed to 63×90mm portrait | CheckIn | `95c7e26` |
+| 14 | District dropdown fix: master list from system_settings.districts | Fix | `c9d0fc6` |
+| 15 | QR switched from inline SVG to canvas PNG (html2canvas compatibility) | Fix | `c9d0fc6` |
+| 16 | Badge layout: flexbox → absolute positioning for reliable canvas capture | Fix | `c9d0fc6` |
+| 17 | Banner fetch hardened: 5s timeout, encodeURI, graceful fallback | Fix | `c9d0fc6` |
+| 18 | Mobile html2canvas scale reduced 3→2 to prevent OOM | Fix | `c9d0fc6` |
+| 19 | Canvas 2D badge generation (3× scale, programmatic drawing, PNG reuse) | CheckIn | `58e0670` |
+| 20 | PDF export: direct jsPDF.addImage from canvas URL (bypasses html2pdf) | CheckIn | `58e0670` |
+| 21 | Print: simple <img> tag with print CSS reset (no HTML layout) | CheckIn | `58e0670` |
+| 22 | jsPDF standalone CDN 2.5.1 added to index.html | Infra | `ea7988b` |
+| 23 | PDF fallback: try multiple jsPDF references (jspdf.jsPDF / jsPDF) | CheckIn | `ea7988b` |
+
+### Database Migration Results
+
+| Migration | Content | Status |
+|-----------|---------|--------|
+| `supabase_migration_add_8up_portrait_layout.sql` | Add 8-up-portrait to badge_batches CHECK constraint | To run by user |
+| `supabase_migration_add_checkin_uniqueness.sql` | Unique constraints on checkins + session_responses + index for getSessionResponseIds | To run by user |
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Canvas 2D badge generation over DOM-based html2canvas | Eliminates all layout issues: mm units, flexbox %, absolute positioning, SVG rendering. Single PNG data URL powers Print, PDF, Image, Share |
+| jsPDF standalone over html2pdf wrapper | html2pdf wraps html2canvas poorly for complex layouts. Direct jsPDF.addImage() with exact 63×90mm dimensions works reliably on mobile + desktop |
+| system_settings.districts for dropdown instead of delegate district query | Previous approach returned only districts present in active event's delegates. Master list has all 25 official FGBMFI districts |
+| Banner fetch with AbortController(5s) + encodeURI | Space in filename broke on some mobile proxies. Timeout prevents hung modal. Graceful fallback shows badge without banner |
+| SVG QR abandoned for badge context | html2canvas cannot render inline SVG from dangerouslySetInnerHTML. Canvas PNG via QRCode.toCanvas() is universally compatible |
+| Print badge as <img> tag (not HTML layout) | position:absolute children with % heights collapse in print context. Flat canvas image renders perfectly |
+| mobile scale detection for html2canvas | 238×340px × scale 3 = ~3MB canvas memory → OOM on low-RAM devices. Scale 2 = ~1.3MB, safe |
+
+### Key Files Changed
+
+| File | Changes |
+|------|---------|
+| `types.ts` | Added `'8-up-portrait'` to BadgeLayout union |
+| `services/badgePdfGenerator.ts` | 8-up-portrait layout, auto-detect landscape, banner PNG header, fallback to logo header |
+| `services/supabaseService.ts` | deleteBadgeBatch, listBadgePDFs, deleteStorageFile; delegate_id null-guards; duplicate check handling; checkInDelegate returns full delegate |
+| `pages/BadgePrintingModule.tsx` | 8-up-portrait in layout picker, district dropdown from settings, delete batch button, banner fetch |
+| `pages/CheckInPage.tsx` | Canvas 2D badge generation, banner header + footer stamp, 63×90mm, 4 export modes (print/pdf/img/share), SVG→canvas QR, timeout/encodeURI, mobile scale |
+| `pages/StorageModule.tsx` | **NEW** — badge-pdfs file listing, bulk delete, batch link |
+| `components/Layout.tsx` | Added "Storage" nav link under Administration |
+| `components/BadgePreview.tsx` | Added 8-up-portrait label and 4×2 grid |
+| `App.tsx` | Added /admin/storage route (admin-only) |
+| `index.html` | Added jsPDF 2.5.1 standalone CDN script |
+| `public/` | Added `fgbmfi badge banner-2.png` (1800×250px) |
+
+### Route Additions
+
+| Route | Page | Roles |
+|-------|------|-------|
+| `#/admin/storage` | StorageModule | admin |
+
+---
+
 ## Phased Roadmap
 
 ### Phase 1 — Core Event Management (6–8 weeks) ← **Current**
@@ -147,7 +220,8 @@ Optimize the existing React/Vite SPA for 25K delegates and 50 concurrent officer
 | **Sprint 5** | Hardening & Deployment | 50-concurrent-user load test, error recovery, operator training | 24 hrs | ✅ Done |
 | **Sprint 6** | Convention Accreditation | Native QR scanner, event-scoped delegates, 4-pass code resolution, multi-format QR parser, auto-registration flow, event isolation queries, report/master list fixes | 32 hrs | ✅ Done |
 | **Sprint 10** | Session Ministry Tracking | session_responses/summaries/VD tables, Session Details page (#/ministry) with CheckInPage workflow, alter call recording (FT/SLV/MI/HGB), manual totals for MPO/FTO, Voice Distribution tracking, Sessions Summary with ATT column, Sessions Report tab with Alter Call filter + CSV export, badge reprint (60×70mm), e-badge PDF/PNG/Share, user manual update | 48 hrs | ✅ Done |
-| **Total** | | | **~184 hrs** | |
+| **Sprint 11** | Badge Printing + Check-in Reprint | 5 badge layouts (8-up/10-up/6-up portrait/9-up portrait/8-up portrait), canvas 2D badge reprint, full-width banner header, delegate type footer stamp, storage management (#/admin/storage), badge batch delete, concurrent DB unique constraints, district dropdown master list, QR canvas PNG, PDF/Print/Image/Share exports, mobile resilience | 40 hrs | ✅ Done |
+| **Total** | | | **~224 hrs** | |
 
 ### Phase 2 — Finance & Communications (4–6 weeks)
 
@@ -339,6 +413,8 @@ Sprint 5 (Load Test + Hardening) ✅ Done
 Sprint 6 (Convention Accreditation) ✅ Done
         ↓
 Sprint 10 (Session Ministry Tracking) ✅ Done
+        ↓
+Sprint 11 (Badge Printing + Check-in Reprint) ✅ Done
         ↓
         READY FOR CONVENTION ✅
 ```

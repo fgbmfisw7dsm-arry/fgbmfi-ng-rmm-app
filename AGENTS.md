@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.1 (Regional Meetings — single codebase, national-scope target)
+- **Current Version:** 1.2 (Badge Printing + Check-in Reprint — 10 tables, 5 badge layouts, canvas-based reprint)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -22,7 +22,7 @@
 | UI | Tailwind CSS | 3.x |
 | State | React Context (AppContext) | — |
 | Charts | Recharts | 3.5 |
-| PDF | html2pdf.js (html2canvas + jsPDF) | — |
+| PDF | jsPDF (standalone CDN 2.5.1) + html2canvas 1.4.1 + Canvas 2D badge generation | — |
 | QR Codes | Deterministic 4-digit hash (client-side) | — |
 | Realtime | Supabase Realtime (Postgres Changes) | — |
 | Build | Vite | 6.x |
@@ -50,10 +50,10 @@ React Components (Pages)
     ↕ supabaseClient.ts ←→ supabaseService.ts
     ↕ Supabase SDK
 supabase.co
- ├── PostgreSQL (8 tables)
+ ├── PostgreSQL (12 tables including badge batches, session ministry)
  ├── Auth (email/password)
  ├── Realtime (subscriptions)
- └── Storage (not currently used)
+ └── Storage (badge-pdfs bucket for printed batch PDFs)
 ```
 
 ### Key Architectural Decisions
@@ -70,16 +70,21 @@ supabase.co
 ```
 fgbmfi-ng-rmm-app/
 ├── components/
+│   ├── BadgePreview.tsx          # Badge layout preview grid (5 layouts)
 │   ├── ConfigurationError.tsx    # Vite + Supabase config validation
 │   ├── ErrorBoundary.tsx         # Class-based React error boundary
 │   ├── Layout.tsx                # Shell: header, nav, active event selector
 │   ├── Logos.tsx                 # FGBMFI SVG logo component
+│   ├── QRScanner.tsx             # Native BarcodeDetector API (1080p) scanner
 │   └── StatCard.tsx              # Reusable dashboard stat card
 ├── context/
 │   └── AppContext.ts             # Global state: user, activeEvent, events (NOTE: 404 — may be inline in App.tsx)
+├── hooks/
+│   └── useMinistry.ts            # TanStack Query: session ministry mutations
 ├── pages/
 │   ├── AdminDashboard.tsx        # Real-time dashboard with charts + activity feed
-│   ├── CheckInPage.tsx           # QR code entry + delegate search + verification
+│   ├── BadgePrintingModule.tsx   # Badge generation: filters, 5 layouts, batches, storage, reprint
+│   ├── CheckInPage.tsx           # QR code entry + delegate search + badge reprint (canvas-based)
 │   ├── DataModule.tsx            # Data management: clear event, bulk delete, harmonize
 │   ├── EventsModule.tsx          # CRUD events + sessions + lifecycle toggle
 │   ├── FinancialsPage.tsx        # Offerings, pledges, redemptions (3-tab)
@@ -87,41 +92,48 @@ fgbmfi-ng-rmm-app/
 │   ├── LoginPage.tsx             # Supabase Auth email/password login
 │   ├── MasterListModule.tsx      # Full delegate list + inline editing + PDF export
 │   ├── NewDelegatePage.tsx       # Single delegate registration form
-│   ├── ReportsPage.tsx           # Attendance list, matrix, financial report, pledge summary
+│   ├── ReportsPage.tsx           # Attendance list, matrix, financial report, pledge summary, sessions
+│   ├── SessionMinistryPage.tsx   # Alter call recording: QR scan + search + response types (FT/SLV/MI/HGB)
 │   ├── SetupModule.tsx           # System settings: districts, ranks, offices, titles
+│   ├── StorageModule.tsx         # Admin storage file management (badge-pdfs bucket)
 │   ├── UserManualModule.tsx      # Static help/guide content
 │   └── UsersModule.tsx           # CRUD app_users + role assignment
 ├── services/
+│   ├── badgePdfGenerator.ts      # pdf-lib badge generation: 5 layouts, canvas QR, banner header
 │   ├── mockSupabase.ts           # CLEARED — no longer used
 │   ├── supabaseClient.ts         # Supabase client singleton + config check
-│   ├── supabaseService.ts        # All DB operations: auth, delegates, checkins, finances, settings
+│   ├── supabaseService.ts        # All DB operations: auth, delegates, checkins, finances, settings, badges, storage, session ministry
 │   └── utils.ts                  # formatCurrency, generateCodeFromId, exportToPDF, downloadJSON
 ├── .gitignore
 ├── App.tsx                       # Root: ErrorBoundary → Auth init → AppContext → HashRouter → Routes
-├── index.html
+├── index.html                    # CDN scripts: Tailwind, html2pdf, html2canvas, jsPDF 2.5.1
 ├── index.tsx                     # Entry point (ReactDOM.createRoot)
 ├── metadata.json                 # Supabase metadata snapshot
 ├── package.json
 ├── supabase_schema.sql           # Full DDL + RLS + RPCs + seed data
 ├── tsconfig.json
-├── types.ts                      # All interfaces, enums (UserRole, FinancialType, etc.)
+├── types.ts                      # All interfaces, enums (UserRole, BadgeLayout, SessionResponseType, etc.)
 └── vite.config.ts
 ```
 
 ## Database Design
 
-### Current Tables (8)
+### Current Tables (12)
 
 | Table | Purpose | Key Columns | RLS |
 |-------|---------|------------|-----|
 | `events` | Event catalog | event_id, name, start_date, end_date, is_active, region | Authenticated |
-| `delegates` | Single delegate repository | delegate_id, first_name, last_name, district, chapter, phone, email, rank, office, title | Authenticated |
+| `delegates` | Single delegate repository | delegate_id, first_name, last_name, district, chapter, phone, email, rank, office, title, qr_hash, external_id, event_id | Authenticated |
 | `sessions` | Event sessions (sub-events) | session_id, event_id (FK), title, start_time, end_time | Authenticated |
 | `checkins` | Arrival + session attendance | checkin_id, event_id, delegate_id, session_id (nullable), checked_in_at, checked_in_by | Authenticated |
 | `pledges` | Financial pledges | id, event_id, donor_name, district, amount_pledged, amount_redeemed | Authenticated |
 | `financial_entries` | Offerings + redemptions | id, event_id, type (OFFERING/PLEDGE_REDEMPTION), amount, session_id, payer_name, pledge_id (FK), remarks | Authenticated |
 | `app_users` | System user profiles | id (UUID, FK to auth.users), email, role, district | Authenticated |
-| `system_settings` | Global config (single row) | id, titles (jsonb), districts (jsonb), ranks (jsonb), offices (jsonb), regions (jsonb) | Authenticated |
+| `system_settings` | Global config (single row) | id, titles (jsonb), districts (jsonb), ranks (jsonb), offices (jsonb), regions (jsonb), delegate_types (jsonb) | Authenticated |
+| `badge_batches` | Badge PDF generation batches | batch_id, event_id, batch_number, badge_count, page_count, layout, sort_field, filters, status, pdf_url | Authenticated |
+| `badge_print_logs` | Per-badge print audit trail | log_id, batch_id (FK cascade), delegate_id, event_id, printed_by, printed_at | Authenticated |
+| `session_responses` | Alter call individual responses | response_id, event_id, delegate_id, session_id, response_type (FT/SLV/MI/HGB), recorded_by | Authenticated |
+| `session_voice_distribution` | Voice distribution aggregates | id, event_id, session_id, count (integer) | Authenticated |
 
 ### Critical Indexes (Must Exist Before 25K Scale)
 ```sql
@@ -129,18 +141,28 @@ fgbmfi-ng-rmm-app/
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX idx_delegates_name_gin ON delegates USING gin (first_name gin_trgm_ops, last_name gin_trgm_ops);
 CREATE INDEX idx_delegates_phone ON delegates(phone);
+CREATE INDEX idx_delegates_qr_hash ON delegates(qr_hash);          -- UNIQUE, critical for QR scan Pass 1
 CREATE INDEX idx_checkins_event_delegate ON checkins(event_id, delegate_id);
 CREATE INDEX idx_checkins_event_session ON checkins(event_id, session_id);
 CREATE INDEX idx_financials_event ON financial_entries(event_id);
 CREATE INDEX idx_pledges_event ON pledges(event_id);
+
+-- Concurrent scanner safety (unique constraints)
+CREATE UNIQUE INDEX idx_checkins_event_delegate_session_unique ON checkins(event_id, delegate_id, session_id) WHERE session_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_checkins_event_delegate_arrival_unique ON checkins(event_id, delegate_id) WHERE session_id IS NULL;
+CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_responses(event_id, delegate_id, session_id, response_type);
 ```
 
-### Supabase RPCs (3)
-- `create_app_user(email, password, role, district)` — creates auth.users + app_users row. **MUST set `aud='authenticated'`, `role='authenticated'`, pull `instance_id` from existing user, use `gen_random_uuid()` for `auth.identities.id`.** See `supabase_migration_2026_08_fix_auth_row_integrity.sql` for the reference implementation.
+### Supabase RPCs (6)
+- `create_app_user(email, password, role, district)` — creates auth.users + app_users row
 - `delete_app_user(user_id_to_delete)` — deletes from app_users + auth.users
-- `reset_user_password(user_id, new_password)` — updates auth.users password. **MUST use `crypt()` and re-stamp confirmation via `COALESCE` to never un-confirm a user.**
-- `get_my_profile()` — returns the caller's `app_users` row (used by `auth.diagnoseLoginFailure` for descriptive login error messages)
-- `v_auth_integrity_check` (view) — audit view: `SELECT * FROM v_auth_integrity_check WHERE NOT has_email_identity;` identifies broken users
+- `reset_user_password(user_id, new_password)` — updates auth.users password
+- `get_my_profile()` — returns the caller's `app_users` row
+- `v_auth_integrity_check` (view) — audit view for broken user detection
+- `get_event_dashboard_stats(p_event_id, p_district_filter)` — RPC-based aggregated dashboard counts
+- `get_session_ministry_stats(p_event_id)` — RPC for session response counts + attendance
+- `get_ministry_export_data(p_event_id, p_session_id)` — RPC for ministry CSV export data
+- `get_next_batch_number(p_event_id)` — RPC for badge batch sequential numbering
 
 ### Auth Row Integrity (2026-08-01 fix)
 Historical `create_app_user` rewrites dropped the `aud`, `instance_id`, and `role` columns on `auth.users`, causing `signInWithPassword()` to silently fail with "Invalid login credentials" for every newly-created user. The fix in `supabase_migration_2026_08_fix_auth_row_integrity.sql` is the reference implementation. **Any future rewrite of `create_app_user` must:**
@@ -183,7 +205,7 @@ Historical `create_app_user` rewrites dropped the `aud`, `instance_id`, and `rol
 ```
 #/login                              — LoginPage (unauthenticated)
 #/admin                              — AdminDashboard (default)
-#/admin/reports                      — ReportsPage
+#/admin/reports                      — ReportsPage (including Sessions tab)
 #/admin/financials                   — FinancialsPage
 #/admin/delegates                    — MasterListModule
 #/admin/events                       — EventsModule (admin only)
@@ -191,7 +213,10 @@ Historical `create_app_user` rewrites dropped the `aud`, `instance_id`, and `rol
 #/admin/import                       — ImportModule
 #/admin/setup                        — SetupModule
 #/admin/data                         — DataModule
-#/checkin                            — CheckInPage
+#/admin/badges                       — BadgePrintingModule (admin + registrar)
+#/admin/storage                      — StorageModule (admin only)
+#/checkin                            — CheckInPage (includes badge reprint modal)
+#/ministry                           — SessionMinistryPage (admin + registrar)
 #/register-new                       — NewDelegatePage
 #/help                               — UserManualModule
 #/*                                  — Redirects to /login or /admin based on auth
@@ -288,6 +313,47 @@ supabase.channel('dashboard_sync')
 - `importDelegates()` parses 9-column CSV, inserts all rows in single call
 - v2 fix: batch inserts of 500 rows with progress feedback
 
+### 9. Badge Printing (pdf-lib generation)
+- 5 layouts: `8-up` (90×60mm), `10-up` (80×55mm), `6-up-portrait` (63×95mm), `9-up-portrait` (55×80mm), `8-up-portrait` (63×90mm)
+- Auto-detect paper orientation: if grid width > 210mm, switches to landscape A4 (`badgePdfGenerator.ts`)
+- Full-width banner header: `fgbmfi badge banner-2.png` (1800×250px) replaces separate logo rendering
+- Banner scaled to badge width with maroon (`#3a0007`) padding + gold accent line (`#c8960c`)
+- Backward compatible: falls back to original logo-based header when banner unavailable
+- Color-coded delegate type stamp band at bottom (17% height) — same `BAND_COLORS` mapping
+- PDF generated client-side via `pdf-lib`, uploaded to `badge-pdfs` Supabase storage bucket
+- Batch tracking: `badge_batches` + `badge_print_logs` tables with status lifecycle (pending→generating→ready→printed)
+- Storage management: `/admin/storage` page for listing and deleting badge PDF files
+
+### 10. Check-in Badge Reprint (Canvas 2D)
+- **Canvas-based generation:** badge drawn programmatically on Canvas 2D at 3× scale (714×1020px)
+- Produces a single PNG data URL reused by all 4 export modes (Print, PDF, Image, Share)
+- 63×90mm portrait default (matching `8-up-portrait` layout)
+- Layout: 17% banner header + 66% white body (QR + text) + 17% colored footer band
+- Banner fetched with 5s timeout + `encodeURI()` + graceful fallback (empty banner)
+- QR code generated via `QRCode.toCanvas()` then drawn as Image on the badge canvas
+- PDF export: direct `jsPDF.addImage(canvasDataUrl, 'PNG', 0, 0, 63, 90)` — no DOM capture
+- Print: simple `<img src={canvasDataUrl}>` with `@media print` margin reset — no HTML layout
+- Mobile: html2canvas scale reduced from 3→2 for lower memory pressure
+- **Never use `dangerouslySetInnerHTML` with SVG for QR** — html2canvas cannot render it
+- **Never use `position:absolute` children with percentage heights for capture** — DOM clone collapses
+
+### 11. QR Code Resolution (4-pass checkInByCode)
+```typescript
+// Pass order in checkInByCode():
+1. UUID qr_hash lookup (> 10 chars, direct DB hit via UNIQUE index)
+2. external_id lookup (> 4 chars, external badge QR codes)
+3. delegate_id lookup (> 4 chars, only when lookupId !== code)
+4. 4-digit deterministic code fallback (≤ 10 chars, scans up to 5000 delegates)
+```
+- All 4 passes now validate `match.delegate_id` is truthy before calling `checkInDelegate`
+- `checkInDelegate` and `recordSessionResponse` both reject immediately if `delegateId` is falsy
+- Duplicate inserts (23505) caught gracefully — returns "Already recorded" instead of throwing
+
+### 12. Concurrent Scanner Safety
+- DB-level unique constraints prevent duplicate checkins and session_responses at scale
+- Partial unique indexes: separate constraints for null (`WHERE session_id IS NULL`) vs non-null session_id
+- App-level graceful handling: 23505 errors treated as success (already recorded)
+
 ## Code Conventions
 
 ### Naming
@@ -382,6 +448,10 @@ npm run build   # Production build to /dist
 | Client-side role enforcement | RLS is fallback, but UI gates are purely client-side | LOW | Phase 2 |
 | No TypeScript strict mode | `any` used in several service functions | LOW | Phase 3 |
 | Gemini API key in env | Referenced in README but no AI feature implemented | LOW | Phase 4 |
+| `getDistinctDelegateDistricts` event-scoped | BadgePrintingModule now uses master `system_settings.districts` instead | RESOLVED | v1.2 |
+| PDF blank with html2pdf wrapper | Switched to direct jsPDF.addImage from pre-rendered canvas | RESOLVED | v1.2 |
+| SVG QR in html2canvas fails | Switched to canvas PNG via QRCode.toCanvas() | RESOLVED | v1.2 |
+| Badge reprint PDF/Print broken | Canvas 2D generation bypasses all DOM layout issues | RESOLVED | v1.2 |
 
 ## v2.0 Evolution
 
