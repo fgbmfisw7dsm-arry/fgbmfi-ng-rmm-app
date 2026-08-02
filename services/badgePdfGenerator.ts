@@ -51,14 +51,7 @@ const CROP_COLOR = rgb(0, 0, 0);
 const HEADER_STRIP_BG = rgb(0.027, 0.000, 0.000);
 
 function encodeQRData(delegate: Delegate, event: Event): string {
-  return [
-    delegate.delegate_id,
-    delegate.qr_hash || delegate.delegate_id,
-    `${delegate.first_name} ${delegate.last_name}`,
-    delegate.district,
-    delegate.delegate_type || 'Member',
-    event.event_id,
-  ].join('|');
+  return delegate.qr_hash || delegate.delegate_id;
 }
 
 function drawCropMarks(page: PDFPage, x: number, y: number, w: number, h: number) {

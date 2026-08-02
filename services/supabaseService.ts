@@ -1190,8 +1190,8 @@ export const db = {
         if (filters.selectedIds?.length) {
             q = q.in('delegate_id', filters.selectedIds);
         } else {
-            if (filters.district) q = q.ilike('district', normalize(filters.district));
-            if (filters.chapter) q = q.ilike('chapter', normalize(filters.chapter));
+            if (filters.district) q = q.ilike('district', `*${normalize(filters.district)}*`);
+            if (filters.chapter) q = q.ilike('chapter', `*${normalize(filters.chapter)}*`);
             if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
             if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
             if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
@@ -1235,8 +1235,8 @@ export const db = {
 
         let q = supabase.from('delegates').select('delegate_id', { count: 'exact' }).eq('event_id', eventId);
 
-        if (filters.district) q = q.ilike('district', normalize(filters.district));
-        if (filters.chapter) q = q.ilike('chapter', normalize(filters.chapter));
+        if (filters.district) q = q.ilike('district', `*${normalize(filters.district)}*`);
+        if (filters.chapter) q = q.ilike('chapter', `*${normalize(filters.chapter)}*`);
         if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
         if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
         if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
