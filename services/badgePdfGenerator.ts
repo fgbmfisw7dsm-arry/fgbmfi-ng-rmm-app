@@ -25,8 +25,8 @@ const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
 
 const ZONES = {
   headerFraction: 0.17,
-  bodyFraction: 0.66,
-  bandFraction: 0.17,
+  bodyFraction: 0.70,
+  bandFraction: 0.13,
 };
 
 const BAND_COLORS: Record<string, readonly [number, number, number]> = {
@@ -165,7 +165,9 @@ function drawBadge(
   fgbmfiLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   badgeBanner?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
-  isPortrait: boolean = false
+  isPortrait: boolean = false,
+  showRank: boolean = true,
+  showOffice: boolean = true
 ) {
   const badgeBottom = by;
   const badgeLeft = bx;
@@ -197,14 +199,14 @@ function drawBadge(
 
       const isSmall = bw < mmToPt(60);
       const nameSize = isSmall ? 9.0 : 12.0;
-      const fieldLabelSize = isSmall ? 6.0 : 7.0;
-      const fieldSize = isSmall ? 7.0 : 8.0;
+      const fieldLabelSize = isSmall ? 6.5 : 7.5;
+      const fieldSize = isSmall ? 7.5 : 8.5;
 
       const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
       const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
-      page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(4), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
+      page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
 
-      let textY = qrY - mmToPt(4) - nameSize * 1.6;
+      let textY = qrY - mmToPt(6) - nameSize * 1.6;
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
@@ -266,20 +268,21 @@ function drawBadge(
     const bodyTop = badgeBottom + bh - headerH;
     page.drawRectangle({ x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG });
 
-    const qrSize = Math.min(bw * 0.48, (bodyTop - bodyBottom) * 0.38);
+    const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
     const qrX = badgeLeft + (bw - qrSize) / 2;
     const qrY = bodyTop - mmToPt(6) - qrSize;
     drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
 
     const isSmall = bw < mmToPt(60);
-    const nameSize = isSmall ? 5.0 : 6.0;
-    const fieldSize = isSmall ? 3.8 : 4.5;
+    const nameSize = isSmall ? 9.0 : 12.0;
+    const fieldLabelSize = isSmall ? 6.5 : 7.5;
+    const fieldSize = isSmall ? 7.5 : 8.5;
 
     const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
     const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
-    page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(4), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
+    page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
 
-    let textY = qrY - mmToPt(4) - nameSize * 1.8;
+    let textY = qrY - mmToPt(6) - nameSize * 1.6;
     const fields: [string, string][] = [
       ['District', delegate.district || 'N/A'],
       ['Chapter', delegate.chapter || 'N/A'],
@@ -290,12 +293,12 @@ function drawBadge(
     for (const [label, value] of fields) {
       if (textY < bodyBottom + mmToPt(3)) break;
       const labelText = label + ': ';
-      const lW = fontBold.widthOfTextAtSize(labelText, fieldSize - 0.5);
+      const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
       const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
       const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
-      page.drawText(labelText, { x: sx, y: textY, size: fieldSize - 0.5, font: fontBold as any, color: TEXT_SECONDARY });
+      page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
       page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-      textY -= fieldSize * 1.4;
+      textY -= fieldSize * 1.6;
     }
 
     // Category band
@@ -418,8 +421,8 @@ function drawBadge(
   const isSmall = bw < mmToPt(85);
 
   const nameSize = isSmall ? 9.0 : 12.0;
-  const fieldSize = isSmall ? 7.0 : 8.0;
-  const labelSize = isSmall ? 6.0 : 7.0;
+  const fieldSize = isSmall ? 7.5 : 8.5;
+  const labelSize = isSmall ? 6.5 : 7.5;
 
   const fullName = [delegate.title, delegate.first_name, delegate.last_name]
     .filter(Boolean)
@@ -446,10 +449,10 @@ function drawBadge(
     ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
   ];
 
-  if (delegate.rank && delegate.rank !== 'CP') {
+  if (showRank && delegate.rank && delegate.rank !== 'CP') {
     fields.push(['Rank', delegate.rank]);
   }
-  if (delegate.office && delegate.office !== 'OTHER') {
+  if (showOffice && delegate.office && delegate.office !== 'OTHER') {
     fields.push(['Office', delegate.office]);
   }
 
@@ -471,7 +474,7 @@ function drawBadge(
       color: TEXT_PRIMARY,
       maxWidth: detailW - labelWidth,
     });
-    textY -= fieldSize * 1.5;
+    textY -= fieldSize * 1.6;
   }
 
   // Category band
@@ -539,6 +542,10 @@ export async function generateBadgePDF(
   const cutGapW = mmToPt(config.cutGap);
   const cutGapH = mmToPt(config.cutGap);
 
+  const eventConfig = (event?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+
   const headerH = badgeH * ZONES.headerFraction;
   const bodyH = badgeH * ZONES.bodyFraction;
   const bandH = badgeH * ZONES.bandFraction;
@@ -587,7 +594,9 @@ export async function generateBadgePDF(
         fgbmfiLogo as any,
         eventLogo as any,
         badgeBanner as any,
-        IS_PORTRAIT[layout]
+        IS_PORTRAIT[layout],
+        showRank,
+        showOffice
       );
       drawCropMarks(page, bx, by, badgeW, badgeH);
     }

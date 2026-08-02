@@ -281,7 +281,7 @@ const CheckInPage = () => {
     ctx.fillRect(0, headerH - Math.round(0.5 * mmToPx), bw, Math.round(0.5 * mmToPx));
 
     const bodyTop = headerH;
-    const bodyH = bh * 0.66;
+    const bodyH = bh * 0.70;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, bodyTop, bw, bodyH);
 
@@ -299,29 +299,46 @@ const CheckInPage = () => {
         ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
         const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-        const nameY = qrY + qrSize + 12;
+        const nameY = qrY + qrSize + 16;
         ctx.fillStyle = '#1e3a5f';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(fullName, bw / 2, nameY);
 
+        const lineGap = 18;
+        let textY = nameY + lineGap;
+
         ctx.fillStyle = '#4b5563';
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillText(delegate.district || '', bw / 2, nameY + 18);
+        ctx.fillText('District: ' + (delegate.district || 'N/A'), bw / 2, textY);
+        textY += lineGap;
 
-        const details = [delegate.chapter || '', delegate.office, delegate.rank].filter(Boolean).join('  •  ');
-        ctx.fillStyle = '#6b7280';
-    ctx.font = 'bold 9px sans-serif';
-        ctx.fillText(details, bw / 2, nameY + 30);
+        ctx.fillStyle = '#4b5563';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText('Chapter: ' + (delegate.chapter || 'N/A'), bw / 2, textY);
+        textY += lineGap;
 
-        ctx.fillStyle = '#9ca3af';
-        ctx.font = 'bold 6px sans-serif';
-        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, nameY + 40);
+        if (showOffice && delegate.office) {
+          ctx.fillStyle = '#4b5563';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.fillText('Office: ' + delegate.office, bw / 2, textY);
+          textY += lineGap;
+        }
+        if (showRank && delegate.rank) {
+          ctx.fillStyle = '#4b5563';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.fillText('Rank: ' + delegate.rank, bw / 2, textY);
+          textY += lineGap;
+        }
+
+        ctx.fillStyle = '#1e3a5f';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, textY);
       } catch {}
     }
 
     const bandTop = bodyTop + bodyH;
-    const bandH = bh * 0.17;
+    const bandH = bh * 0.13;
     const dt = delegate.delegate_type || 'Member';
     const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' };
     ctx.fillStyle = bc[dt] || '#595966';
@@ -756,22 +773,28 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                       {badgeBannerDataUrl && <img src={badgeBannerDataUrl} alt="Banner" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
                       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
                     </div>
-                    <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '66%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
+                     <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '70%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
                        <div style={{ width: '30mm', height: '30mm', margin: '0 auto' }}>
-                        {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
-                      </div>
-                       <div style={{ marginTop: '1mm', lineHeight: '1.3' }}>
+                         {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
+                       </div>
+                       <div style={{ marginTop: '1.5mm', lineHeight: '1.4' }}>
                          <div className="text-[14px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
-                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">{badgeDelegate.district}</div>
-                         <div className="text-[7px] font-bold text-gray-500 uppercase">{[badgeDelegate.chapter || '', showOffice && badgeDelegate.office ? badgeDelegate.office : null, showRank && badgeDelegate.rank ? badgeDelegate.rank : null].filter(Boolean).join(' • ')}</div>
+                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">District: {badgeDelegate.district || 'N/A'}</div>
+                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Chapter: {badgeDelegate.chapter || 'N/A'}</div>
+                         {showOffice && badgeDelegate.office && (
+                           <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Office: {badgeDelegate.office}</div>
+                         )}
+                         {showRank && badgeDelegate.rank && (
+                           <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Rank: {badgeDelegate.rank}</div>
+                         )}
                          {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                           <div className="text-[6px] font-black text-gray-400 uppercase">ID: <span className="text-gray-600 font-mono text-[6px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '17%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
-                      <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
-                    </div>
+                           <div className="text-[8px] font-black text-gray-500 uppercase">ID: <span className="text-gray-700 font-mono text-[8px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
+                         )}
+                       </div>
+                     </div>
+                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '13%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
+                       <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+                     </div>
                   </div>
 
                 <div className="mt-6 grid grid-cols-2 gap-2">
