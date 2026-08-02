@@ -10,6 +10,15 @@ const A4 = { w: mmToPt(210), h: mmToPt(297) };
 const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '8-up': { cols: 2, rows: 4, badgeW: 90, badgeH: 60, cutGap: 3 },
   '10-up': { cols: 2, rows: 5, badgeW: 80, badgeH: 55, cutGap: 3 },
+  '6-up-portrait': { cols: 3, rows: 2, badgeW: 63, badgeH: 95, cutGap: 3 },
+  '9-up-portrait': { cols: 3, rows: 3, badgeW: 55, badgeH: 80, cutGap: 3 },
+};
+
+const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
+  '8-up': false,
+  '10-up': false,
+  '6-up-portrait': true,
+  '9-up-portrait': true,
 };
 
 const ZONES = {
@@ -159,10 +168,89 @@ function drawBadge(
   font: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
   fontOblique: ReturnType<PDFDocument['embedFont']> extends Promise<infer T> ? T : never,
   fgbmfiLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
-  eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never
+  eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
+  isPortrait: boolean = false
 ) {
   const badgeBottom = by;
   const badgeLeft = bx;
+
+  if (isPortrait) {
+    // Punch zone at top — no drawing needed, just offset all content downward
+    const headerCenterY = badgeBottom + bh - headerH / 2;
+
+    // Header background
+    page.drawRectangle({ x: badgeLeft, y: badgeBottom + bh - headerH, width: bw, height: headerH, color: HEADER_BG });
+    page.drawRectangle({ x: badgeLeft, y: badgeBottom + bh - headerH, width: bw, height: mmToPt(0.5), color: ACCENT_GOLD });
+
+    if (eventLogo) {
+      try {
+        const logoH = headerH * 0.55;
+        const logoW = logoH * (eventLogo.width / eventLogo.height);
+        page.drawImage(eventLogo as any, { x: badgeLeft + bw - Math.min(logoW, bw * 0.3) - mmToPt(1.5), y: headerCenterY - logoH / 2, width: Math.min(logoW, bw * 0.3), height: logoH });
+      } catch {}
+    }
+    if (fgbmfiLogo) {
+      try {
+        const logoH = headerH * 0.50;
+        const logoW = logoH * (fgbmfiLogo.width / fgbmfiLogo.height);
+        page.drawImage(fgbmfiLogo as any, { x: badgeLeft + mmToPt(1.5), y: headerCenterY - logoH / 2, width: Math.min(logoW, bw * 0.3), height: logoH });
+      } catch {}
+    }
+
+    const evLogoW = eventLogo ? bw * 0.25 : 0;
+    const fgLogoW = fgbmfiLogo ? bw * 0.22 : 0;
+    const textX = badgeLeft + fgLogoW + mmToPt(2);
+    const textMaxW = bw - fgLogoW - evLogoW - mmToPt(4);
+    const eventName = event.name || '2026 LAGOS NATIONAL CONVENTION';
+    const hFontSize = bh > mmToPt(90) ? 5.0 : 3.8;
+    page.drawText(eventName.toUpperCase(), { x: textX, y: headerCenterY - hFontSize * 0.35, size: hFontSize, font: fontBold as any, color: HEADER_TEXT, maxWidth: textMaxW > 0 ? textMaxW : bw * 0.4 });
+
+    // Body
+    const bodyBottom = badgeBottom + bandH;
+    const bodyTop = badgeBottom + bh - headerH;
+    page.drawRectangle({ x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG });
+
+    const qrSize = Math.min(bw * 0.48, (bodyTop - bodyBottom) * 0.38);
+    const qrX = badgeLeft + (bw - qrSize) / 2;
+    const qrY = bodyTop - mmToPt(6) - qrSize;
+    drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
+
+    const isSmall = bw < mmToPt(60);
+    const nameSize = isSmall ? 5.0 : 6.0;
+    const fieldSize = isSmall ? 3.8 : 4.5;
+
+    const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+    const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
+    page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(4), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
+
+    let textY = qrY - mmToPt(4) - nameSize * 1.8;
+    const fields: [string, string][] = [
+      ['District', delegate.district || 'N/A'],
+      ['Chapter', delegate.chapter || 'N/A'],
+      ['Type', delegate.delegate_type || 'Member'],
+      ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
+    ];
+
+    for (const [label, value] of fields) {
+      if (textY < bodyBottom + mmToPt(3)) break;
+      const labelText = label + ': ';
+      const lW = fontBold.widthOfTextAtSize(labelText, fieldSize - 0.5);
+      const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
+      const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
+      page.drawText(labelText, { x: sx, y: textY, size: fieldSize - 0.5, font: fontBold as any, color: TEXT_SECONDARY });
+      page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
+      textY -= fieldSize * 1.4;
+    }
+
+    // Category band
+    const dt = delegate.delegate_type || 'Member';
+    const bc = BAND_COLORS[dt] || DEFAULT_BAND;
+    page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
+    const bts = isSmall ? 4.0 : 5.0;
+    const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
+    page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
+    return;
+  }
 
   page.drawRectangle({
     x: badgeLeft,
@@ -411,7 +499,8 @@ export async function generateBadgePDF(
         font as any,
         fontOblique as any,
         fgbmfiLogo as any,
-        eventLogo as any
+        eventLogo as any,
+        IS_PORTRAIT[layout]
       );
       drawCropMarks(page, bx, by, badgeW, badgeH);
     }

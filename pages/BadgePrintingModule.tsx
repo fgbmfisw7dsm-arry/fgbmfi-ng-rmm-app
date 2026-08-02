@@ -10,8 +10,10 @@ import BatchStatusBadge from '../components/BatchStatusBadge';
 type Tab = 'generate' | 'batches' | 'reprint' | 'history';
 
 const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
-  { value: '8-up', label: '8-up (90×60mm)' },
-  { value: '10-up', label: '10-up (80×55mm)' },
+  { value: '8-up', label: '8-up Landscape (90×60mm)' },
+  { value: '10-up', label: '10-up Landscape (80×55mm)' },
+  { value: '6-up-portrait', label: '6-up Portrait (63×95mm)' },
+  { value: '9-up-portrait', label: '9-up Portrait (55×80mm)' },
 ];
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [

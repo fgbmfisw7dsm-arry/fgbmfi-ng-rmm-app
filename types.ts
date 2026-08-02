@@ -269,7 +269,7 @@ export interface MinistryExportData {
   attendance: { session_id: string; session_title: string; attendance: number }[];
 }
 
-export type BadgeLayout = '8-up' | '10-up';
+export type BadgeLayout = '8-up' | '10-up' | '6-up-portrait' | '9-up-portrait';
 export type BadgeBatchSize = 250 | 500 | 1000;
 export type BatchStatus = 'pending' | 'generating' | 'ready' | 'printing' | 'printed' | 'failed';
 export type BadgeSortField = 'delegate_number' | 'surname' | 'district' | 'chapter' | 'category' | 'registration_date';

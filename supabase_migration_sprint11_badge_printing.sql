@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS badge_batches (
   batch_number INT NOT NULL,
   badge_count INT NOT NULL DEFAULT 0,
   page_count INT NOT NULL DEFAULT 0,
-  layout TEXT NOT NULL DEFAULT '8-up' CHECK (layout IN ('8-up', '10-up')),
+  layout TEXT NOT NULL DEFAULT '8-up' CHECK (layout IN ('8-up', '10-up', '6-up-portrait', '9-up-portrait')),
   sort_field TEXT NOT NULL DEFAULT 'surname',
   filters JSONB DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'generating', 'ready', 'printing', 'printed', 'failed')),
