@@ -506,7 +506,7 @@ export const db = {
             const { data: arrival } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).is('session_id', null).maybeSingle();
             if (!arrival) {
                 const { error: arrivalErr } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: null, checked_in_by: registrar.id });
-                if (arrivalErr) throw arrivalErr;
+                if (arrivalErr && !arrivalErr.message?.includes('duplicate') && arrivalErr.code !== '23505') throw arrivalErr;
             }
         }
 
@@ -516,7 +516,7 @@ export const db = {
             return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
-        if (error) throw error;
+        if (error && error.code !== '23505' && !error.message?.includes('duplicate')) throw error;
         const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name').eq('delegate_id', delegateId).maybeSingle();
         return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         });
