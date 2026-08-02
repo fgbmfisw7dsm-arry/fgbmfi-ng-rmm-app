@@ -63,6 +63,7 @@ const BadgePrintingModule = () => {
   const [layout, setLayout] = useState<BadgeLayout>('8-up');
   const [batchSize, setBatchSize] = useState<BadgeBatchSize>(500);
   const [previewCount, setPreviewCount] = useState(0);
+  const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
@@ -157,6 +158,12 @@ const BadgePrintingModule = () => {
     } else {
       const count = await db.getFilteredDelegateCount(activeEventId, activeFilters);
       setPreviewCount(count);
+      if (count > 0) {
+        const sample = await db.getFilteredDelegates(activeEventId, activeFilters, sortBy, 10, 0);
+        setPreviewDelegates(sample);
+      } else {
+        setPreviewDelegates([]);
+      }
     }
   }, [activeEventId, filters, selectedDelegates]);
 
@@ -871,6 +878,31 @@ const BadgePrintingModule = () => {
             badgeCount={previewCount}
             pageCount={getBadgePageCount(previewCount, layout)}
           />
+
+          {previewDelegates.length > 0 && (
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h2 className="text-[10px] font-black text-gray-400 uppercase mb-3 tracking-[0.2em]">
+                Matching Delegates (first {previewDelegates.length} of {previewCount})
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {previewDelegates.map((d) => (
+                  <div key={d.delegate_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-[10px] font-black text-blue-700">
+                      {d.first_name?.[0]}{d.last_name?.[0]}
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-gray-800">
+                        {d.title} {d.first_name} {d.last_name}
+                      </p>
+                      <p className="text-[9px] text-gray-400">
+                        {d.district}{d.chapter ? ` · ${d.chapter}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {generating && progress && (
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
