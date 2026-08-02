@@ -1185,13 +1185,13 @@ export const db = {
         offset: number = 0
     ): Promise<Delegate[]> => {
         if (!eventId) return [];
-        let q = supabase.from('delegates').select('*', { count: 'exact' }).eq('event_id', eventId);
+        let q = supabase.from('delegates').select('*').eq('event_id', eventId);
 
         if (filters.selectedIds?.length) {
             q = q.in('delegate_id', filters.selectedIds);
         } else {
-            if (filters.district) q = q.ilike('district', `%${filters.district}%`);
-            if (filters.chapter) q = q.ilike('chapter', `%${filters.chapter}%`);
+            if (filters.district) q = q.ilike('district', normalize(filters.district));
+            if (filters.chapter) q = q.ilike('chapter', normalize(filters.chapter));
             if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
             if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
             if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
@@ -1224,34 +1224,39 @@ export const db = {
 
     getFilteredDelegateCount: async (eventId: string, filters: BadgeFilter): Promise<number> => {
         if (!eventId) return 0;
-        let q = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
+        if (filters.selectedIds?.length) return filters.selectedIds.length;
 
-        if (filters.selectedIds?.length) {
-            q = q.in('delegate_id', filters.selectedIds);
-        } else {
-            if (filters.district) q = q.ilike('district', `%${filters.district}%`);
-            if (filters.chapter) q = q.ilike('chapter', `%${filters.chapter}%`);
-            if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
-            if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
-            if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
-            if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
-            if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
-
-            if (filters.registrationStatus === 'checked_in') {
-                const { data: checkedInIds } = await supabase.from('checkins')
-                    .select('delegate_id').eq('event_id', eventId);
-                const ids = (checkedInIds || []).map(c => c.delegate_id);
-                if (ids.length) q = q.in('delegate_id', ids);
-                else return 0;
-            } else if (filters.registrationStatus === 'not_checked_in') {
-                const { data: checkedInIds } = await supabase.from('checkins')
-                    .select('delegate_id').eq('event_id', eventId);
-                const ids = (checkedInIds || []).map(c => c.delegate_id);
-                if (ids.length) q = q.not('delegate_id', 'in', `(${ids.join(',')})`);
-            }
+        if (!filters.district && !filters.chapter && !filters.delegateType &&
+            !filters.surnameFrom && !filters.surnameTo &&
+            !filters.delegateNumberFrom && !filters.delegateNumberTo &&
+            filters.registrationStatus !== 'checked_in' && filters.registrationStatus !== 'not_checked_in') {
+            return 0;
         }
 
-        const { count, error } = await q;
+        let q = supabase.from('delegates').select('delegate_id', { count: 'exact' }).eq('event_id', eventId);
+
+        if (filters.district) q = q.ilike('district', normalize(filters.district));
+        if (filters.chapter) q = q.ilike('chapter', normalize(filters.chapter));
+        if (filters.delegateType) q = q.eq('delegate_type', filters.delegateType);
+        if (filters.surnameFrom) q = q.gte('last_name', filters.surnameFrom);
+        if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
+        if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
+        if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
+
+        if (filters.registrationStatus === 'checked_in') {
+            const { data: checkedInIds } = await supabase.from('checkins')
+                .select('delegate_id').eq('event_id', eventId);
+            const ids = (checkedInIds || []).map(c => c.delegate_id);
+            if (ids.length) q = q.in('delegate_id', ids);
+            else return 0;
+        } else if (filters.registrationStatus === 'not_checked_in') {
+            const { data: checkedInIds } = await supabase.from('checkins')
+                .select('delegate_id').eq('event_id', eventId);
+            const ids = (checkedInIds || []).map(c => c.delegate_id);
+            if (ids.length) q = q.not('delegate_id', 'in', `(${ids.join(',')})`);
+        }
+
+        const { count, error } = await q.limit(0);
         if (error) return 0;
         return count || 0;
     },
