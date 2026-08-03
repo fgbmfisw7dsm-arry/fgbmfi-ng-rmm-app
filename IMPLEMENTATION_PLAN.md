@@ -1,8 +1,68 @@
 # FGBMFI Nigeria EMS — Implementation Plan
 
 **Project:** FGBMFI Nigeria Events Management System
-**Version:** 1.7 (Phase 1) → 2.0 (Target)
-**Last Updated:** August 2, 2026 (Badge Printing Module + Check-in Reprint Complete)
+**Version:** 1.3 (Phase 1) → 2.0 (Target)
+**Last Updated:** August 3, 2026 (Badge UI Overhaul + Import CSV Upload + Dashboard Auto-Load + PDF Naming Convention)
+
+---
+
+## Session Summary (August 3, 2026) — Badge UI Overhaul, Import CSV, Dashboard Fix, PDF Naming
+
+### What Was Delivered
+
+| # | Item | Type | Commit(s) |
+|---|------|------|-----------|
+| 1 | Dashboard auto-load on login (hash navigation to /#/admin) | Fix | `9407d70` |
+| 2 | Badge fonts increased 50-133% per professional print spec (name 12pt/14px, fields 8pt/9px, ID 6pt/8px) | Badge | `9407d70` → `0d8a36c` |
+| 3 | QR code enlarged from 19mm to 30mm across all 5 batch layouts + CheckInPage canvas/DOM badges | Badge | `9407d70` |
+| 4 | ZONES rebalanced: header 17%, body 70%, band 13% (footer reduced from 17% for more text area) | Badge | `0d8a36c` |
+| 5 | All delegate details labeled (District:, Chapter:, Office:, Rank:, ID:) across canvas, DOM, and 5 batch layouts | Badge | `0d8a36c` |
+| 6 | Canvas badge respects showRank/showOffice from event_config | Badge | `0d8a36c` |
+| 7 | Portrait no-banner path fully synced with banner path (previously used old small fonts and QR) | Badge | `0d8a36c` |
+| 8 | batchPdfGenerator: showRank/showOffice params threaded from event_config through generateBadgePDF → drawBadge | Badge | `0d8a36c` |
+| 9 | Portrait text area: Type removed (redundant with footer); only District, Chapter, ID rendered | Badge | `2992431` |
+| 10 | isSmall height-aware: bh < 92mm triggers small fonts for 8-up-portrait 90mm badges | Badge | `2992431` |
+| 11 | Landscape name pushed down 5mm from body top; long names auto-wrap to 2 lines with 1.05× spacing | Badge | `2992431` |
+| 12 | ExtraSmall tier for 9-up-portrait 55×80mm (bh < 82mm): 8pt/5.5pt/6pt with 1.3× spacing | Badge | `c5eb8f4` |
+| 13 | Landscape Type removed from text area (redundant with footer) | Badge | `c5eb8f4` |
+| 14 | CSV file upload: FileReader API, drag-styled file input, filename display, clear button | Import | `9407d70` |
+| 15 | CSV header parsing + fuzzy column matching: 35+ alias variants → 10 known fields | Import | `9407d70` |
+| 16 | Column mapping UI: toggle buttons per detected column, auto-check matches, event_config-aware unchecking | Import | `9407d70` |
+| 17 | Dynamic field order instruction grid + sample row adapts to event_config visible fields | Import | `9407d70` |
+| 18 | mappedCsvData useMemo transforms CSV data (reorder/select columns) before importDelegates() | Import | `9407d70` |
+| 19 | Descriptive badge PDF filenames: FGBMFI_Batch-{N}_{District}_{YYYY-MM-DD_HHmmss}.pdf | Badge | `a35edd4` → `9fc0e6b` |
+| 20 | uploadBadgePDF accepts optional customFileName parameter | Service | `a35edd4` |
+| 21 | handleDownload uses showSaveFilePicker API (Chrome/Edge) for guaranteed filename, Blob URL fallback | Badge | `cdd149b` |
+| 22 | Print PDF swaps document.title before print(), restores via afterprint + 15s timeout | Badge | `9fc0e6b` |
+| 23 | buildBatchFileName() helper shared by Download + Print buttons | Badge | `9fc0e6b` |
+| 24 | Open in New Tab uses Supabase storage URL (filename in path) instead of Blob URL | Badge | `b005eac` |
+| 25 | PDF document metadata set via pdf-lib: title "FGBMFI Delegate Badges", subject, creator | Badge | `b005eac` |
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Three-tier portrait font sizing (Full/Small/ExtraSmall) | 63×95mm fits 12pt comfortably; 63×90mm needs 9pt; 55×80mm needs 8pt. Height-based thresholds avoid one-size-fits-all that would leave text unreadable or cut off |
+| Type removed from badge text area | Delegate type already shown in color-coded footer band. Removing redundant Type frees one line — makes ID render on shorter badges |
+| showSaveFilePicker for downloads | Blob URL a.download attribute is unreliable across browsers — the page <title> from index.html overrides it. File System Access API directly opens OS Save As dialog with exact filename |
+| document.title swap for Print PDF | Browser print-to-PDF derives filename from page title. Temporary swap during print() ensures correct name; afterprint + 15s timeout for reliable restoration |
+| Supabase URL for Open in New Tab | Blob URLs have no filename — browser uses page title. Supabase storage URL contains the filename in its path, so browser derives correct name |
+| showRank/showOffice threaded through drawBadge | Landscape path needed event_config awareness for Rank/Office fields. Adding optional params with defaults (true) maintains backward compatibility |
+| isSmall includes badge height | Previous check (bw < 60mm only) missed the 8-up-portrait 63×90mm which is tall enough for full fonts but the wide QR + label progression pushes ID below bodyBottom |
+
+### Key Files Changed
+
+| File | Changes |
+|------|---------|
+| `pages/LoginPage.tsx` | Added `window.location.hash = '#/admin'` after login |
+| `pages/CheckInPage.tsx` | Canvas: ZONES 17/70/13, QR 30mm, fonts 14/9/8px, labeled lines, event_config respect, 18px line gap. DOM: ZONES 17/70/13, fonts 14/9/8px, labeled lines, marginTop 1.5mm, lineHeight 1.4 |
+| `pages/ImportModule.tsx` | FileReader upload input, KNOWN_FIELDS fuzzy matcher (35+ aliases), column toggle UI, event_config integration, mappedCsvData useMemo, dynamic field order grid, paste-triggered header detection |
+| `pages/BadgePrintingModule.tsx` | generatedPdfUrl state, descriptive filename construction, buildBatchFileName() helper, showSaveFilePicker download, document.title swap for print, Supabase URL for Open in New Tab |
+| `services/badgePdfGenerator.ts` | ZONES 0.17/0.70/0.13, QR formula 0.55/0.55 (portrait) + mmToPt(30) cap (landscape), three-tier font sizing, Type removal from portrait + landscape fields, showRank/showOffice params, portrait no-banner sync, landscape name wrapping, field spacing 1.5/1.3, PDF metadata, isSmall height check |
+| `services/supabaseService.ts` | uploadBadgePDF customFileName parameter |
+
+| `AGENTS.md` | Updated version to 1.3, badge specs, import features, dashboard fix, PDF naming convention, Known Technical Debt resolved items |
+| `IMPLEMENTATION_PLAN.md` | Added this session summary |
 
 ---
 

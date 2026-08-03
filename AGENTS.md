@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.2 (Badge Printing + Check-in Reprint — 10 tables, 5 badge layouts, canvas-based reprint)
+- **Current Version:** 1.3 (Badge UI Overhaul + Import CSV Upload + Dashboard Fixes — badge font/QR/labels, CSV file upload with column mapping, dashboard auto-load, PDF naming convention)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -309,18 +309,38 @@ supabase.channel('dashboard_sync')
 - Includes scale=2 for clarity, orientation toggle
 - **Does not scale to 25K rows** — use summary-only PDF + full CSV export
 
-### 8. Bulk Import
-- `importDelegates()` parses 9-column CSV, inserts all rows in single call
+### 8. Bulk Import (CSV Upload + Column Mapping)
+- **File upload:** `<input type="file" accept=".csv,.txt">` with `FileReader` API, shows selected filename
+- **Paste mode:** existing textarea kept as primary input; paste also triggers header detection
+- **CSV header parsing:** first line auto-detected as header row, stripped whitespace + quotes
+- **Fuzzy column matching:** 35+ alias variants mapped to 10 known fields (Title, First Name, Last Name, District, Chapter, Phone, Email, Rank, Office, DelegateType)
+- **Column mapping UI:** toggle buttons for each detected column; auto-checked when matched to a known field
+- **event_config awareness:** reads `activeEvent.event_config` — auto-unchecks Rank/Office/DelegateType if hidden for the event
+- **Dynamic field order:** instruction grid and sample row adapt to active event's visible field count
+- **Data transformation:** `mappedCsvData` useMemo reorders/reduces CSV columns before passing to `importDelegates()`
+- `importDelegates()` handles the sanitized data; `activeEventId` scoped
+- Clear button resets file + CSV + mapping state
 - v2 fix: batch inserts of 500 rows with progress feedback
 
 ### 9. Badge Printing (pdf-lib generation)
 - 5 layouts: `8-up` (90×60mm), `10-up` (80×55mm), `6-up-portrait` (63×95mm), `9-up-portrait` (55×80mm), `8-up-portrait` (63×90mm)
 - Auto-detect paper orientation: if grid width > 210mm, switches to landscape A4 (`badgePdfGenerator.ts`)
+- ZONES: header 17%, body 70%, band 13% (footer reduced from 17% to gain more text area)
 - Full-width banner header: `fgbmfi badge banner-2.png` (1800×250px) replaces separate logo rendering
 - Banner scaled to badge width with maroon (`#3a0007`) padding + gold accent line (`#c8960c`)
+- **QR code: 30mm** on all layouts where physically possible (previously 19-28mm)
+- Three-tier font sizing for portrait badges: Full (bh ≥ 92mm) → Name 12pt/Label 7.5pt/Value 8.5pt, Small (bw < 60mm or bh < 92mm) → 9/6.5/7.5pt, ExtraSmall (bh < 82mm) → 8/5.5/6pt/1.3× spacing
+- Landscape font sizing: Name 12/9pt, Label 7.5/6.5pt, Value 8.5/7.5pt (large/small by 85mm width threshold)
+- Long landscape names auto-wrap to two lines at space near midpoint with 1.05× tight stacking
+- **All delegate details have labels:** District: X, Chapter: X, Office: X (if enabled), Rank: X (if enabled), ID: XXXXXXXX
+- Portrait text area omits `Type` (redundant with color footer band); always renders District, Chapter, ID
+- Landscape text area also omits Type; Rank/Office shown conditionally per `event_config.show_rank`/`show_office`
+- `showRank` and `showOffice` params threaded from `event.event_config` through `generateBadgePDF` → `drawBadge`
+- `drawBadge` no-banner portrait path fully synced with banner path — no font/QR regressions
 - Backward compatible: falls back to original logo-based header when banner unavailable
-- Color-coded delegate type stamp band at bottom (17% height) — same `BAND_COLORS` mapping
-- PDF generated client-side via `pdf-lib`, uploaded to `badge-pdfs` Supabase storage bucket
+- Color-coded delegate type stamp band at bottom (13% height) — same `BAND_COLORS` mapping
+- PDF generated client-side via `pdf-lib`; uploaded to `badge-pdfs` bucket with descriptive filename (see §14)
+- PDF document metadata set: title "FGBMFI Delegate Badges", subject, creator
 - Batch tracking: `badge_batches` + `badge_print_logs` tables with status lifecycle (pending→generating→ready→printed)
 - Storage management: `/admin/storage` page for listing and deleting badge PDF files
 
@@ -328,12 +348,15 @@ supabase.channel('dashboard_sync')
 - **Canvas-based generation:** badge drawn programmatically on Canvas 2D at 3× scale (714×1020px)
 - Produces a single PNG data URL reused by all 4 export modes (Print, PDF, Image, Share)
 - 63×90mm portrait default (matching `8-up-portrait` layout)
-- Layout: 17% banner header + 66% white body (QR + text) + 17% colored footer band
+- Layout: 17% banner header + 70% white body (QR + text) + 13% colored footer band (rebalanced from 17/66/17)
+- QR code: 30mm (previously 19mm), generated via `QRCode.toCanvas(width: 400)` for sharp rendering
+- **Text sizing (Canvas):** Name 14px bold, Fields 9px bold (District/Chapter/Office/Rank), ID 8px bold
+- **Text sizing (DOM):** Name `text-[14px]`, Fields `text-[9px]`, ID `text-[8px]`
+- All delegate details are individually labeled lines: District: X, Chapter: X, Office: X (if enabled), Rank: X (if enabled), ID: XXXXXXXX
+- Canvas badge respects `showRank`/`showOffice` from `event_config` — fields hidden when disabled for the event
+- Line spacing: 18px gap between each text line, 16px gap between QR bottom and name (canvas)
+- DOM badge: `marginTop: 1.5mm`, `lineHeight: 1.4`
 - Banner fetched with 5s timeout + `encodeURI()` + graceful fallback (empty banner)
-- QR code generated via `QRCode.toCanvas()` then drawn as Image on the badge canvas
-- PDF export: direct `jsPDF.addImage(canvasDataUrl, 'PNG', 0, 0, 63, 90)` — no DOM capture
-- Print: simple `<img src={canvasDataUrl}>` with `@media print` margin reset — no HTML layout
-- Mobile: html2canvas scale reduced from 3→2 for lower memory pressure
 - **Never use `dangerouslySetInnerHTML` with SVG for QR** — html2canvas cannot render it
 - **Never use `position:absolute` children with percentage heights for capture** — DOM clone collapses
 
@@ -353,6 +376,24 @@ supabase.channel('dashboard_sync')
 - DB-level unique constraints prevent duplicate checkins and session_responses at scale
 - Partial unique indexes: separate constraints for null (`WHERE session_id IS NULL`) vs non-null session_id
 - App-level graceful handling: 23505 errors treated as success (already recorded)
+
+### 13. Dashboard Auto-Load on Login
+- After login, `window.location.hash = '#/admin'` triggers instant navigation to AdminDashboard
+- Auth flow: `supabase.auth.signInWithPassword()` → `login(user)` sets context → hash change → dashboard renders
+- `activeEventId` restored from localStorage; `fetchEvents()` validates → dashboard fetches data via `useQuery`
+- Dashboard auto-refetches when event is changed in the active event selector (query key includes `activeEventId`)
+
+### 14. Badge PDF Filename Convention
+- Storage upload filename: `FGBMFI_Batch-{N}_{District}_{YYYY-MM-DD_HHmmss}.pdf`
+- Example: `FGBMFI_Batch-3_South-West-7_2026-08-03_143025.pdf`
+- `uploadBadgePDF` accepts optional `customFileName` parameter
+- `BadgePrintingModule` constructs filename from batch number + active district filter + current timestamp
+- District names sanitized: spaces/punctuation → hyphens, no leading/trailing dashes, multi-hyphen collapse
+- "Download PDF" button uses `showSaveFilePicker` API (Chrome/Edge) for guaranteed filename, Blob URL fallback
+- "Print PDF" button swaps `document.title` before `print()`, restores via `afterprint` + 15s timeout
+- "Open in New Tab" uses Supabase storage URL (filename in path) instead of Blob URL
+- PDF document metadata set via pdf-lib: title "FGBMFI Delegate Badges", subject, creator
+- `handleDownload` + `buildBatchFileName()` helper shared across Download/Print buttons
 
 ## Code Conventions
 
@@ -452,6 +493,13 @@ npm run build   # Production build to /dist
 | PDF blank with html2pdf wrapper | Switched to direct jsPDF.addImage from pre-rendered canvas | RESOLVED | v1.2 |
 | SVG QR in html2canvas fails | Switched to canvas PNG via QRCode.toCanvas() | RESOLVED | v1.2 |
 | Badge reprint PDF/Print broken | Canvas 2D generation bypasses all DOM layout issues | RESOLVED | v1.2 |
+| Small badge fonts & QR | Fonts increased 50-133% per professional print spec; QR enlarged to 30mm on all layouts | RESOLVED | v1.3 |
+| Badge missing Type/ID management | Type removed from text area (redundant with footer); ID always last field; extraSmall tier for 55×80mm | RESOLVED | v1.3 |
+| Badge no labels on fields | All fields now prefixed: District:, Chapter:, Office:, Rank:, ID: — across canvas, DOM, and all 5 pdf-lib layouts | RESOLVED | v1.3 |
+| No CSV file upload | FileReader CSV upload with fuzzy header matching and column toggle mapping UI | RESOLVED | v1.3 |
+| Import not event_config-aware | Reads activeEvent.event_config; auto-unchecks Rank/Office/DelegateType if hidden | RESOLVED | v1.3 |
+| Dashboard doesn't auto-load on login | window.location.hash = '#/admin' after login triggers instant dashboard render | RESOLVED | v1.3 |
+| Opaque badge PDF filenames | Descriptive convention: FGBMFI_Batch-{N}_{District}_{Timestamp}.pdf; showSaveFilePicker API | RESOLVED | v1.3 |
 
 ## v2.0 Evolution
 
