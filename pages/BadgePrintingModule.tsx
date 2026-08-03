@@ -398,7 +398,14 @@ const BadgePrintingModule = () => {
             generated_by: user.id,
           });
 
-          const pdfUrl = await db.uploadBadgePDF(batch.batch_id, pdfBytes);
+          const districtSlug = (filters.district || 'All-Districts')
+            .replace(/[^a-zA-Z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
+          const badgeFileName = `FGBMFI_Batch-${batch.batch_number}_${districtSlug}_${timestamp}.pdf`;
+
+          const pdfUrl = await db.uploadBadgePDF(batch.batch_id, pdfBytes, badgeFileName);
           await db.updateBadgeBatchStatus(batch.batch_id, 'ready', pdfUrl);
 
           const printLogs = batchDelegates.map((d) => ({

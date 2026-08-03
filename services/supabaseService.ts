@@ -1300,8 +1300,8 @@ export const db = {
         return count || 0;
     },
 
-    uploadBadgePDF: async (batchId: string, pdfBytes: Uint8Array): Promise<string> => {
-        const fileName = `badge-batch-${batchId}.pdf`;
+    uploadBadgePDF: async (batchId: string, pdfBytes: Uint8Array, customFileName?: string): Promise<string> => {
+        const fileName = customFileName || `badge-batch-${batchId}.pdf`;
         const bucketName = 'badge-pdfs';
 
         try {
