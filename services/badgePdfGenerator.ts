@@ -197,7 +197,7 @@ function drawBadge(
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
 
-      const isSmall = bw < mmToPt(60);
+      const isSmall = bw < mmToPt(60) || bh < mmToPt(92);
       const nameSize = isSmall ? 9.0 : 12.0;
       const fieldLabelSize = isSmall ? 6.5 : 7.5;
       const fieldSize = isSmall ? 7.5 : 8.5;
@@ -210,7 +210,6 @@ function drawBadge(
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
-        ['Type', delegate.delegate_type || 'Member'],
         ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
       ];
 
@@ -222,7 +221,7 @@ function drawBadge(
         const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
         page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
         page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-    textY -= fieldSize * 1.6;
+    textY -= fieldSize * 1.5;
       }
 
       const dt = delegate.delegate_type || 'Member';
@@ -273,7 +272,7 @@ function drawBadge(
     const qrY = bodyTop - mmToPt(6) - qrSize;
     drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
 
-    const isSmall = bw < mmToPt(60);
+    const isSmall = bw < mmToPt(60) || bh < mmToPt(92);
     const nameSize = isSmall ? 9.0 : 12.0;
     const fieldLabelSize = isSmall ? 6.5 : 7.5;
     const fieldSize = isSmall ? 7.5 : 8.5;
@@ -286,7 +285,6 @@ function drawBadge(
     const fields: [string, string][] = [
       ['District', delegate.district || 'N/A'],
       ['Chapter', delegate.chapter || 'N/A'],
-      ['Type', delegate.delegate_type || 'Member'],
       ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
     ];
 
@@ -298,7 +296,7 @@ function drawBadge(
       const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
       page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
       page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-      textY -= fieldSize * 1.6;
+      textY -= fieldSize * 1.5;
     }
 
     // Category band
@@ -429,18 +427,23 @@ function drawBadge(
     .join(' ')
     .toUpperCase();
 
-  let textY = bodyTop - mmToPt(2);
+  let textY = bodyTop - mmToPt(5);
 
-  page.drawText(fullName, {
-    x: detailX,
-    y: textY,
-    size: nameSize,
-    font: fontBold as any,
-    color: TEXT_PRIMARY,
-    maxWidth: detailW,
-  });
-
-  textY -= nameSize * 2.2;
+  const nameWidth = fontBold.widthOfTextAtSize(fullName, nameSize);
+  if (nameWidth > detailW && fullName.includes(' ')) {
+    const midIdx = Math.floor(fullName.length / 2);
+    let splitIdx = fullName.lastIndexOf(' ', midIdx);
+    if (splitIdx < 0) splitIdx = fullName.indexOf(' ');
+    const line1 = fullName.substring(0, splitIdx);
+    const line2 = fullName.substring(splitIdx + 1);
+    page.drawText(line1, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
+    textY -= nameSize * 1.05;
+    page.drawText(line2, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
+    textY -= nameSize * 1.2;
+  } else {
+    page.drawText(fullName, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
+    textY -= nameSize * 2.2;
+  }
 
   const fields: [string, string][] = [
     ['District', delegate.district || 'N/A'],
