@@ -484,7 +484,7 @@ const BadgePrintingModule = () => {
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     const bytes = generatedPdfBytes;
     if (!bytes) return;
     const districtSlug = (generatedBatchDistrict || 'All-Districts')
@@ -495,6 +495,21 @@ const BadgePrintingModule = () => {
     const batchNum = generatedBatchNumber || '0';
     const fileName = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
 
+    try {
+      if ('showSaveFilePicker' in window) {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{ description: 'PDF Document', accept: { 'application/pdf': ['.pdf'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(bytes);
+        await writable.close();
+        return;
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
+    }
+
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -503,10 +518,8 @@ const BadgePrintingModule = () => {
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    requestAnimationFrame(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleMarkPrinted = async (batchId: string) => {
