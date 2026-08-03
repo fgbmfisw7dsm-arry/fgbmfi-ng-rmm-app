@@ -484,16 +484,20 @@ const BadgePrintingModule = () => {
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
   };
 
-  const handleDownload = async () => {
-    const bytes = generatedPdfBytes;
-    if (!bytes) return;
+  const buildBatchFileName = (): string => {
     const districtSlug = (generatedBatchDistrict || 'All-Districts')
       .replace(/[^a-zA-Z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
     const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
     const batchNum = generatedBatchNumber || '0';
-    const fileName = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+    return `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+  };
+
+  const handleDownload = async () => {
+    const bytes = generatedPdfBytes;
+    if (!bytes) return;
+    const fileName = buildBatchFileName();
 
     try {
       if ('showSaveFilePicker' in window) {
@@ -1016,8 +1020,13 @@ const BadgePrintingModule = () => {
                   </button>
                   <button
                     onClick={() => {
+                      const fileName = buildBatchFileName();
+                      const originalTitle = document.title;
+                      document.title = fileName;
                       const iframe = document.querySelector('iframe[title="Badge PDF Preview"]') as HTMLIFrameElement | null;
                       iframe?.contentWindow?.print();
+                      window.addEventListener('afterprint', () => { document.title = originalTitle; }, { once: true });
+                      setTimeout(() => { document.title = originalTitle; }, 15000);
                     }}
                     className="w-full py-4 bg-gray-700 hover:bg-gray-600 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
                   >
