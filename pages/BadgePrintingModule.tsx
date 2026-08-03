@@ -76,6 +76,7 @@ const BadgePrintingModule = () => {
   const [generatedBatchId, setGeneratedBatchId] = useState<string | null>(null);
   const [generatedBatchNumber, setGeneratedBatchNumber] = useState<number | null>(null);
   const [generatedBatchDistrict, setGeneratedBatchDistrict] = useState<string>('');
+  const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string>('');
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [batches, setBatches] = useState<BadgeBatch[]>([]);
   const [printLogs, setPrintLogs] = useState<BadgePrintLog[]>([]);
@@ -330,6 +331,7 @@ const BadgePrintingModule = () => {
     setGeneratedBatchId(null);
     setGeneratedBatchNumber(null);
     setGeneratedBatchDistrict('');
+    setGeneratedPdfUrl('');
 
     try {
       const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64] = await Promise.all([
@@ -425,6 +427,7 @@ const BadgePrintingModule = () => {
           setGeneratedBatchId(batch.batch_id);
           setGeneratedBatchNumber(batch.batch_number);
           setGeneratedBatchDistrict(filters.district || '');
+          setGeneratedPdfUrl(pdfUrl);
           const blob = new Blob([pdfBytes], { type: 'application/pdf' });
           const previewUrl = URL.createObjectURL(blob);
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -481,22 +484,30 @@ const BadgePrintingModule = () => {
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
   };
 
-  const handleDownload = (pdfBytes?: Uint8Array) => {
-    const bytes = pdfBytes || generatedPdfBytes;
+  const handleDownload = async () => {
+    if (generatedPdfUrl) {
+      window.open(generatedPdfUrl, '_blank');
+      return;
+    }
+    const bytes = generatedPdfBytes;
     if (!bytes) return;
-    const blob = new Blob([bytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
     const districtSlug = (generatedBatchDistrict || 'All-Districts')
       .replace(/[^a-zA-Z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
     const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
     const batchNum = generatedBatchNumber || '0';
-    a.download = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+    const fileName = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.setAttribute('download', fileName);
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleMarkPrinted = async (batchId: string) => {
