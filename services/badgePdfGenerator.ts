@@ -615,6 +615,9 @@ export async function generateBadgePDF(
   }
 
   onProgress?.({ current: totalPages, total: totalPages, phase: 'saving' });
+  pdfDoc.setTitle('FGBMFI Delegate Badges');
+  pdfDoc.setSubject('Event Delegate Badge Batch');
+  pdfDoc.setCreator('FGBMFI Nigeria EMS');
   const pdfBytes = await pdfDoc.save();
   return pdfBytes;
 }

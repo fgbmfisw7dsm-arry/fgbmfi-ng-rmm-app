@@ -74,6 +74,8 @@ const BadgePrintingModule = () => {
   const [progress, setProgress] = useState<BadgeGenerationProgress | null>(null);
   const [generatedPdfBytes, setGeneratedPdfBytes] = useState<Uint8Array | null>(null);
   const [generatedBatchId, setGeneratedBatchId] = useState<string | null>(null);
+  const [generatedBatchNumber, setGeneratedBatchNumber] = useState<number | null>(null);
+  const [generatedBatchDistrict, setGeneratedBatchDistrict] = useState<string>('');
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [batches, setBatches] = useState<BadgeBatch[]>([]);
   const [printLogs, setPrintLogs] = useState<BadgePrintLog[]>([]);
@@ -326,6 +328,8 @@ const BadgePrintingModule = () => {
     setProgress(null);
     setGeneratedPdfBytes(null);
     setGeneratedBatchId(null);
+    setGeneratedBatchNumber(null);
+    setGeneratedBatchDistrict('');
 
     try {
       const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64] = await Promise.all([
@@ -419,6 +423,8 @@ const BadgePrintingModule = () => {
 
           setGeneratedPdfBytes(pdfBytes);
           setGeneratedBatchId(batch.batch_id);
+          setGeneratedBatchNumber(batch.batch_number);
+          setGeneratedBatchDistrict(filters.district || '');
           const blob = new Blob([pdfBytes], { type: 'application/pdf' });
           const previewUrl = URL.createObjectURL(blob);
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -482,7 +488,13 @@ const BadgePrintingModule = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `badge-batch-${generatedBatchId || Date.now()}.pdf`;
+    const districtSlug = (generatedBatchDistrict || 'All-Districts')
+      .replace(/[^a-zA-Z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
+    const batchNum = generatedBatchNumber || '0';
+    a.download = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
   };
