@@ -484,11 +484,7 @@ const BadgePrintingModule = () => {
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
   };
 
-  const handleDownload = async () => {
-    if (generatedPdfUrl) {
-      window.open(generatedPdfUrl, '_blank');
-      return;
-    }
+  const handleDownload = () => {
     const bytes = generatedPdfBytes;
     if (!bytes) return;
     const districtSlug = (generatedBatchDistrict || 'All-Districts')
@@ -498,16 +494,19 @@ const BadgePrintingModule = () => {
     const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
     const batchNum = generatedBatchNumber || '0';
     const fileName = `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.style.display = 'none';
     a.href = url;
-    a.setAttribute('download', fileName);
+    a.download = fileName;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    requestAnimationFrame(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
   };
 
   const handleMarkPrinted = async (batchId: string) => {
@@ -993,7 +992,7 @@ const BadgePrintingModule = () => {
                   </button>
                   <button
                     onClick={() => {
-                      if (pdfPreviewUrl) window.open(pdfPreviewUrl, '_blank');
+                      window.open(generatedPdfUrl || pdfPreviewUrl, '_blank');
                     }}
                     className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
                   >
