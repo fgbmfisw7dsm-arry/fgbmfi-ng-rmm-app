@@ -339,7 +339,7 @@ END $$;
 
 -- §6. LEGACY REPAIR REPORT
 -- ============================================================
-RAISE NOTICE '=== LEGACY USER bcrypt COST AUDIT ===';
+DO $$ BEGIN RAISE NOTICE '=== LEGACY USER bcrypt COST AUDIT ==='; END $$;
 
 DO $$
 DECLARE
@@ -407,6 +407,8 @@ ORDER BY created_at DESC;
 
 -- §7. COMPLETION
 -- ============================================================
+DO $$
+BEGIN
 RAISE NOTICE '================================================';
 RAISE NOTICE 'MIGRATION SPRINT 14 COMPLETE';
 RAISE NOTICE 'create_app_user now uses bcrypt cost 10';
@@ -417,3 +419,4 @@ RAISE NOTICE 'NEXT STEP: If the repair report shows users with';
 RAISE NOTICE 'cost < 10, reset their passwords once via admin UI.';
 RAISE NOTICE 'Then create a test user and verify login works.';
 RAISE NOTICE '================================================';
+END $$;
