@@ -420,7 +420,7 @@ export const db = {
 
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
         if (!eventId) return [];
-        let q = supabase.from('delegates').select('*').or(`event_id.eq.${eventId},event_id.is.null`);
+        let q = supabase.from('delegates').select('*').eq('event_id', eventId);
         if (region) {
             q = q.ilike('district', `${normalize(region)}%`);
         } else if (district) {
@@ -468,7 +468,7 @@ export const db = {
         } catch {}
 
         let q = supabase.from('delegates').select('*', { count: 'exact' });
-        if (eventId) q = q.or(`event_id.eq.${eventId},event_id.is.null`);
+        if (eventId) q = q.eq('event_id', eventId);
         if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
         if (region) {
             q = q.ilike('district', `${normalize(region)}%`);
@@ -595,25 +595,25 @@ export const db = {
         
         // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
         if (code.length > 10 && code === lookupId) {
-            const { data: match } = await supabase.from('delegates').select('delegate_id').eq('qr_hash', code).maybeSingle();
+            const { data: match } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('qr_hash', code).maybeSingle();
             if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
         
         // Pass 2: External ID lookup (use extracted delegate ID, matches subsequent scans)
         if (lookupId.length > 4) {
-            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('external_id', lookupId).maybeSingle();
+            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('external_id', lookupId).maybeSingle();
             if (extMatch && extMatch.delegate_id) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
         }
         
         // Pass 3: Delegate ID lookup
         if (lookupId.length > 4 && lookupId !== code) {
-            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('delegate_id', lookupId).maybeSingle();
+            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('delegate_id', lookupId).maybeSingle();
             if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
         }
         
         // Pass 4: 4-digit deterministic code fallback (legacy)
         if (code.length <= 10) {
-            const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
+            const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').eq('event_id', eventId).limit(5000);
             const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
             if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
         }
@@ -748,7 +748,7 @@ export const db = {
 
         const regionPrefix = region ? `${normalize(region).toUpperCase()}%` : null;
         const filter = region ? null : (district ? normalize(district).toUpperCase() : null);
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).or(`event_id.eq.${eventId},event_id.is.null`);
+        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
         if (regionPrefix) delegatesQuery = delegatesQuery.ilike('district', regionPrefix);
         else if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;
@@ -813,11 +813,7 @@ export const db = {
             while (true) {
                 let q = supabase.from(table).select('*').range(from, from + 999);
                 if (eventIdFilter) {
-                    if (table === 'delegates') {
-                        q = q.or(`event_id.eq.${eventIdFilter},event_id.is.null`);
-                    } else {
-                        q = q.eq('event_id', eventIdFilter);
-                    }
+                    q = q.eq('event_id', eventIdFilter);
                 }
                 if (table === 'checkins') q = q.order('checked_in_at', { ascending: true });
                 const { data, error } = await q;

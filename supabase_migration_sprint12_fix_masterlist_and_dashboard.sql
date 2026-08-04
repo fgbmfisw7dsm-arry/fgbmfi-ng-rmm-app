@@ -33,7 +33,7 @@ BEGIN
   )
   AND (
     p_event_id IS NULL OR
-    event_id = p_event_id OR event_id IS NULL
+    event_id = p_event_id
   );
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
@@ -53,7 +53,7 @@ BEGIN
     )
     AND (
       p_event_id IS NULL OR
-      event_id = p_event_id OR event_id IS NULL
+      event_id = p_event_id
     )
     ORDER BY first_name, last_name
     LIMIT p_page_size
@@ -96,11 +96,11 @@ BEGIN
 
   IF norm_district IS NOT NULL THEN
     SELECT COUNT(*) INTO total_delegates FROM delegates
-    WHERE (event_id = p_event_id OR event_id IS NULL)
+    WHERE (event_id = p_event_id)
       AND UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = norm_district;
   ELSE
     SELECT COUNT(*) INTO total_delegates FROM delegates
-    WHERE (event_id = p_event_id OR event_id IS NULL);
+    WHERE (event_id = p_event_id);
   END IF;
 
   SELECT COUNT(DISTINCT d.delegate_id) INTO total_checkins

@@ -476,7 +476,7 @@ BEGIN
   )
   AND (
     p_event_id IS NULL OR
-    event_id = p_event_id OR event_id IS NULL
+    event_id = p_event_id
   );
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
@@ -496,7 +496,7 @@ BEGIN
     )
     AND (
       p_event_id IS NULL OR
-      event_id = p_event_id OR event_id IS NULL
+      event_id = p_event_id
     )
     ORDER BY first_name, last_name
     LIMIT p_page_size

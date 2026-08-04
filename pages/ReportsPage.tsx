@@ -250,8 +250,9 @@ const ReportsPage = () => {
                                 if (scanned.length === 0) return null;
                                 return (
                                     <div key={type} className="mt-4">
-                                        <div className="bg-blue-900 text-white p-2 font-black uppercase text-[9px] rounded-t-lg">
-                                            {RESPONSE_TYPE_LABELS[type]} — Individual Records ({scanned.length})
+                                        <div className="bg-blue-900 text-white p-2 uppercase text-[9px] rounded-t-lg">
+                                            <span className="font-black text-[10px] block">{group.title}</span>
+                                            <span className="opacity-80">{RESPONSE_TYPE_LABELS[type]} — Individual Records ({scanned.length})</span>
                                         </div>
                                         <table className="w-full text-[9px] border-collapse border border-gray-300">
                                             <thead className="bg-gray-50 uppercase text-gray-400 font-black">
