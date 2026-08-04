@@ -135,6 +135,23 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
                 clonedDoc.querySelectorAll('.sticky').forEach(el => {
                     (el as HTMLElement).style.position = 'static';
                 });
+                clonedDoc.querySelectorAll('.bg-blue-900').forEach(el => {
+                    (el as HTMLElement).style.setProperty('background-color', '#1e3a8a', 'important');
+                    (el as HTMLElement).style.setProperty('color', '#ffffff', 'important');
+                });
+                clonedDoc.querySelectorAll('.bg-slate-800').forEach(el => {
+                    (el as HTMLElement).style.setProperty('background-color', '#1e293b', 'important');
+                    (el as HTMLElement).style.setProperty('color', '#ffffff', 'important');
+                });
+                clonedDoc.querySelectorAll('.report-section-header').forEach(el => {
+                    (el as HTMLElement).style.setProperty('background-color', '#1e3a8a', 'important');
+                    (el as HTMLElement).style.setProperty('color', '#ffffff', 'important');
+                    (el as HTMLElement).style.setProperty('display', 'block', 'important');
+                });
+                clonedDoc.querySelectorAll('.print-gold').forEach(el => {
+                    (el as HTMLElement).style.setProperty('background-color', '#fbbf24', 'important');
+                    (el as HTMLElement).style.setProperty('color', '#1e3a8a', 'important');
+                });
             }
         },
         jsPDF: { 
