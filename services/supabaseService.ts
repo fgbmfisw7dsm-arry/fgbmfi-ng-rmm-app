@@ -459,33 +459,54 @@ export const db = {
     },
 
     getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string, region?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+        let result: { data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number };
+
         try {
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
                 p_search: search || null, p_district: district || null,
                 p_event_id: eventId || null,
             });
-            if (!error && data) return data as any;
-        } catch {}
+            if (!error && data) {
+                result = data as any;
+                console.log('[getPaginatedDelegates] RPC success, eventId:', eventId, 'returned:', result.data?.length, 'delegates, total:', result.total);
+            } else {
+                throw error || new Error('RPC empty');
+            }
+        } catch (e) {
+            console.log('[getPaginatedDelegates] RPC failed, using fallback. eventId:', eventId, 'error:', (e as any)?.message);
 
-        let q = supabase.from('delegates').select('*', { count: 'exact' });
-        if (eventId) q = q.eq('event_id', eventId);
-        if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
-        if (region) {
-            q = q.ilike('district', `${normalize(region)}%`);
-        } else if (district) {
-            q = q.ilike('district', normalize(district));
+            let q = supabase.from('delegates').select('*', { count: 'exact' });
+            if (eventId) q = q.eq('event_id', eventId);
+            if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+            if (region) {
+                q = q.ilike('district', `${normalize(region)}%`);
+            } else if (district) {
+                q = q.ilike('district', normalize(district));
+            }
+            const from = (page - 1) * pageSize;
+            const { data: rows, count, error } = await q.order('first_name').range(from, from + pageSize - 1);
+            if (error) throw error;
+            result = {
+                data: (rows || []) as Delegate[],
+                total: count || 0,
+                page,
+                pageSize,
+                totalPages: Math.ceil((count || 0) / pageSize),
+            };
         }
-        const from = (page - 1) * pageSize;
-        const { data: rows, count, error } = await q.order('first_name').range(from, from + pageSize - 1);
-        if (error) throw error;
-        return {
-            data: (rows || []) as Delegate[],
-            total: count || 0,
-            page,
-            pageSize,
-            totalPages: Math.ceil((count || 0) / pageSize),
-        };
+
+        if (eventId && result.data && result.data.length > 0) {
+            const filtered = result.data.filter(d => d.event_id === eventId);
+            if (filtered.length !== result.data.length) {
+                console.warn('[getPaginatedDelegates] POST-FILTER: stripped', result.data.length - filtered.length, 'delegates from other events. eventId:', eventId);
+                result.data = filtered;
+                result.total = filtered.length;
+                result.totalPages = Math.ceil(filtered.length / pageSize);
+            }
+        }
+
+        return result;
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
@@ -744,8 +765,18 @@ export const db = {
                 p_event_id: eventId,
                 p_district: district || region || null,
             });
-            if (!error && data && typeof data.totalArrivals === 'number' && typeof data.totalSessionAttendance === 'number') return data as DashboardStats;
+            if (!error && data && typeof data.totalArrivals === 'number' && typeof data.totalSessionAttendance === 'number') {
+                console.log('[getStats] RPC success, totalDelegates:', data.totalDelegates, 'totalArrivals:', data.totalArrivals);
+                if (data.totalArrivals > data.totalDelegates) {
+                    console.warn('[getStats] RPC arrivals exceed delegates — re-counting delegates');
+                    const { count } = await supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
+                    data.totalDelegates = count || 0;
+                }
+                return data as DashboardStats;
+            }
         } catch {}
+
+        console.log('[getStats] RPC failed or missing fields, using client fallback. eventId:', eventId);
 
         const regionPrefix = region ? `${normalize(region).toUpperCase()}%` : null;
         const filter = region ? null : (district ? normalize(district).toUpperCase() : null);
@@ -799,7 +830,15 @@ export const db = {
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
 
-        return { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalArrivals: arrivalIdentities.size, totalSessionAttendance, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
+        const stats: DashboardStats = { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalArrivals: arrivalIdentities.size, totalSessionAttendance, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
+
+        if (stats.totalArrivals > stats.totalDelegates) {
+            console.warn('[getStats] fallback: arrivals exceed delegates — re-counting delegates. totalArrivals:', stats.totalArrivals, 'totalDelegates:', stats.totalDelegates);
+            const { count } = await supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
+            stats.totalDelegates = count || 0;
+        }
+
+        return stats;
     },
 
     getAllDataForExport: async (eventId: string): Promise<any> => {
