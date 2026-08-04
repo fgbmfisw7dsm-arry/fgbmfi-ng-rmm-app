@@ -459,6 +459,11 @@ export const db = {
     },
 
     getPaginatedDelegates: async (page: number = 1, pageSize: number = 50, search?: string, district?: string, region?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+        if (!eventId) {
+            console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
+            return { data: [], total: 0, page, pageSize, totalPages: 0 };
+        }
+
         let result: { data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number };
 
         try {
@@ -760,6 +765,11 @@ export const db = {
     },
 
     getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {
+        if (!eventId) {
+            console.warn('[getStats] BLOCKED: no eventId provided, returning empty stats');
+            return { totalDelegates: 0, totalCheckIns: 0, totalArrivals: 0, totalSessionAttendance: 0, totalFinancials: 0, checkInsByRank: {}, checkInsByDistrict: {}, recentActivity: [] };
+        }
+
         try {
             const { data, error } = await supabase.rpc('get_event_dashboard_stats', {
                 p_event_id: eventId,
