@@ -86,7 +86,8 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         const style = document.createElement('style');
         style.id = 'pdf-export-print-styles';
         style.textContent = `
-            .pdf-export-mode .overflow-x-auto { overflow-x: visible !important; }
+            .pdf-export-mode .overflow-x-auto,
+            .pdf-export-mode .overflow-hidden { overflow: visible !important; }
             .pdf-export-mode .min-w-max { min-width: 0 !important; width: 100% !important; }
             .pdf-export-mode .sticky { position: static !important; }
             .pdf-export-mode .print-only { display: flex !important; }
@@ -124,7 +125,7 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
             width: viewportWidth,
             windowWidth: viewportWidth,
             onclone: (clonedDoc: Document) => {
-                clonedDoc.querySelectorAll('.overflow-x-auto').forEach(el => {
+                clonedDoc.querySelectorAll('.overflow-x-auto, .overflow-hidden').forEach(el => {
                     (el as HTMLElement).style.overflow = 'visible';
                 });
                 clonedDoc.querySelectorAll('.min-w-max').forEach(el => {

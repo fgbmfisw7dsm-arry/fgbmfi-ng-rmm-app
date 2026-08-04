@@ -439,7 +439,7 @@ export const db = {
         return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '', code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
     },
 
-    getAllDelegates: async (): Promise<Delegate[]> => {
+    getAllDelegates: async (eventId?: string): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
@@ -447,6 +447,7 @@ export const db = {
             const { data } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
                 p_search: null, p_district: null,
+                p_event_id: eventId || null,
             });
             const parsed = data as any;
             if (!parsed?.data || parsed.data.length === 0) break;

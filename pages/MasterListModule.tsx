@@ -46,6 +46,7 @@ const MasterListModule = () => {
     const listRef = useRef<HTMLDivElement>(null);
 
     const loadData = useCallback(async (p?: number) => {
+        if (!activeEventId) return;
         const currentPage = p ?? page;
         setLoading(true);
         try {
