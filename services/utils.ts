@@ -70,6 +70,8 @@ export const exportToCSV = (rows: Record<string, any>[], filename: string, colum
 /**
  * Enhanced PDF Export: Uses a wider viewport (1600px) and proper scaling 
  * to ensure wide Matrix tables are not truncated during export.
+ * onclone callback flattens overflow containers and sticky elements
+ * so html2canvas captures the full table content without clipping.
  */
 export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
     if (!element) {
@@ -77,12 +79,25 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         return;
     }
 
-    // Increased width for capturing full Matrix width
     const viewportWidth = orientation === 'landscape' ? 1600 : 900;
     window.scrollTo(0, 0);
 
+    if (!document.getElementById('pdf-export-print-styles')) {
+        const style = document.createElement('style');
+        style.id = 'pdf-export-print-styles';
+        style.textContent = `
+            .pdf-export-mode .overflow-x-auto { overflow-x: visible !important; }
+            .pdf-export-mode .min-w-max { min-width: 0 !important; width: 100% !important; }
+            .pdf-export-mode .sticky { position: static !important; }
+            .pdf-export-mode .print-only { display: flex !important; }
+            .pdf-export-mode .no-print { display: none !important; }
+        `;
+        document.head.appendChild(style);
+    }
+
     const nodeToPrint = element.cloneNode(true) as HTMLElement;
     nodeToPrint.classList.add('print-mode');
+    nodeToPrint.classList.add('pdf-export-mode');
     
     const printContainer = document.createElement('div');
     printContainer.id = 'pdf-export-container';
@@ -102,12 +117,24 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         filename: filename,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
-            scale: 2, // Higher scale for clarity
+            scale: 2,
             useCORS: true, 
             logging: false,
             backgroundColor: '#ffffff',
             width: viewportWidth,
-            windowWidth: viewportWidth
+            windowWidth: viewportWidth,
+            onclone: (clonedDoc: Document) => {
+                clonedDoc.querySelectorAll('.overflow-x-auto').forEach(el => {
+                    (el as HTMLElement).style.overflow = 'visible';
+                });
+                clonedDoc.querySelectorAll('.min-w-max').forEach(el => {
+                    (el as HTMLElement).style.minWidth = '0';
+                    (el as HTMLElement).style.width = '100%';
+                });
+                clonedDoc.querySelectorAll('.sticky').forEach(el => {
+                    (el as HTMLElement).style.position = 'static';
+                });
+            }
         },
         jsPDF: { 
             unit: 'mm', 
@@ -117,13 +144,15 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         }
     };
 
-    setTimeout(() => {
-        // @ts-ignore
-        window.html2pdf().from(nodeToPrint).set(options).save().then(() => {
-            if (printContainer.parentNode) document.body.removeChild(printContainer);
-        }).catch((error: any) => {
-            console.error("PDF error:", error);
-            if (printContainer.parentNode) document.body.removeChild(printContainer);
-        });
-    }, 1500); 
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            // @ts-ignore
+            window.html2pdf().from(nodeToPrint).set(options).save().then(() => {
+                if (printContainer.parentNode) document.body.removeChild(printContainer);
+            }).catch((error: any) => {
+                console.error("PDF error:", error);
+                if (printContainer.parentNode) document.body.removeChild(printContainer);
+            });
+        }, 500);
+    });
 };

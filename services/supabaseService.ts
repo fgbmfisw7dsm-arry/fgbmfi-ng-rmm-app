@@ -462,6 +462,7 @@ export const db = {
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
                 p_search: search || null, p_district: district || null,
+                p_event_id: eventId || null,
             });
             if (!error && data) return data as any;
         } catch {}
@@ -747,7 +748,7 @@ export const db = {
 
         const regionPrefix = region ? `${normalize(region).toUpperCase()}%` : null;
         const filter = region ? null : (district ? normalize(district).toUpperCase() : null);
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
+        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).or(`event_id.eq.${eventId},event_id.is.null`);
         if (regionPrefix) delegatesQuery = delegatesQuery.ilike('district', regionPrefix);
         else if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
         const { count: totalDelegatesCount } = await delegatesQuery;

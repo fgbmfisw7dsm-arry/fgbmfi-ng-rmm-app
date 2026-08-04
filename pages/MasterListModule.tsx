@@ -63,17 +63,17 @@ const MasterListModule = () => {
         } finally {
             setLoading(false);
         }
-    }, [page, searchTerm, selectedDistrict]);
+    }, [page, searchTerm, selectedDistrict, activeEventId]);
 
     useEffect(() => {
         loadData(1);
-        const delegateSub = supabase.channel('master_list_sync')
-          .on('postgres_changes', { event: '*', table: 'delegates' }, () => loadData())
+        const delegateSub = supabase.channel(`master_list_sync_${activeEventId}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData())
           .subscribe();
         const settingsSub = supabase.channel('settings_sync_master')
-          .on('postgres_changes', { event: '*', table: 'system_settings' }, () => loadData())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => loadData())
           .subscribe();
-        return () => { delegateSub.unsubscribe(); settingsSub.unsubscribe(); };
+        return () => { supabase.removeChannel(delegateSub); settingsSub.unsubscribe(); };
     }, [loadData]);
 
     const officialDistricts = useMemo(() => {

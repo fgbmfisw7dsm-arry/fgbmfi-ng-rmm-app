@@ -1,0 +1,2 @@
+-- Sprint 12: Fix Master List event-scoping + Dashboard divergent delegate counting
+-- Run this in Supabase SQL Editor to replace both RPCs with corrected versions
