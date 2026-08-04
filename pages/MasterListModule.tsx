@@ -9,8 +9,15 @@ import { AppContext } from '../context/AppContext';
 const PAGE_SIZE = 50;
 
 const MasterListModule = () => {
-    const { activeEventId, activeEvent, user } = useContext(AppContext);
+    const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
     const isAdmin = isAdminRole((user?.role || '').toLowerCase());
+
+    useEffect(() => {
+        if (!activeEventId && Array.isArray(events)) {
+            const liveEvent = events.find(e => e.is_active !== false);
+            if (liveEvent) onEventChange(liveEvent.event_id);
+        }
+    }, [activeEventId, events, onEventChange]);
 
     if (!isAdmin) {
         return (
