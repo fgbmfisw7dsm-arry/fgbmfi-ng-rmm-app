@@ -250,7 +250,7 @@ const ReportsPage = () => {
                                 if (scanned.length === 0) return null;
                                 return (
                                     <div key={type} className="mt-4">
-                                        <div className="bg-blue-900 text-white p-2 uppercase text-[9px] rounded-t-lg">
+                                        <div className="bg-blue-900 text-white p-2 uppercase text-[9px] rounded-t-lg" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                             <span className="font-black text-[10px] block">{group.title}</span>
                                             <span className="opacity-80">{RESPONSE_TYPE_LABELS[type]} — Individual Records ({scanned.length})</span>
                                         </div>
@@ -313,7 +313,7 @@ const ReportsPage = () => {
                     if (group.length === 0) return null;
                     return (
                         <div key={distName} className="mb-8">
-                            <div className="bg-blue-900 text-white p-2 font-black uppercase text-xs rounded-t-lg flex justify-between">
+                            <div className="bg-blue-900 text-white p-2 font-black uppercase text-xs rounded-t-lg flex justify-between" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                 <span>{distName}</span>
                                 <span className="opacity-70">Total: {group.length}</span>
                             </div>
@@ -364,7 +364,7 @@ const ReportsPage = () => {
 
         return (
             <div className="mb-12">
-                <h4 className="report-section-header bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-xl">{title}</h4>
+                <h4 className="report-section-header bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-xl" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>{title}</h4>
                 <div className="overflow-x-auto w-full custom-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
                     <table className="w-full text-[10px] text-left border-collapse border border-gray-300 min-w-max">
                         <thead className="bg-slate-100 uppercase font-black">
@@ -387,7 +387,7 @@ const ReportsPage = () => {
                                     </tr>
                                 );
                             })}
-                            <tr className="bg-blue-900 text-white font-black">
+                            <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                 <td className="border p-2 uppercase sticky left-0 bg-blue-900 z-10">Entity Totals</td>
                                 {columns.map(col => <td key={col} className="border p-2 text-center">{colTotals[col] || 0}</td>)}
                                 <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900 sticky right-0 z-10">{grandTotal}</td>
@@ -501,7 +501,7 @@ const ReportsPage = () => {
                                     })}
                                 </tbody>
                                 <tfoot>
-                                    <tr className="bg-blue-900 text-white font-black">
+                                    <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).reduce((s2: number, r: any) => s2 + (Number(r.total_count) || 0), 0)), 0)}</td>
@@ -575,7 +575,7 @@ const ReportsPage = () => {
                                 if (ps.length === 0) return null;
                                 return (
                                     <div key={dist} className="mb-6">
-                                        <div className="bg-slate-800 text-white p-2 font-black uppercase text-[10px] rounded-t-lg">{dist} Detailed Pledges</div>
+                                        <div className="bg-slate-800 text-white p-2 font-black uppercase text-[10px] rounded-t-lg" style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>{dist} Detailed Pledges</div>
                                         <table className="w-full text-[10px] border">
                                             <thead className="bg-gray-50 uppercase font-black">
                                                 <tr><th className="p-2 border">Donor</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>

@@ -4,6 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole } from '../types';
 import { exportToPDF, exportToCSV } from '../services/utils';
+import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 50;
@@ -34,6 +35,7 @@ const MasterListModule = () => {
         );
     }
     const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+    const scope = getScopeFilter(user);
     const showRank = eventConfig.show_rank !== false;
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
@@ -58,7 +60,7 @@ const MasterListModule = () => {
         setLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, activeEventId),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);

@@ -470,6 +470,7 @@ export const db = {
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
                 p_search: search || null, p_district: district || null,
+                p_region: region || null,
                 p_event_id: eventId || null,
             });
             if (!error && data) {
@@ -658,6 +659,7 @@ export const db = {
     },
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
+        if (!delegate.event_id) throw new Error('registerDelegate requires event_id');
         const { data, error } = await supabase.from('delegates').insert({
             ...delegate,
             qr_hash: delegate.qr_hash || generateQrHash(),
@@ -672,7 +674,7 @@ export const db = {
         const externalIdValue = parsedData['delegate_id'] || parsedData['external_id'] || scannedCode;
 
         if (externalIdValue) {
-            const { data: existing } = await supabase.from('delegates').select('*').eq('external_id', externalIdValue).maybeSingle();
+            const { data: existing } = await supabase.from('delegates').select('*').eq('external_id', externalIdValue).eq('event_id', eventId).maybeSingle();
             if (existing) return existing;
         }
 
@@ -680,7 +682,7 @@ export const db = {
             const fname = normalize(parsedData['first_name']);
             const lname = normalize(parsedData['last_name']);
             const phone = parsedData['phone'].replace(/\s+/g, '');
-            const { data: nameMatch } = await supabase.from('delegates').select('*').ilike('first_name', fname).ilike('last_name', lname).eq('phone', phone).limit(1).maybeSingle();
+            const { data: nameMatch } = await supabase.from('delegates').select('*').eq('event_id', eventId).ilike('first_name', fname).ilike('last_name', lname).eq('phone', phone).limit(1).maybeSingle();
             if (nameMatch) return nameMatch;
         }
 
@@ -706,6 +708,7 @@ export const db = {
     },
 
     importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, skipped: number, total: number) => void): Promise<{ inserted: number; skipped: number }> => {
+        if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
         const BATCH_SIZE = 500;
         let inserted = 0;
@@ -726,7 +729,7 @@ export const db = {
                 office: p[8] || 'OTHER',
                 delegate_type: p[9] || 'Member',
                 qr_hash: generateQrHash(),
-                event_id: eventId || null,
+                event_id: eventId,
                 registration_source: 'import'
             }));
 
@@ -773,14 +776,13 @@ export const db = {
         try {
             const { data, error } = await supabase.rpc('get_event_dashboard_stats', {
                 p_event_id: eventId,
-                p_district: district || region || null,
+                p_district: district || null,
+                p_region: region || null,
             });
             if (!error && data && typeof data.totalArrivals === 'number' && typeof data.totalSessionAttendance === 'number') {
                 console.log('[getStats] RPC success, totalDelegates:', data.totalDelegates, 'totalArrivals:', data.totalArrivals);
                 if (data.totalArrivals > data.totalDelegates) {
-                    console.warn('[getStats] RPC arrivals exceed delegates — re-counting delegates');
-                    const { count } = await supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
-                    data.totalDelegates = count || 0;
+                    console.warn('[getStats] DIAGNOSTIC: arrivals exceed delegates — data-integrity gap detected. totalArrivals:', data.totalArrivals, 'totalDelegates:', data.totalDelegates, 'eventId:', eventId);
                 }
                 return data as DashboardStats;
             }
@@ -843,9 +845,7 @@ export const db = {
         const stats: DashboardStats = { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalArrivals: arrivalIdentities.size, totalSessionAttendance, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
 
         if (stats.totalArrivals > stats.totalDelegates) {
-            console.warn('[getStats] fallback: arrivals exceed delegates — re-counting delegates. totalArrivals:', stats.totalArrivals, 'totalDelegates:', stats.totalDelegates);
-            const { count } = await supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
-            stats.totalDelegates = count || 0;
+            console.warn('[getStats] DIAGNOSTIC (fallback): arrivals exceed delegates — data-integrity gap detected. totalArrivals:', stats.totalArrivals, 'totalDelegates:', stats.totalDelegates, 'eventId:', eventId);
         }
 
         return stats;
