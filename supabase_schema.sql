@@ -130,41 +130,144 @@ DROP FUNCTION IF EXISTS reactivate_app_user(TEXT);
 DROP FUNCTION IF EXISTS deactivate_all_event_users();
 
 -- 3b. Create User Profile & Auth Account (SECURITY DEFINER, single RPC)
--- Inserts into auth.users, sets email_confirmed_at (GoTrue confirmation),
--- creates app_users profile — all in one atomic transaction.
+-- Inserts into auth.users with full column coverage (aud, role, instance_id),
+-- bcrypt cost 10 (GoTrue-compatible), auto-confirms, creates auth.identities
+-- and app_users profile — all in one atomic transaction.
 -- Bypasses signUp (avoids DNS email validation, session hijacking).
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, auth, public
 AS $func$
 DECLARE
-  new_user_id UUID;
-  extra_cols TEXT := '';
-  extra_vals TEXT := '';
+    new_user_id      UUID;
+    v_instance_id    UUID;
+    ins_cols         TEXT;
+    ins_vals         TEXT;
+    v_token_set      TEXT := '';
+    confirm_ok       BOOLEAN := false;
+    identities_ok    BOOLEAN := false;
+    aud_set          BOOLEAN := false;
+    instance_id_set  BOOLEAN := false;
+    v_sanitized_role TEXT;
 BEGIN
-  new_user_id := gen_random_uuid();
+    new_user_id := gen_random_uuid();
 
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'is_sso_user' AND is_generated = 'NEVER') THEN
-    extra_cols := ', is_sso_user, is_anonymous';
-    extra_vals := ', false, false';
-  END IF;
+    v_sanitized_role := CASE
+        WHEN role IN ('national_admin','regional_admin','district_admin','admin',
+                      'national_registrar','regional_registrar','district_registrar','registrar',
+                      'finance')
+        THEN role
+        ELSE 'registrar'
+    END;
 
-  EXECUTE 'INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at, updated_at' || extra_cols || ')
-    VALUES ($1, $2, crypt($3, gen_salt(''bf'')), $4, NOW(), NOW()' || extra_vals || ')'
-    USING new_user_id, email, password, jsonb_build_object('role', role, 'provider', 'email');
+    SELECT instance_id INTO v_instance_id
+    FROM auth.users WHERE instance_id IS NOT NULL
+    ORDER BY created_at DESC NULLS LAST LIMIT 1;
+    instance_id_set := (v_instance_id IS NOT NULL);
 
-  INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
-  VALUES (new_user_id, new_user_id, jsonb_build_object('sub', new_user_id, 'email', email), 'email', email, NOW(), NOW(), NOW());
+    ins_cols := 'id, email, encrypted_password, created_at, updated_at, '
+             || 'raw_app_meta_data, aud, role, instance_id';
+    ins_vals := '$1, $2, crypt($3, gen_salt(''bf'', 10)), NOW(), NOW(), '
+             || '$4, ''authenticated'', ''authenticated'', $5';
 
-  UPDATE auth.users SET email_confirmed_at = NOW(), confirmation_token = '', confirmation_sent_at = NOW(), recovery_token = '', email_change_token = '', email_change = '', updated_at = NOW()
-  WHERE id = new_user_id;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'auth' AND table_name = 'users'
+                 AND column_name = 'is_sso_user' AND is_generated = 'NEVER') THEN
+        ins_cols := ins_cols || ', is_sso_user, is_anonymous';
+        ins_vals := ins_vals || ', false, false';
+    END IF;
 
-  INSERT INTO public.app_users (id, email, role, district, region, is_active)
-  VALUES (new_user_id, email, role, district, region, true);
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'auth' AND table_name = 'users'
+                 AND column_name = 'raw_user_meta_data' AND is_generated = 'NEVER') THEN
+        ins_cols := ins_cols || ', raw_user_meta_data';
+        ins_vals := ins_vals || ', ''{}''::jsonb';
+    END IF;
 
-  RETURN json_build_object('status', 'success', 'id', new_user_id);
+    IF v_instance_id IS NULL THEN
+        ins_cols := REPLACE(ins_cols, ', instance_id', '');
+        ins_vals := REPLACE(ins_vals, ', $5', '');
+    END IF;
+
+    BEGIN
+        EXECUTE 'INSERT INTO auth.users (' || ins_cols || ') VALUES (' || ins_vals || ')'
+            USING new_user_id, email, password,
+                  jsonb_build_object('role', v_sanitized_role, 'provider', 'email'),
+                  v_instance_id;
+
+        aud_set := true;
+
+        INSERT INTO auth.identities (
+            id, user_id, identity_data, provider, provider_id,
+            last_sign_in_at, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(), new_user_id,
+            jsonb_build_object('sub', new_user_id, 'email', email),
+            'email', email, NOW(), NOW(), NOW()
+        );
+
+        identities_ok := true;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'auth' AND table_name = 'users'
+                     AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
+            EXECUTE 'UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = $1'
+                USING new_user_id;
+            confirm_ok := true;
+        END IF;
+
+        IF NOT confirm_ok THEN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = 'auth' AND table_name = 'users'
+                         AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
+                EXECUTE 'UPDATE auth.users SET confirmed_at = NOW(), updated_at = NOW() WHERE id = $1'
+                    USING new_user_id;
+                confirm_ok := true;
+            END IF;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmation_token') THEN
+            v_token_set := v_token_set || 'confirmation_token = '''', ';
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'recovery_token') THEN
+            v_token_set := v_token_set || 'recovery_token = '''', ';
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token') THEN
+            v_token_set := v_token_set || 'email_change_token = '''', ';
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change') THEN
+            v_token_set := v_token_set || 'email_change = '''', ';
+        END IF;
+        v_token_set := v_token_set || 'updated_at = NOW()';
+        EXECUTE 'UPDATE auth.users SET ' || v_token_set || ' WHERE id = $1' USING new_user_id;
+
+        INSERT INTO public.app_users (id, email, role, district, region, is_active)
+        VALUES (new_user_id, email, v_sanitized_role, district, region, true);
+    EXCEPTION WHEN OTHERS THEN
+        RETURN json_build_object(
+            'status', 'error',
+            'error', SQLERRM,
+            'detail', SQLSTATE
+        );
+    END;
+
+    RETURN json_build_object(
+        'status', 'success',
+        'id', new_user_id,
+        'aud_set', aud_set,
+        'instance_id_set', instance_id_set,
+        'confirmed', confirm_ok,
+        'identities_inserted', identities_ok,
+        'role_sanitized', v_sanitized_role
+    );
+
 EXCEPTION WHEN OTHERS THEN
-  RETURN json_build_object('error', SQLERRM);
+    RETURN json_build_object(
+        'status', 'error',
+        'error', SQLERRM,
+        'detail', SQLSTATE
+    );
 END;
 $func$;
 
@@ -192,17 +295,42 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $func$;
 
--- 3d. Reset Password (Sprint 8 — uses encrypted_password, explicit cast)
+-- 3d. Reset Password (Sprint 14 — bcrypt cost 10, never un-confirms)
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, auth, public
 AS $func$
+DECLARE
+    v_uid   UUID;
+    v_found BOOLEAN;
 BEGIN
-  UPDATE auth.users SET encrypted_password = crypt(new_password, gen_salt('bf'))
-  WHERE auth.users.id = user_id::uuid;
-  RETURN json_build_object('status', 'success', 'message', 'Password updated');
+    v_uid := user_id::uuid;
+    UPDATE auth.users
+    SET encrypted_password = crypt(new_password, gen_salt('bf', 10)),
+        updated_at = NOW()
+    WHERE id = v_uid;
+    GET DIAGNOSTICS v_found = ROW_COUNT;
+    IF NOT v_found THEN
+        RETURN json_build_object('status', 'error', 'error', 'User not found');
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'auth' AND table_name = 'users'
+                 AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
+        EXECUTE 'UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, NOW()) WHERE id = $1 AND email_confirmed_at IS NULL'
+            USING v_uid;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'auth' AND table_name = 'users'
+                 AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
+        EXECUTE 'UPDATE auth.users SET confirmed_at = COALESCE(confirmed_at, email_confirmed_at, NOW()) WHERE id = $1 AND confirmed_at IS NULL'
+            USING v_uid;
+    END IF;
+
+    RETURN json_build_object('status', 'success', 'message', 'Password updated');
 EXCEPTION WHEN OTHERS THEN
-  RETURN json_build_object('error', SQLERRM);
+    RETURN json_build_object('status', 'error', 'error', SQLERRM);
 END;
 $func$;
 

@@ -1,3 +1,24 @@
+# Auth Issue — RESOLVED (2026-08-04)
+
+## Resolution Summary
+
+**Root cause:** PostgreSQL `gen_salt('bf')` defaults to bcrypt cost **6**. GoTrue (Supabase Auth) generates and validates hashes at bcrypt cost **10**. During sign-in, GoTrue rejects stored hashes below the minimum cost — surfacing as the cryptic `Error: {}` / "account may be incomplete" toast.
+
+**Fix:** `supabase_migration_sprint14_fix_new_user_login.sql` rewrites `create_app_user` and `reset_user_password` to use `gen_salt('bf', 10)`. Also enhances `v_auth_integrity_check` with a `bcrypt_cost` column so future audits catch under-cost hashes.
+
+**Run this in the Supabase SQL Editor:**
+```
+supabase_migration_sprint14_fix_new_user_login.sql
+```
+
+**After running the migration:**
+1. Self-test should PASS (confirms cost 10 + password round-trip).
+2. The repair report lists users with `bcrypt_cost < 10` — for each, reset their password once via Admin → Users → Reset Password (now uses cost 10).
+3. Create a new user through the UI and verify they can log in.
+4. `supabase_schema.sql` has been synced — fresh projects won't reintroduce the bug.
+
+## Historical Investigation (Archived)
+
 # Auth Issue - Session Handoff (2026-08-01)
 
 ## Current Status
