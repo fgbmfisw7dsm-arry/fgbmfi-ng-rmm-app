@@ -16,8 +16,8 @@
 -- cannot log in. Same for passwords reset via reset_user_password.
 --
 -- THIS MIGRATION:
---   1. Rewrites create_app_user to use gen_salt('bf', 10)
---   2. Rewrites reset_user_password to use gen_salt('bf', 10)
+--   1. Rewrites create_app_user with bcrypt cost 10 (manual salt: pgcrypto two-arg gen_salt variant not available on all Supabase instances)
+--   2. Rewrites reset_user_password with bcrypt cost 10
 --   3. Enhances v_auth_integrity_check with bcrypt_cost column
 --   4. Runs a REAL self-test that asserts stored bcrypt cost = 10
 --      (the old test only checked columns, never hash cost)
@@ -74,7 +74,7 @@ BEGIN
 
     ins_cols := 'id, email, encrypted_password, created_at, updated_at, '
              || 'raw_app_meta_data, aud, role, instance_id';
-    ins_vals := '$1, $2, crypt($3, gen_salt(''bf'', 10)), NOW(), NOW(), '
+    ins_vals := '$1, $2, crypt($3, ''$2a$10$'' || substring(replace(encode(gen_random_bytes(16), ''base64''), ''+'', ''.''), 1, 22)), NOW(), NOW(), '
              || '$4, ''authenticated'', ''authenticated'', $5';
 
     IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -190,7 +190,7 @@ DECLARE
 BEGIN
     v_uid := user_id::uuid;
     UPDATE auth.users
-    SET encrypted_password = crypt(new_password, gen_salt('bf', 10)),
+    SET encrypted_password = crypt(new_password, '$2a$10$' || substring(replace(encode(gen_random_bytes(16), 'base64'), '+', '.'), 1, 22)),
         updated_at = NOW()
     WHERE id = v_uid;
     GET DIAGNOSTICS v_found = ROW_COUNT;
