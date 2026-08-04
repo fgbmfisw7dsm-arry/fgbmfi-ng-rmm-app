@@ -168,7 +168,7 @@ BEGIN
 
     ins_cols := 'id, email, encrypted_password, created_at, updated_at, '
              || 'raw_app_meta_data, aud, role, instance_id';
-    ins_vals := '$1, $2, crypt($3, ''$2a$10$'' || substring(replace(encode(gen_random_bytes(16), ''base64''), ''+'', ''.''), 1, 22)), NOW(), NOW(), '
+    ins_vals := '$1, $2, crypt($3, ''$2a$10$'' || substring(translate(encode(decode(md5(random()::text), ''hex''), ''base64''), ''+/'', ''./''), 1, 22)), NOW(), NOW(), '
              || '$4, ''authenticated'', ''authenticated'', $5';
 
     IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -307,7 +307,7 @@ DECLARE
 BEGIN
     v_uid := user_id::uuid;
     UPDATE auth.users
-    SET encrypted_password = crypt(new_password, '$2a$10$' || substring(replace(encode(gen_random_bytes(16), 'base64'), '+', '.'), 1, 22)),
+    SET encrypted_password = crypt(new_password, '$2a$10$' || substring(translate(encode(decode(md5(random()::text), 'hex'), 'base64'), '+/', './'), 1, 22)),
         updated_at = NOW()
     WHERE id = v_uid;
     GET DIAGNOSTICS v_found = ROW_COUNT;
