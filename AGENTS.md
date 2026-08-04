@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.3 (Badge UI Overhaul + Import CSV Upload + Dashboard Fixes — badge font/QR/labels, CSV file upload with column mapping, dashboard auto-load, PDF naming convention)
+- **Current Version:** 1.4 (Event Data Isolation + Dashboard Stats Reconciliation + Diagnostic Logging)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -307,6 +307,9 @@ supabase.channel('dashboard_sync')
 ### 7. PDF Export
 - `exportToPDF()` in `utils.ts`: clones element → wide viewport (1600px) → html2canvas → html2pdf
 - Includes scale=2 for clarity, orientation toggle
+- CSS injection via `pdf-export-mode` class: removes `overflow`, `min-w-max`, `sticky` from capture
+- `onclone` callback flattens all `.overflow-x-auto`, `.overflow-hidden`, `.min-w-max`, `.sticky` elements in the cloned document
+- `requestAnimationFrame` → `setTimeout(500ms)` ensures DOM layout before capture (replaces fixed 1500ms delay)
 - **Does not scale to 25K rows** — use summary-only PDF + full CSV export
 
 ### 8. Bulk Import (CSV Upload + Column Mapping)
@@ -363,12 +366,12 @@ supabase.channel('dashboard_sync')
 ### 11. QR Code Resolution (4-pass checkInByCode)
 ```typescript
 // Pass order in checkInByCode():
-1. UUID qr_hash lookup (> 10 chars, direct DB hit via UNIQUE index)
-2. external_id lookup (> 4 chars, external badge QR codes)
-3. delegate_id lookup (> 4 chars, only when lookupId !== code)
-4. 4-digit deterministic code fallback (≤ 10 chars, scans up to 5000 delegates)
+1. UUID qr_hash lookup (> 10 chars, scoped to active event via event_id)
+2. external_id lookup (> 4 chars, scoped to active event via event_id)
+3. delegate_id lookup (> 4 chars, only when lookupId !== code, scoped to active event)
+4. 4-digit deterministic code fallback (≤ 10 chars, scans up to 5000 delegates, event-scoped)
 ```
-- All 4 passes now validate `match.delegate_id` is truthy before calling `checkInDelegate`
+- All 4 passes now scoped to active event: `.eq('event_id', eventId)` added to each lookup
 - `checkInDelegate` and `recordSessionResponse` both reject immediately if `delegateId` is falsy
 - Duplicate inserts (23505) caught gracefully — returns "Already recorded" instead of throwing
 
@@ -382,6 +385,7 @@ supabase.channel('dashboard_sync')
 - Auth flow: `supabase.auth.signInWithPassword()` → `login(user)` sets context → hash change → dashboard renders
 - `activeEventId` restored from localStorage; `fetchEvents()` validates → dashboard fetches data via `useQuery`
 - Dashboard auto-refetches when event is changed in the active event selector (query key includes `activeEventId`)
+- Dashboard + MasterList both auto-select the first active event when `activeEventId` is empty (see §16)
 
 ### 14. Badge PDF Filename Convention
 - Storage upload filename: `FGBMFI_Batch-{N}_{District}_{YYYY-MM-DD_HHmmss}.pdf`
@@ -394,6 +398,36 @@ supabase.channel('dashboard_sync')
 - "Open in New Tab" uses Supabase storage URL (filename in path) instead of Blob URL
 - PDF document metadata set via pdf-lib: title "FGBMFI Delegate Badges", subject, creator
 - `handleDownload` + `buildBatchFileName()` helper shared across Download/Print buttons
+
+### 15. Event Data Isolation (v1.4 — Strict Per-Event Delegate Scoping)
+- **Every delegate is tied to exactly one event** via `delegates.event_id`. There is no concept of global/unscoped delegates.
+- All delegate-list queries use strict `eq('event_id', eventId)` — NO `OR event_id IS NULL` exceptions.
+- All `checkInByCode` passes (1-4) are scoped to the active event via `.eq('event_id', eventId)`.
+- `NewDelegatePage` explicitly sets `event_id: activeEventId` in the payload.
+- `getPaginatedDelegates`, `getStats`, `searchDelegates`, `getAllDataForExport` — all cleaned of `event_id IS NULL` leakage.
+- `getAllDelegates()` now accepts optional `eventId` parameter; passes `p_event_id` to RPC.
+
+**Defense-in-depth layers for event isolation:**
+1. **RPC-level filter:** `get_paginated_delegates(p_event_id)` and `get_event_dashboard_stats(p_event_id)` filter server-side.
+2. **Hard gate:** `getPaginatedDelegates` and `getStats` return empty immediately if `!eventId` (prevents undefined/null/empty-string from hitting the database).
+3. **Client-side post-filter:** After receiving data from RPC or fallback, `getPaginatedDelegates` strips any delegate whose `event_id !== eventId`. Logs a `[POST-FILTER]` warning if this fires (indicates upstream filtering gap).
+4. **Auto-select:** Dashboard and Master List both auto-select the first active event when `activeEventId` is empty — prevents empty-event loads at page entry.
+
+**Dashboard reconciliation:** Both the RPC path and client-side fallback in `getStats` validate `totalArrivals ≤ totalDelegates`. If arrivals exceed delegates, the delegate count is re-queried directly.
+
+**RPCs updated (deploy `supabase_migration_sprint12_fix_masterlist_and_dashboard.sql`):**
+| RPC | Change |
+|-----|--------|
+| `get_paginated_delegates` | Added `p_event_id UUID` parameter; `WHERE event_id = p_event_id` filter |
+| `get_event_dashboard_stats` | `totalDelegates` now event-scoped; added `totalArrivals` and `totalSessionAttendance` fields; `recentActivity` deduplicated via `DISTINCT ON (delegate_id)` |
+
+### 16. Diagnostic Logging
+Browser console diagnostic logs use the `[functionName]` prefix convention:
+- `[getPaginatedDelegates] BLOCKED` — hard gate fired (no eventId provided to service)
+- `[getPaginatedDelegates] RPC success/failed` — which path executed and result count
+- `[getPaginatedDelegates] POST-FILTER: stripped N delegates` — cross-event data caught and removed
+- `[getStats] RPC success/failed` — which path executed for dashboard stats
+- `[getStats] arrivals exceed delegates — re-counting` — dashboard self-correction fired
 
 ## Code Conventions
 
@@ -450,12 +484,15 @@ npm run build   # Production build to /dist
 ## Security Constraints
 
 ### MUST
-- Filter all Supabase queries by `event_id` where applicable
+- Filter all Supabase queries by `event_id` where applicable — use strict `.eq('event_id', eventId)`, NEVER `OR event_id IS NULL`
 - Call `ensureEventActive()` before any database write
 - Use `handleSupabaseError()` to translate Supabase errors consistently
 - Validate role (`user.role`) before admin operations (event CRUD, user management)
 - Scope registrar queries to `user.district`
 - Normalize district names before comparison (`norm()`)
+- Guard `getPaginatedDelegates()` and `getStats()` callers: `activeEventId` must be truthy before calling these functions
+- Each delegate belongs to exactly one event; `event_id` must be set on every `delegates.insert()` call
+- Do NOT add `OR event_id IS NULL` to any delegate query — it breaks event isolation
 
 ### MUST NOT
 - Store `VITE_SUPABASE_ANON_KEY` in code (use env vars)
@@ -463,6 +500,8 @@ npm run build   # Production build to /dist
 - Allow SQL injection (use Supabase SDK parameterized queries, never raw SQL)
 - Expose `app_users` password hashes in responses
 - Rely on 4-digit QR codes as sole check-in method above 10K delegates
+- Create delegates without `event_id` — every delegate INSERT must include `event_id`
+- Add `event_id.is.null` or `OR event_id IS NULL` to any Supabase query
 
 ### Known Vulnerabilities
 1. **4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots
@@ -470,8 +509,7 @@ npm run build   # Production build to /dist
 3. **`getAllDelegates()` + `getAllDataForExport()`** — fetch entire table into memory, will fail at 25K
 4. **Context re-render storms** — all context consumers re-render on any state change
 5. **No rate limiting** — 50 concurrent officers could exhaust Supabase connection pool
-6. **No pagination** — list views (`MasterListModule`, search results) render all rows in DOM
-7. **`getStats()` fetches checkins paginated** — linear scan of all checkins per dashboard load
+6. **Event data isolation is client-enforced** — RLS policies on `delegates` do not enforce `event_id` scoping; isolation relies on application-level queries, hard gates, post-filters, and scoped RPCs. A bypass of the service layer could leak cross-event data.
 
 ## Known Technical Debt
 
@@ -500,6 +538,10 @@ npm run build   # Production build to /dist
 | Import not event_config-aware | Reads activeEvent.event_config; auto-unchecks Rank/Office/DelegateType if hidden | RESOLVED | v1.3 |
 | Dashboard doesn't auto-load on login | window.location.hash = '#/admin' after login triggers instant dashboard render | RESOLVED | v1.3 |
 | Opaque badge PDF filenames | Descriptive convention: FGBMFI_Batch-{N}_{District}_{Timestamp}.pdf; showSaveFilePicker API | RESOLVED | v1.3 |
+| Cross-event delegate leakage | Removed all `OR event_id IS NULL` from TS queries; 4 RPCs updated (p_event_id); 3-layer defense (hard gate → RPC filter → post-filter); checkInByCode event-scoped; NewDelegatePage event_id set | RESOLVED | v1.4 |
+| Dashboard delegates vs arrivals divergence | RPC counts event-scoped delegates; dashboard reconciliation auto-corrects; recentActivity deduplicated via DISTINCT ON | RESOLVED | v1.4 |
+| PDF report overflow clip | `onclone` callback + CSS removes `overflow-hidden` on cloned document; inline background-color fallback for html2canvas rendering | RESOLVED | v1.4 |
+| Sessions report no session demarcation | Individual records sub-headers now show session name before response type label | RESOLVED | v1.4 |
 
 ## v2.0 Evolution
 
@@ -524,7 +566,8 @@ All v1 business logic (event lifecycle, district scoping, deduplication, harmoni
 3. Verify role required for the operation
 4. Confirm event lifecycle guard (`ensureEventActive()`) is applied
 5. Confirm district scoping is applied for REGISTRAR role
-6. Check for existing patterns in similar pages/services
+6. Verify every delegate query uses strict `event_id` scoping (no `OR event_id IS NULL`)
+7. Check for existing patterns in similar pages/services
 
 ### After Each Session
 - Update file headers or this AGENTS.md if architecture decisions change
@@ -546,6 +589,8 @@ All v1 business logic (event lifecycle, district scoping, deduplication, harmoni
 - [ ] Write guard: `ensureEventActive()` called before DB write
 - [ ] District scope: REGISTRAR queries filtered by `user.district`
 - [ ] Role check: admin-only operations guarded by `user.role`
+- [ ] Event scope: all delegate queries use strict `.eq('event_id', eventId)` — no `event_id IS NULL` bypasses
+- [ ] New delegate INSERT includes `event_id: activeEventId`
 - [ ] No secrets in code or responses
 - [ ] Input validation before Supabase insert/update
 - [ ] Supabase RLS policies cover the operation (check `supabase_schema.sql`)
