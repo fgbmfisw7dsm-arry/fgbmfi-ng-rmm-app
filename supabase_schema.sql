@@ -419,10 +419,14 @@ BEGIN
       COALESCE(d.district, 'Unknown') AS district,
       COALESCE(d.rank, '-') AS rank,
       COALESCE(d.office, '-') AS office
-    FROM checkins c
+    FROM (
+      SELECT DISTINCT ON (delegate_id) *
+      FROM checkins
+      WHERE event_id = p_event_id
+      ORDER BY delegate_id, checked_in_at DESC
+    ) c
     JOIN delegates d ON c.delegate_id = d.delegate_id
-    WHERE c.event_id = p_event_id
-      AND (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district)
+    WHERE (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district)
     ORDER BY c.checked_in_at DESC
     LIMIT 10
   ) activity;
@@ -430,6 +434,8 @@ BEGIN
   RETURN json_build_object(
     'totalDelegates', total_delegates,
     'totalCheckIns', total_checkins,
+    'totalArrivals', (SELECT COUNT(DISTINCT delegate_id) FROM checkins WHERE event_id = p_event_id AND session_id IS NULL),
+    'totalSessionAttendance', (SELECT COUNT(*) FROM checkins WHERE event_id = p_event_id AND session_id IS NOT NULL),
     'totalFinancials', total_financials,
     'checkInsByRank', rank_counts,
     'checkInsByDistrict', district_counts,
@@ -443,7 +449,8 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_page INTEGER DEFAULT 1,
   p_page_size INTEGER DEFAULT 50,
   p_search TEXT DEFAULT NULL,
-  p_district TEXT DEFAULT NULL
+  p_district TEXT DEFAULT NULL,
+  p_event_id UUID DEFAULT NULL
 ) RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
@@ -466,6 +473,10 @@ BEGIN
   AND (
     p_district IS NULL OR
     UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = UPPER(regexp_replace(TRIM(p_district), '\s+', ' ', 'g'))
+  )
+  AND (
+    p_event_id IS NULL OR
+    event_id = p_event_id OR event_id IS NULL
   );
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
@@ -482,6 +493,10 @@ BEGIN
     AND (
       p_district IS NULL OR
       UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = UPPER(regexp_replace(TRIM(p_district), '\s+', ' ', 'g'))
+    )
+    AND (
+      p_event_id IS NULL OR
+      event_id = p_event_id OR event_id IS NULL
     )
     ORDER BY first_name, last_name
     LIMIT p_page_size
