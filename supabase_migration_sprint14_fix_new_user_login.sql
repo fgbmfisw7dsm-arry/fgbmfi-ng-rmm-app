@@ -43,7 +43,6 @@ CREATE OR REPLACE FUNCTION create_app_user(
 )
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, auth, public
 AS $func$
 DECLARE
     new_user_id      UUID;
@@ -182,7 +181,6 @@ $func$;
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, auth, public
 AS $func$
 DECLARE
     v_uid   UUID;

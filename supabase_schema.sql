@@ -137,7 +137,6 @@ DROP FUNCTION IF EXISTS deactivate_all_event_users();
 CREATE OR REPLACE FUNCTION create_app_user(email TEXT, password TEXT, role TEXT, district TEXT DEFAULT NULL, region TEXT DEFAULT NULL)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, auth, public
 AS $func$
 DECLARE
     new_user_id      UUID;
@@ -299,7 +298,6 @@ $func$;
 CREATE OR REPLACE FUNCTION reset_user_password(user_id TEXT, new_password TEXT)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, auth, public
 AS $func$
 DECLARE
     v_uid   UUID;
