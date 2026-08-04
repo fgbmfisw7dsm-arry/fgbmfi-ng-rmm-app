@@ -199,7 +199,7 @@ const ReportsPage = () => {
                     const hasDelegateData = typeForDisplay.some(t => (group.responses.get(t) || []).length > 0);
                     return (
                         <div key={sessionId} className="mb-8">
-                            <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between">
+                            <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between" style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>
                                 <span>{group.title}{alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</span>
                                 <span className="opacity-70">
                                     ATT: {group.att} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}

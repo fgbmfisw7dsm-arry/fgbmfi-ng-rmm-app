@@ -89,7 +89,7 @@ const NewDelegatePage = () => {
     
     setLoading(true);
     try {
-        const payload = { ...form };
+        const payload = { ...form, event_id: activeEventId };
         if (isDistrictScoped) payload.district = user.district;
 
         const newDelegate = await db.registerDelegate(payload);
