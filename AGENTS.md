@@ -153,11 +153,12 @@ CREATE UNIQUE INDEX idx_checkins_event_delegate_arrival_unique ON checkins(event
 CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_responses(event_id, delegate_id, session_id, response_type);
 ```
 
-### Supabase RPCs (6)
+### Supabase RPCs (7)
 - `create_app_user(email, password, role, district)` — creates auth.users + app_users row
 - `delete_app_user(user_id_to_delete)` — deletes from app_users + auth.users
 - `reset_user_password(user_id, new_password)` — updates auth.users password
 - `get_my_profile()` — returns the caller's `app_users` row
+- `check_login_account(p_email, p_password)` — SECURITY DEFINER login diagnostics (works WITHOUT a session; reports malformed email / no account / wrong password / unconfirmed / missing identity / deactivated)
 - `v_auth_integrity_check` (view) — audit view for broken user detection
 - `get_event_dashboard_stats(p_event_id, p_district_filter)` — RPC-based aggregated dashboard counts
 - `get_session_ministry_stats(p_event_id)` — RPC for session response counts + attendance
@@ -436,6 +437,11 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - `db.createPledge` passes through any `Partial<Pledge>` — no service-layer change needed.
 - Display surfaces: Active Pledges table column, Reports Pledge Summary ("By Pledge Name" table), and Reports Pledge List column.
 - **types.ts exception:** `Pledge.pledge_name?: string` and `Event.event_config?: Record<string, boolean | string[]>` were added to support this feature — a documented, additive exception to the "never modify types.ts" rule.
+
+### 18. Login Account Validation & Diagnostics (Sprint 15)
+- **New accounts require a valid email format.** `UsersModule.tsx` and `db.createUser` both validate `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` (after trim/lowercase) and block creation otherwise. Rationale: bare usernames (no `@domain`) cause GoTrue to return HTTP 500 on login — see `supabase_migration_sprint15_check_login_account_rpc.sql`.
+- **`check_login_account(p_email, p_password DEFAULT NULL)`** is a SECURITY DEFINER RPC readable WITHOUT an active session, so `auth.diagnoseLoginFailure()` (invoked on "Invalid login credentials") reports the truthful reason: malformed email, no account, wrong password (when `p_password` passed), unconfirmed, missing identity, or deactivated. It must be deployed to Supabase before the login page can use it (it falls back to the generic message on RPC failure).
+- `diagnoseLoginFailure` no longer calls `get_my_profile()` (which requires `auth.uid()` and therefore always failed pre-login).
 
 ## Code Conventions
 

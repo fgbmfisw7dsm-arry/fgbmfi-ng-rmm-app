@@ -7,6 +7,7 @@ import { generateCodeFromId, generateQrHash } from './utils';
  * Normalizes email for transmission. 
  */
 const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
+const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
 const handleSupabaseError = (res: any, customMessage?: string) => {
@@ -202,7 +203,7 @@ export const auth = {
                     throw serverErr;
                 }
                 if (authErr.message && authErr.message.includes('Invalid login credentials')) {
-                    const hint = await auth.diagnoseLoginFailure(normalizedEmail);
+                    const hint = await auth.diagnoseLoginFailure(normalizedEmail, password);
                     throw new Error(hint);
                 }
                 const err = new Error(authErr.message || "Authentication service unavailable");
@@ -252,18 +253,38 @@ export const auth = {
         }
     },
 
-    diagnoseLoginFailure: async (email: string): Promise<string> => {
+    diagnoseLoginFailure: async (email: string, password?: string): Promise<string> => {
         try {
-            const { data: profile, error } = await supabase.rpc('get_my_profile');
-            if (error || !profile) {
+            const { data: diag, error } = await supabase.rpc('check_login_account', {
+                p_email: normalizeEmail(email),
+                p_password: password || null
+            });
+            if (error || !diag) {
+                console.warn('[diagnoseLoginFailure] RPC failed:', error?.message || 'no data');
+                return "Login Failed: Invalid email or password. Please check for typos and try again.";
+            }
+            const d = diag as any;
+            if (d.email_format_valid === false) {
+                return "This account uses an invalid email format. Please contact your administrator to correct the account email (e.g. officer@fgbmfi.ng).";
+            }
+            if (d.account_exists === false) {
                 return "Account not found for this email. Please ask your administrator to create the account.";
             }
-            const p = profile as any;
-            if (p.is_active === false) {
+            if (d.password_matches === false) {
+                return "Login Failed: Invalid email or password. Please check for typos and try again.";
+            }
+            if (d.is_active === false) {
                 return "This account has been deactivated. Please contact your administrator to reactivate it.";
             }
-            return "Login Failed: Invalid email or password. Please check for typos and try again. If the problem persists, ask the administrator to run the v_auth_integrity_check view in Supabase.";
-        } catch {
+            if (d.confirmed === false) {
+                return "This account is not confirmed. Please contact your administrator to re-run the auth integrity fix migration.";
+            }
+            if (d.has_identity === false) {
+                return "This account is missing its login identity record. Please contact your administrator to re-run the auth integrity fix migration.";
+            }
+            return d.recommendation || "Login Failed: Invalid email or password. Please check for typos and try again.";
+        } catch (e: any) {
+            console.warn('[diagnoseLoginFailure] exception:', e?.message);
             return "Login Failed: Invalid email or password. Please check for typos and try again.";
         }
     },
@@ -386,6 +407,9 @@ export const db = {
 
     createUser: async (user: Omit<User, 'id'>, password: string) => {
         const email = normalizeEmail(user.email);
+        if (!isValidEmail(email)) {
+            throw new Error("Email must be a full address (e.g. officer@fgbmfi.ng)");
+        }
         const role = user.role.toLowerCase();
         const district = user.district || null;
         const region = user.region || null;

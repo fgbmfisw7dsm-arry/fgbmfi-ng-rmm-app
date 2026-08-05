@@ -59,8 +59,8 @@ const UsersModule = () => {
     const handleAction = async () => {
         setStatus(null);
 
-        if (!form.email || form.email.trim().length < 3) {
-            setStatus({ type: 'error', msg: "Please enter a valid email." });
+        if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+            setStatus({ type: 'error', msg: "Please enter a valid email address, e.g. officer@fgbmfi.ng" });
             return;
         }
 
