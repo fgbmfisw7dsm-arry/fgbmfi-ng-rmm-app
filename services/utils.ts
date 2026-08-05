@@ -110,6 +110,9 @@ export const exportToPDF = (
     }
 
     const nodeToPrint = element.cloneNode(true) as HTMLElement;
+    nodeToPrint.classList.remove('rounded-[2.5rem]', 'min-h-screen');
+    nodeToPrint.style.borderRadius = '0';
+    nodeToPrint.style.minHeight = '0';
     nodeToPrint.classList.add('print-mode');
     nodeToPrint.classList.add('pdf-export-mode');
 
@@ -150,8 +153,8 @@ export const exportToPDF = (
                 });
                 const root = clonedDoc.querySelector('.print-mode') as HTMLElement;
                 if (root) {
-                    root.style.borderRadius = '0';
-                    root.style.minHeight = '0';
+                    root.style.setProperty('border-radius', '0', 'important');
+                    root.style.setProperty('min-height', '0', 'important');
                 }
                 clonedDoc.querySelectorAll('.bg-blue-900').forEach(el => {
                     (el as HTMLElement).style.setProperty('background-color', '#1e3a8a', 'important');
