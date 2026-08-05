@@ -396,9 +396,22 @@ supabase.channel('dashboard_sync')
 - District names sanitized: spaces/punctuation → hyphens, no leading/trailing dashes, multi-hyphen collapse
 - "Download PDF" button uses `showSaveFilePicker` API (Chrome/Edge) for guaranteed filename, Blob URL fallback
 - "Print PDF" button swaps `document.title` before `print()`, restores via `afterprint` + 15s timeout
-- "Open in New Tab" uses Supabase storage URL (filename in path) instead of Blob URL
 - PDF document metadata set via pdf-lib: title "FGBMFI Delegate Badges", subject, creator
 - `handleDownload` + `buildBatchFileName()` helper shared across Download/Print buttons
+
+### 14a. Private Bucket + Authenticated Downloads (Sprint 16)
+- The `badge-pdfs` bucket is **PRIVATE** (`public: false`). Public URLs (`getPublicUrl()`) do NOT work — they return "404: Bucket not found".
+- Downloads must go through `db.getBadgePDFBlob(batch)` → `supabase.storage.from('badge-pdfs').download(fileName)` → client-side Blob + `a.download` (requires an authenticated session).
+- `resolveBadgeFileName(batch)` derives the real storage filename from `badge_batches.pdf_url` (URL-decoded basename), falling back to `badge-batch-<batch_id>.pdf` — safe for legacy rows and prevents orphaned files.
+- Storage RLS is required for deletes/downloads. Deploy `supabase_migration_sprint16_badge_storage_fix.sql` (idempotent): ensures the private bucket exists, adds `storage.objects` SELECT/INSERT/UPDATE/DELETE policies for `authenticated` scoped to `badge-pdfs`, and a SELECT policy on `storage.buckets`.
+- Without those policies, `storage.remove()` is rejected and `listBadgePDFs()`/`uploadBadgePDF()` fail silently (upload previously "worked" only because it pre-created the bucket).
+- `deleteStorageFile` returns `false` on failure — StorageModule must never show success when `deleted === 0`.
+
+### 14b. Bulk Badge Operations (admin-only, event-scoped)
+- `db.deleteBadgeBatches(ids)` → removes each real PDF from storage, deletes its `badge_print_logs` rows (`.in('batch_id', ids)`), then the `badge_batches` rows. Cascade is explicit at the service layer (FK is `ON DELETE SET NULL`).
+- `db.deleteBadgePrintLogs(ids)` / `db.clearBadgePrintLogs(eventId)` — history scrub by id or by active event.
+- BadgePrintingModule exposes admin-only bulk controls: Batches tab (Select All + Delete Selected/All) and History tab (Select All + Clear Selected/All), each with a `Set<string>` of selected ids, a `bulkDeleting` spinner, and confirm dialogs.
+- StorageModule "Delete All/Selected" reconciles via `loadFiles()` and reports honest results: error when 0 deleted, error listing failed count on partial, success only when all were removed.
 
 ### 15. Event Data Isolation (v1.4 — Strict Per-Event Delegate Scoping)
 - **Every delegate is tied to exactly one event** via `delegates.event_id`. There is no concept of global/unscoped delegates.
@@ -558,6 +571,8 @@ npm run build   # Production build to /dist
 | Dashboard delegates vs arrivals divergence | RPC counts event-scoped delegates; dashboard reconciliation auto-corrects; recentActivity deduplicated via DISTINCT ON | RESOLVED | v1.4 |
 | PDF report overflow clip | `onclone` callback + CSS removes `overflow-hidden` on cloned document; inline background-color fallback for html2canvas rendering | RESOLVED | v1.4 |
 | Sessions report no session demarcation | Individual records sub-headers now show session name before response type label | RESOLVED | v1.4 |
+| Badge download "404 Bucket not found" | Bucket is private; downloads now use authenticated `storage.download()` blob instead of public URL; `resolveBadgeFileName` derives real filename | RESOLVED | v1.5 |
+| Storage/batch deletes fail silently | `storage.objects` RLS policies added (sprint16); `deleteBadgeBatch`/`deleteBadgeBatches` remove the real filename + cascade logs; StorageModule reports honest failure counts | RESOLVED | v1.5 |
 
 ## v2.0 Evolution
 

@@ -85,6 +85,9 @@ const BadgePrintingModule = () => {
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
+  const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const cancellationRef = useRef(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -524,6 +527,119 @@ const BadgePrintingModule = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleBatchDownload = async (batch: BadgeBatch) => {
+    try {
+      const res = await db.getBadgePDFBlob(batch);
+      if (!res) {
+        setFeedback({ type: 'error', msg: `PDF not found in storage for batch #${batch.batch_number}.` });
+        return;
+      }
+      const url = URL.createObjectURL(res.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Download failed: ${e?.message || 'unknown error'}` });
+    }
+  };
+
+  const toggleBatchSelect = (id: string) => {
+    setSelectedBatchIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllBatches = () => {
+    setSelectedBatchIds(prev => (prev.size === batches.length ? new Set() : new Set(batches.map(b => b.batch_id))));
+  };
+
+  const toggleLogSelect = (id: string) => {
+    setSelectedLogIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllLogs = () => {
+    setSelectedLogIds(prev => (prev.size === printLogs.length ? new Set() : new Set(printLogs.map(l => l.log_id))));
+  };
+
+  const handleDeleteSelectedBatches = async () => {
+    const count = selectedBatchIds.size;
+    if (!count) return;
+    if (!window.confirm(`Delete ${count} selected batch(es)? This will remove the PDFs and all logs.`)) return;
+    setBulkDeleting(true);
+    try {
+      await db.deleteBadgeBatches([...selectedBatchIds]);
+      setSelectedBatchIds(new Set());
+      await Promise.all([loadBatches(), loadPrintLogs()]);
+      setFeedback({ type: 'success', msg: `Deleted ${count} batch(es).` });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Batch deletion failed: ${e?.message}` });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const handleDeleteAllBatches = async () => {
+    const count = batches.length;
+    if (!count) return;
+    if (!window.confirm(`Delete ALL ${count} batch(es) for this event? This will remove the PDFs and all logs.`)) return;
+    setBulkDeleting(true);
+    try {
+      await db.deleteBadgeBatches(batches.map(b => b.batch_id));
+      setSelectedBatchIds(new Set());
+      await Promise.all([loadBatches(), loadPrintLogs()]);
+      setFeedback({ type: 'success', msg: `Deleted all ${count} batch(es).` });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Batch deletion failed: ${e?.message}` });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const handleClearSelectedLogs = async () => {
+    const count = selectedLogIds.size;
+    if (!count) return;
+    if (!window.confirm(`Clear ${count} selected history entr(ies)?`)) return;
+    setBulkDeleting(true);
+    try {
+      await db.deleteBadgePrintLogs([...selectedLogIds]);
+      setSelectedLogIds(new Set());
+      await loadPrintLogs();
+      setFeedback({ type: 'success', msg: `Cleared ${count} history entr(ies).` });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Clear failed: ${e?.message}` });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const handleClearAllLogs = async () => {
+    const count = printLogs.length;
+    if (!count) return;
+    if (!window.confirm(`Clear ALL ${count} history entr(ies) for this event?`)) return;
+    setBulkDeleting(true);
+    try {
+      await db.clearBadgePrintLogs(activeEventId);
+      setSelectedLogIds(new Set());
+      await loadPrintLogs();
+      setFeedback({ type: 'success', msg: `Cleared all ${count} history entr(ies).` });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Clear failed: ${e?.message}` });
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const handleMarkPrinted = async (batchId: string) => {
@@ -1051,9 +1167,35 @@ const BadgePrintingModule = () => {
             <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
               Print Queue ({batches.length} batches)
             </h2>
-            <button onClick={loadBatches} className="text-[9px] font-bold text-blue-600 hover:text-blue-800 uppercase tracking-wider">
-              Refresh
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {isAdmin && batches.length > 0 && (
+                <>
+                  <label className="flex items-center gap-1 text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none">
+                    <input type="checkbox" checked={selectedBatchIds.size === batches.length && batches.length > 0} onChange={toggleAllBatches} className="rounded" disabled={bulkDeleting} />
+                    {selectedBatchIds.size > 0 ? `${selectedBatchIds.size} selected` : 'Select All'}
+                  </label>
+                  {selectedBatchIds.size > 0 && (
+                    <button
+                      onClick={handleDeleteSelectedBatches}
+                      disabled={bulkDeleting}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
+                    >
+                      {bulkDeleting ? 'Deleting...' : `Delete Selected (${selectedBatchIds.size})`}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDeleteAllBatches}
+                    disabled={bulkDeleting}
+                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 font-bold rounded-lg text-[8px] uppercase tracking-wider border border-red-100"
+                  >
+                    Delete All
+                  </button>
+                </>
+              )}
+              <button onClick={loadBatches} className="text-[9px] font-bold text-blue-600 hover:text-blue-800 uppercase tracking-wider">
+                Refresh
+              </button>
+            </div>
           </div>
           {!batches.length ? (
             <p className="text-center text-gray-400 py-12 text-xs font-bold uppercase tracking-wider">
@@ -1064,6 +1206,7 @@ const BadgePrintingModule = () => {
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-gray-100">
+                    {isAdmin && <th className="p-3 w-8 text-[8px] font-black text-gray-400 uppercase tracking-widest"></th>}
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Batch</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Badges</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Pages</th>
@@ -1076,6 +1219,11 @@ const BadgePrintingModule = () => {
                 <tbody className="divide-y divide-gray-50">
                   {batches.map((batch) => (
                     <tr key={batch.batch_id} className="hover:bg-gray-50">
+                      {isAdmin && (
+                        <td className="p-3">
+                          <input type="checkbox" checked={selectedBatchIds.has(batch.batch_id)} onChange={() => toggleBatchSelect(batch.batch_id)} className="rounded" disabled={bulkDeleting} />
+                        </td>
+                      )}
                       <td className="p-3 text-xs font-black text-gray-800">
                         #{batch.batch_number}
                       </td>
@@ -1091,10 +1239,7 @@ const BadgePrintingModule = () => {
                           {batch.status === 'ready' && (
                             <>
                               <button
-                                onClick={() => {
-                                  const url = batch.pdf_url;
-                                  if (url) window.open(url, '_blank');
-                                }}
+                                onClick={() => handleBatchDownload(batch)}
                                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
                               >
                                 Download
@@ -1197,9 +1342,35 @@ const BadgePrintingModule = () => {
             <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
               Print History ({printLogs.length} entries)
             </h2>
-            <button onClick={loadPrintLogs} className="text-[9px] font-bold text-blue-600 hover:text-blue-800 uppercase tracking-wider">
-              Refresh
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {isAdmin && printLogs.length > 0 && (
+                <>
+                  <label className="flex items-center gap-1 text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none">
+                    <input type="checkbox" checked={selectedLogIds.size === printLogs.length && printLogs.length > 0} onChange={toggleAllLogs} className="rounded" disabled={bulkDeleting} />
+                    {selectedLogIds.size > 0 ? `${selectedLogIds.size} selected` : 'Select All'}
+                  </label>
+                  {selectedLogIds.size > 0 && (
+                    <button
+                      onClick={handleClearSelectedLogs}
+                      disabled={bulkDeleting}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
+                    >
+                      {bulkDeleting ? 'Clearing...' : `Clear Selected (${selectedLogIds.size})`}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleClearAllLogs}
+                    disabled={bulkDeleting}
+                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 font-bold rounded-lg text-[8px] uppercase tracking-wider border border-red-100"
+                  >
+                    Clear All
+                  </button>
+                </>
+              )}
+              <button onClick={loadPrintLogs} className="text-[9px] font-bold text-blue-600 hover:text-blue-800 uppercase tracking-wider">
+                Refresh
+              </button>
+            </div>
           </div>
           {!printLogs.length ? (
             <p className="text-center text-gray-400 py-12 text-xs font-bold uppercase tracking-wider">
@@ -1210,6 +1381,7 @@ const BadgePrintingModule = () => {
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-gray-100">
+                    {isAdmin && <th className="p-3 w-8"></th>}
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Date/Time</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Delegate</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Action</th>
@@ -1219,6 +1391,17 @@ const BadgePrintingModule = () => {
                 <tbody className="divide-y divide-gray-50">
                   {printLogs.map((log) => (
                     <tr key={log.log_id} className="hover:bg-gray-50">
+                      {isAdmin && (
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedLogIds.has(log.log_id)}
+                            onChange={() => toggleLogSelect(log.log_id)}
+                            className="rounded"
+                            disabled={bulkDeleting}
+                          />
+                        </td>
+                      )}
                       <td className="p-3 text-[9px] text-gray-500">{formatDate(log.created_at)}</td>
                       <td className="p-3 text-xs font-bold text-gray-800">
                         {log.delegate_name || log.delegate_id?.slice(0, 8)}

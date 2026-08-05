@@ -10,6 +10,16 @@ const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
+const resolveBadgeFileName = (batch: { batch_id: string; pdf_url?: string | null }): string => {
+    if (batch.pdf_url) {
+        try {
+            const last = batch.pdf_url.split('/').pop();
+            if (last) return decodeURIComponent(last);
+        } catch {}
+    }
+    return `badge-batch-${batch.batch_id}.pdf`;
+};
+
 const handleSupabaseError = (res: any, customMessage?: string) => {
     if (res.error) {
         console.error("Supabase Database Error:", res.error);
@@ -1217,12 +1227,41 @@ export const db = {
     },
 
     deleteBadgeBatch: async (batchId: string): Promise<boolean> => {
-        const { data: batch } = await supabase.from('badge_batches').select('*').eq('batch_id', batchId).maybeSingle();
+        const { data: batch } = await supabase.from('badge_batches').select('batch_id, pdf_url').eq('batch_id', batchId).maybeSingle();
         if (batch) {
-            const fileName = `badge-batch-${batchId}.pdf`;
-            await supabase.storage.from('badge-pdfs').remove([fileName]);
+            await supabase.storage.from('badge-pdfs').remove([resolveBadgeFileName(batch)]);
+            await supabase.from('badge_print_logs').delete().eq('batch_id', batchId);
         }
         const { error } = await supabase.from('badge_batches').delete().eq('batch_id', batchId);
+        return !error;
+    },
+
+    deleteBadgeBatches: async (ids: string[]): Promise<{ deleted: number }> => {
+        if (!ids.length) return { deleted: 0 };
+        const { data: rows } = await supabase.from('badge_batches').select('batch_id, pdf_url').in('batch_id', ids);
+        for (const r of (rows || [])) {
+            await supabase.storage.from('badge-pdfs').remove([resolveBadgeFileName(r)]);
+        }
+        await supabase.from('badge_print_logs').delete().in('batch_id', ids);
+        const { error } = await supabase.from('badge_batches').delete().in('batch_id', ids);
+        return { deleted: error ? 0 : ids.length };
+    },
+
+    getBadgePDFBlob: async (batch: BadgeBatch): Promise<{ blob: Blob; fileName: string } | null> => {
+        const fileName = resolveBadgeFileName(batch);
+        const { data, error } = await supabase.storage.from('badge-pdfs').download(fileName);
+        if (error || !data) return null;
+        return { blob: data, fileName };
+    },
+
+    deleteBadgePrintLogs: async (ids: string[]): Promise<boolean> => {
+        if (!ids.length) return true;
+        const { error } = await supabase.from('badge_print_logs').delete().in('log_id', ids);
+        return !error;
+    },
+
+    clearBadgePrintLogs: async (eventId: string): Promise<boolean> => {
+        const { error } = await supabase.from('badge_print_logs').delete().eq('event_id', eventId);
         return !error;
     },
 

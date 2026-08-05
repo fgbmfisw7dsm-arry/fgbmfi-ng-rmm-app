@@ -59,7 +59,14 @@ const StorageModule: React.FC = () => {
         if (ok) deleted++;
       } catch {}
     }
-    setFeedback({ type: 'success', msg: `Deleted ${deleted}/${selectedFiles.size} files` });
+    const failed = selectedFiles.size - deleted;
+    if (deleted === 0) {
+      setFeedback({ type: 'error', msg: 'Delete failed. No files were removed — check permissions.' });
+    } else if (failed > 0) {
+      setFeedback({ type: 'error', msg: `Deleted ${deleted}/${selectedFiles.size} files — ${failed} file(s) failed.` });
+    } else {
+      setFeedback({ type: 'success', msg: `Deleted ${deleted}/${selectedFiles.size} files` });
+    }
     setSelectedFiles(new Set());
     loadFiles();
     setTimeout(() => setFeedback(null), 3000);
