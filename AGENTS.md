@@ -431,7 +431,9 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - `[getStats] arrivals exceed delegates — re-counting` — dashboard self-correction fired
 
 ### 17. Pledge Name (per-event categories)
-- Pledge names are **configured per event** in EventsModule as `events.event_config.pledge_names` (a `string[]` JSONB array), edited via a chip add/remove editor in the "Delegate Form Fields" config box.
+- Pledge names are **configured per event** in EventsModule as `events.event_config.pledge_names` (a `string[]` JSONB array), edited via a chip editor in the "Delegate Form Fields" config box.
+- Each chip supports **inline rename** (pencil → save/cancel, Enter/Escape keys) and **remove** (×). Add box at the top; duplicates are rejected.
+- All `pledge_names` state updates use functional `setForm` to prevent stale-closure clobbering when multiple names are added quickly.
 - The FinancialsPage **New Pledge form** shows a "Pledge Name" dropdown sourced from `activeEvent.event_config.pledge_names`; empty selection = "General".
 - The selected value is stored on the pledge row as `pledges.pledge_name` (nullable, backward compatible — added by `supabase_migration_sprint15_pledge_name.sql`).
 - `db.createPledge` passes through any `Partial<Pledge>` — no service-layer change needed.

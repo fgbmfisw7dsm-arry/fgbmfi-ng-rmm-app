@@ -15,6 +15,8 @@ const EventsModule = () => {
     const { refreshActiveEvent, refreshEvents, user, events } = useContext(AppContext);
     const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true, event_config: {} });
     const [pledgeNameInput, setPledgeNameInput] = useState('');
+    const [editingPledgeName, setEditingPledgeName] = useState<string | null>(null);
+    const [pledgeNameEditValue, setPledgeNameEditValue] = useState('');
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
     const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -67,6 +69,8 @@ const EventsModule = () => {
             await refreshEvents(); 
             setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true}); 
             setPledgeNameInput('');
+            setEditingPledgeName(null);
+            setPledgeNameEditValue('');
             setEditingEventId(null);
         } catch(e:any) { 
             setStatusMsg({ type: 'error', text: e.message });
@@ -80,17 +84,48 @@ const EventsModule = () => {
     const addPledgeName = () => {
         const name = pledgeNameInput.trim();
         if (!name) return;
-        const config: EventConfig = form.event_config || {};
-        const names = getPledgeNames(config);
-        if (names.includes(name)) { setPledgeNameInput(''); return; }
-        setForm({ ...form, event_config: { ...config, pledge_names: [...names, name] } });
+        setForm(prev => {
+            const config = (prev.event_config || {}) as EventConfig;
+            const names = getPledgeNames(config);
+            if (names.includes(name)) return prev;
+            return { ...prev, event_config: { ...config, pledge_names: [...names, name] } };
+        });
         setPledgeNameInput('');
     };
 
     const removePledgeName = (name: string) => {
-        const config: EventConfig = form.event_config || {};
-        const names = getPledgeNames(config).filter(n => n !== name);
-        setForm({ ...form, event_config: { ...config, pledge_names: names } });
+        setForm(prev => {
+            const config = (prev.event_config || {}) as EventConfig;
+            return { ...prev, event_config: { ...config, pledge_names: getPledgeNames(config).filter(n => n !== name) } };
+        });
+        if (editingPledgeName === name) {
+            setEditingPledgeName(null);
+            setPledgeNameEditValue('');
+        }
+    };
+
+    const startEditPledgeName = (name: string) => {
+        setEditingPledgeName(name);
+        setPledgeNameEditValue(name);
+    };
+
+    const savePledgeNameEdit = () => {
+        const newName = pledgeNameEditValue.trim();
+        if (!newName) return;
+        setForm(prev => {
+            const config = (prev.event_config || {}) as EventConfig;
+            const names = getPledgeNames(config);
+            if (newName === editingPledgeName) return prev;
+            const renamed = names.map(n => (n === editingPledgeName ? newName : n));
+            return { ...prev, event_config: { ...config, pledge_names: Array.from(new Set(renamed)) } };
+        });
+        setEditingPledgeName(null);
+        setPledgeNameEditValue('');
+    };
+
+    const cancelEditPledgeName = () => {
+        setEditingPledgeName(null);
+        setPledgeNameEditValue('');
     };
     
     const executeDelete = async (eventId: string, eventName: string) => {
@@ -269,10 +304,33 @@ const EventsModule = () => {
                             return (
                                 <div className="flex flex-wrap gap-2 pt-2">
                                     {names.map(name => (
-                                        <span key={name} className="inline-flex items-center gap-2 px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg font-black uppercase text-[10px]">
-                                            {name}
-                                            <button type="button" onClick={() => removePledgeName(name)} className="text-purple-500 hover:text-red-600 font-black">×</button>
-                                        </span>
+                                        editingPledgeName === name ? (
+                                            <span key={name} className="inline-flex items-center gap-1.5 px-2 py-1 bg-purple-100 text-purple-800 rounded-lg font-black uppercase text-[10px]">
+                                                <input
+                                                    autoFocus
+                                                    className="w-28 p-1 rounded bg-white border border-purple-300 font-black uppercase text-[10px]"
+                                                    value={pledgeNameEditValue}
+                                                    onChange={e => setPledgeNameEditValue(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); savePledgeNameEdit(); } if (e.key === 'Escape') cancelEditPledgeName(); }}
+                                                />
+                                                <button type="button" onClick={savePledgeNameEdit} title="Save name" className="text-green-600 hover:text-green-800">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                                </button>
+                                                <button type="button" onClick={cancelEditPledgeName} title="Cancel" className="text-purple-400 hover:text-purple-600">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </span>
+                                        ) : (
+                                            <span key={name} className="inline-flex items-center gap-2 px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg font-black uppercase text-[10px]">
+                                                {name}
+                                                <button type="button" onClick={() => startEditPledgeName(name)} title="Edit pledge name" className="text-purple-500 hover:text-blue-600">
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                </button>
+                                                <button type="button" onClick={() => removePledgeName(name)} title="Remove pledge name" className="text-purple-500 hover:text-red-600">
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </span>
+                                        )
                                     ))}
                                 </div>
                             );
@@ -284,7 +342,7 @@ const EventsModule = () => {
                             {editingEventId ? 'Update' : 'Create'}
                         </button>
                         {editingEventId && (
-                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true, event_config: {}}); setPledgeNameInput(''); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
+                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true, event_config: {}}); setPledgeNameInput(''); setEditingPledgeName(null); setPledgeNameEditValue(''); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
                         )}
                     </div>
                 </form>
