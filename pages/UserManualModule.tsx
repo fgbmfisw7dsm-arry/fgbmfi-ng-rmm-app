@@ -11,7 +11,7 @@ const UserManualModule = () => {
             const fileName = activeTab === 'manual' 
                 ? "FGBMFI_EMS_Operations_Manual.pdf" 
                 : "FGBMFI_EMS_Volunteer_Training_Guide.pdf";
-            exportToPDF(manualRef.current, fileName, 'portrait');
+            exportToPDF(manualRef.current, fileName, 'landscape');
         }
     };
 
