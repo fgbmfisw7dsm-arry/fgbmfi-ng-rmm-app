@@ -68,10 +68,14 @@ export const exportToCSV = (rows: Record<string, any>[], filename: string, colum
 };
 
 /**
- * Enhanced PDF Export: Uses a wider viewport (1600px) and proper scaling 
- * to ensure wide Matrix tables are not truncated during export.
- * onclone callback flattens overflow containers and sticky elements
- * so html2canvas captures the full table content without clipping.
+ * Enhanced PDF Export: Uses a wider viewport (1600px) for landscape and exact A4
+ * inner width (756px) for portrait to prevent html2canvas offset cropping (left-side
+ * clipping). The onclone callback strips border-radius (primary cause of html2canvas
+ * capture offset artifacts on rounded containers), overrides min-height to prevent
+ * viewport-height issues in the cloned iframe, removes break-inside-avoid (image-based
+ * pagination ignores CSS page-break rules), restores padding on manual/document
+ * containers stripped by .print-mode CSS, and applies explicit background/color
+ * fallbacks for Tailwind utility classes that html2canvas may fail to resolve.
  */
 export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
     if (!element) {
@@ -79,11 +83,6 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         return;
     }
 
-    // html2pdf re-clones the element into its own container, sized to the PDF page's
-    // INNER width (A4 minus 5mm margins). The portrait capture width must equal that
-    // (200mm => 756 CSS px at 96dpi) or html2canvas crops an offset region (left-side
-    // clipping) and its page-slice height no longer matches the CSS pagebreak padding
-    // (content starting mid-page). Landscape stays 1600px to fit wide report tables.
     const viewportWidth = orientation === 'landscape' ? 1600 : Math.round(200 * 96 / 25.4);
     window.scrollTo(0, 0);
 
@@ -130,6 +129,33 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
             width: viewportWidth,
             windowWidth: viewportWidth,
             onclone: (clonedDoc: Document) => {
+                const cssStyle = clonedDoc.createElement('style');
+                cssStyle.textContent = `
+                    .print-mode, .pdf-export-mode { border-radius: 0 !important; min-height: 0 !important; }
+                    .print-mode .overflow-x-auto,
+                    .print-mode .overflow-hidden,
+                    .pdf-export-mode .overflow-x-auto,
+                    .pdf-export-mode .overflow-hidden { overflow: visible !important; }
+                    .print-mode .min-w-max,
+                    .pdf-export-mode .min-w-max { min-width: 0 !important; width: 100% !important; }
+                    .print-mode .sticky,
+                    .pdf-export-mode .sticky { position: static !important; }
+                `;
+                clonedDoc.head.appendChild(cssStyle);
+
+                const root = clonedDoc.querySelector('.print-mode') as HTMLElement;
+                if (root) {
+                    root.style.borderRadius = '0';
+                    root.style.minHeight = '0';
+                    if (root.classList.contains('p-12') || root.classList.contains('md:p-16')) {
+                        root.style.padding = '48px';
+                    }
+                }
+
+                clonedDoc.querySelectorAll('.break-inside-avoid').forEach(el => {
+                    (el as HTMLElement).style.breakInside = 'auto';
+                });
+
                 clonedDoc.querySelectorAll('.overflow-x-auto, .overflow-hidden').forEach(el => {
                     (el as HTMLElement).style.overflow = 'visible';
                 });
