@@ -79,7 +79,12 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
         return;
     }
 
-    const viewportWidth = orientation === 'landscape' ? 1600 : 900;
+    // html2pdf re-clones the element into its own container, sized to the PDF page's
+    // INNER width (A4 minus 5mm margins). The portrait capture width must equal that
+    // (200mm => 756 CSS px at 96dpi) or html2canvas crops an offset region (left-side
+    // clipping) and its page-slice height no longer matches the CSS pagebreak padding
+    // (content starting mid-page). Landscape stays 1600px to fit wide report tables.
+    const viewportWidth = orientation === 'landscape' ? 1600 : Math.round(200 * 96 / 25.4);
     window.scrollTo(0, 0);
 
     if (!document.getElementById('pdf-export-print-styles')) {
