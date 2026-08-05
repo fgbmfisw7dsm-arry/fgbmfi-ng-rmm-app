@@ -70,12 +70,12 @@ export const exportToCSV = (rows: Record<string, any>[], filename: string, colum
 /**
  * Enhanced PDF Export: Uses a wider viewport (1600px) for landscape and exact A4
  * inner width (756px) for portrait to prevent html2canvas offset cropping (left-side
- * clipping). The onclone callback strips border-radius (primary cause of html2canvas
- * capture offset artifacts on rounded containers), overrides min-height to prevent
- * viewport-height issues in the cloned iframe, removes break-inside-avoid (image-based
- * pagination ignores CSS page-break rules), restores padding on manual/document
- * containers stripped by .print-mode CSS, and applies explicit background/color
- * fallbacks for Tailwind utility classes that html2canvas may fail to resolve.
+ * clipping). For manual/document-style elements (detected by p-12/md:p-16 classes),
+ * the print-mode class is skipped entirely — its padding-stripping and max-width
+ * removal cause left-side clipping that cannot be corrected via onclone callbacks
+ * (because print-mode rules use !important which beats normal inline styles).
+ * Instead, clean inline styles are applied directly to the clone before capture.
+ * Report tables still use print-mode for its overflow/max-width normalization.
  */
 export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
     if (!element) {
@@ -85,6 +85,8 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
 
     const viewportWidth = orientation === 'landscape' ? 1600 : Math.round(200 * 96 / 25.4);
     window.scrollTo(0, 0);
+
+    const isDocumentStyle = element.classList.contains('p-12') || element.classList.contains('md:p-16');
 
     if (!document.getElementById('pdf-export-print-styles')) {
         const style = document.createElement('style');
@@ -101,9 +103,27 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
     }
 
     const nodeToPrint = element.cloneNode(true) as HTMLElement;
-    nodeToPrint.classList.add('print-mode');
-    nodeToPrint.classList.add('pdf-export-mode');
-    
+
+    if (isDocumentStyle) {
+        nodeToPrint.classList.remove('rounded-[2.5rem]', 'min-h-screen', 'p-12', 'md:p-16');
+        nodeToPrint.classList.add('pdf-export-mode');
+        nodeToPrint.style.setProperty('border-radius', '0', 'important');
+        nodeToPrint.style.setProperty('min-height', '0', 'important');
+        nodeToPrint.style.setProperty('padding', '48px', 'important');
+        nodeToPrint.style.setProperty('margin', '0', 'important');
+        nodeToPrint.style.setProperty('box-shadow', 'none', 'important');
+        nodeToPrint.style.setProperty('border', 'none', 'important');
+        nodeToPrint.style.setProperty('width', `${viewportWidth}px`, 'important');
+        nodeToPrint.style.setProperty('max-width', `${viewportWidth}px`, 'important');
+        nodeToPrint.style.setProperty('box-sizing', 'border-box', 'important');
+        nodeToPrint.querySelectorAll('.break-inside-avoid').forEach(el => {
+            (el as HTMLElement).style.setProperty('break-inside', 'auto', 'important');
+        });
+    } else {
+        nodeToPrint.classList.add('print-mode');
+        nodeToPrint.classList.add('pdf-export-mode');
+    }
+
     const printContainer = document.createElement('div');
     printContainer.id = 'pdf-export-container';
     printContainer.style.position = 'fixed';
@@ -113,7 +133,7 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
     printContainer.style.background = '#ffffff';
     printContainer.style.zIndex = '-9999';
     printContainer.style.overflow = 'visible';
-    
+
     printContainer.appendChild(nodeToPrint);
     document.body.appendChild(printContainer);
 
@@ -129,33 +149,6 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
             width: viewportWidth,
             windowWidth: viewportWidth,
             onclone: (clonedDoc: Document) => {
-                const cssStyle = clonedDoc.createElement('style');
-                cssStyle.textContent = `
-                    .print-mode, .pdf-export-mode { border-radius: 0 !important; min-height: 0 !important; }
-                    .print-mode .overflow-x-auto,
-                    .print-mode .overflow-hidden,
-                    .pdf-export-mode .overflow-x-auto,
-                    .pdf-export-mode .overflow-hidden { overflow: visible !important; }
-                    .print-mode .min-w-max,
-                    .pdf-export-mode .min-w-max { min-width: 0 !important; width: 100% !important; }
-                    .print-mode .sticky,
-                    .pdf-export-mode .sticky { position: static !important; }
-                `;
-                clonedDoc.head.appendChild(cssStyle);
-
-                const root = clonedDoc.querySelector('.print-mode') as HTMLElement;
-                if (root) {
-                    root.style.borderRadius = '0';
-                    root.style.minHeight = '0';
-                    if (root.classList.contains('p-12') || root.classList.contains('md:p-16')) {
-                        root.style.padding = '48px';
-                    }
-                }
-
-                clonedDoc.querySelectorAll('.break-inside-avoid').forEach(el => {
-                    (el as HTMLElement).style.breakInside = 'auto';
-                });
-
                 clonedDoc.querySelectorAll('.overflow-x-auto, .overflow-hidden').forEach(el => {
                     (el as HTMLElement).style.overflow = 'visible';
                 });
@@ -166,6 +159,13 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
                 clonedDoc.querySelectorAll('.sticky').forEach(el => {
                     (el as HTMLElement).style.position = 'static';
                 });
+                if (!isDocumentStyle) {
+                    const root = clonedDoc.querySelector('.print-mode') as HTMLElement;
+                    if (root) {
+                        root.style.borderRadius = '0';
+                        root.style.minHeight = '0';
+                    }
+                }
                 clonedDoc.querySelectorAll('.bg-blue-900').forEach(el => {
                     (el as HTMLElement).style.setProperty('background-color', '#1e3a8a', 'important');
                     (el as HTMLElement).style.setProperty('color', '#ffffff', 'important');
