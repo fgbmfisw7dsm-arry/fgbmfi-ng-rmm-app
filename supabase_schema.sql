@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS pledges (
     email TEXT,
     amount_pledged DECIMAL(15,2) DEFAULT 0,
     amount_redeemed DECIMAL(15,2) DEFAULT 0,
+    pledge_name TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

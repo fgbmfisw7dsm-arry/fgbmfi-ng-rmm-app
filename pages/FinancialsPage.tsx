@@ -8,6 +8,8 @@ import { formatCurrency } from '../services/utils';
 const FinancialsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const isLocked = activeEvent?.is_active === false;
+    const pledgeNameConfig = activeEvent?.event_config?.pledge_names;
+    const pledgeNames = Array.isArray(pledgeNameConfig) ? (pledgeNameConfig as string[]) : [];
     const [entries, setEntries] = useState<FinancialEntry[]>([]);
     const [pledges, setPledges] = useState<Pledge[]>([]);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -21,7 +23,7 @@ const FinancialsPage = () => {
     
     const [selectedPledge, setSelectedPledge] = useState<Pledge | null>(null);
     const [tForm, setTForm] = useState<Partial<FinancialEntry>>({ amount: 0, type: FinancialType.OFFERING, session_id: '', payer_name: '', remarks: '' });
-    const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0 });
+    const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
     const [rForm, setRForm] = useState({ amount: 0, remarks: 'Pledge Redemption' });
 
     const loadData = () => {
@@ -74,7 +76,8 @@ const FinancialsPage = () => {
             chapter: d.chapter || '', 
             phone: d.phone || '', 
             email: d.email || '', 
-            amount_pledged: pForm.amount_pledged 
+            amount_pledged: pForm.amount_pledged,
+            pledge_name: pForm.pledge_name 
         });
         setSearchTerm(''); 
         setSearchResults([]);
@@ -111,7 +114,7 @@ const FinancialsPage = () => {
             await db.createPledge({ ...pForm, event_id: activeEventId }); 
             alert("Pledge Recorded Successfully!"); 
             loadData(); 
-            setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0 }); 
+            setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' }); 
         } catch(err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
 
@@ -292,6 +295,15 @@ const FinancialsPage = () => {
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Pledge Amount (NGN)</label>
                                 <input type="number" className="w-full p-3 border rounded-xl font-black text-2xl text-blue-600 bg-blue-50/30" placeholder="0.00" value={pForm.amount_pledged || ''} onChange={e => setPForm({...pForm, amount_pledged: parseFloat(e.target.value)})} />
                             </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Pledge Name</label>
+                                <select className="w-full p-3 border rounded-xl font-bold bg-white" value={pForm.pledge_name || ''} onChange={e => setPForm({...pForm, pledge_name: e.target.value})}>
+                                    <option value="">General</option>
+                                    {pledgeNames.map(name => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <button type="submit" disabled={loading || isLocked} className="w-full py-4 bg-blue-900 text-white font-black rounded-xl shadow-xl transition-all disabled:opacity-50 uppercase tracking-widest text-sm">
                                 {isLocked ? 'LOCKED' : (loading ? 'SAVING...' : 'RECORD PLEDGE')}
                             </button>
@@ -300,12 +312,13 @@ const FinancialsPage = () => {
                     <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border overflow-x-auto">
                         <h3 className="font-black mb-6 uppercase text-[10px] text-gray-400 tracking-widest border-b pb-2">Active Pledges</h3>
                         <table className="w-full text-xs text-left min-w-[500px]">
-                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">District</th><th className="p-4 text-right">Pledged</th><th className="p-4 text-right">Redeemed</th><th className="p-4 text-right">Balance</th></tr></thead>
+                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">District</th><th className="p-4">Pledge Name</th><th className="p-4 text-right">Pledged</th><th className="p-4 text-right">Redeemed</th><th className="p-4 text-right">Balance</th></tr></thead>
                             <tbody className="divide-y">
                                 {pledges.map(p => (
                                     <tr key={p.id} className="hover:bg-gray-50">
                                         <td className="p-4 font-black text-gray-800 uppercase text-[11px]">{p.donor_name}</td>
                                         <td className="p-4 text-gray-500 font-black uppercase text-[9px]">{p.district}</td>
+                                        <td className="p-4 text-purple-700 font-black uppercase text-[9px]">{p.pledge_name || 'General'}</td>
                                         <td className="p-4 font-bold text-right">{formatCurrency(p.amount_pledged)}</td>
                                         <td className="p-4 text-green-700 font-bold text-right">{formatCurrency(p.amount_redeemed)}</td>
                                         <td className="p-4 text-right text-red-600 font-black">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>

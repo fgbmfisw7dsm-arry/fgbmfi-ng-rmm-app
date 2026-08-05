@@ -100,7 +100,7 @@ export interface Event {
   start_date: string;
   end_date: string;
   is_active: boolean;
-  event_config?: Record<string, boolean>;
+  event_config?: Record<string, boolean | string[]>;
 }
 
 export interface Session {
@@ -155,6 +155,7 @@ export interface Pledge {
   email: string;
   amount_pledged: number;
   amount_redeemed: number;
+  pledge_name?: string;
   created_at: string;
 }
 

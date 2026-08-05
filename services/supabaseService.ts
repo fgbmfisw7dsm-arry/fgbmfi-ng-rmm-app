@@ -185,12 +185,30 @@ export const auth = {
             });
 
             if (authError) {
-                console.error('[auth.login] signInWithPassword error:', authError);
-                if (authError.message && authError.message.includes('Invalid login credentials')) {
+                const authErr: any = authError as any;
+                console.error('[auth.login] signInWithPassword error:', {
+                    message: authErr.message,
+                    name: authErr.name,
+                    status: authErr.status,
+                    code: authErr.code,
+                    details: authErr.details,
+                    hint: authErr.hint,
+                    full: authErr
+                });
+                const status = Number(authErr.status) || 0;
+                if (authErr.name === 'AuthRetryableFetchError' || status >= 500) {
+                    const serverErr = new Error(`Authentication service temporarily unavailable (HTTP ${status || 'unknown'}). Please retry.`);
+                    (serverErr as any).status = status;
+                    throw serverErr;
+                }
+                if (authErr.message && authErr.message.includes('Invalid login credentials')) {
                     const hint = await auth.diagnoseLoginFailure(normalizedEmail);
                     throw new Error(hint);
                 }
-                throw new Error(authError.message || "Authentication service unavailable");
+                const err = new Error(authErr.message || "Authentication service unavailable");
+                (err as any).status = status;
+                (err as any).code = authErr.code;
+                throw err;
             }
 
             if (!authData.user) {

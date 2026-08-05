@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.4 (Event Data Isolation + Dashboard Stats Reconciliation + Diagnostic Logging)
+- **Current Version:** 1.5 (Event Data Isolation + Dashboard Stats Reconciliation + Diagnostic Logging + Pledge Name categories)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -126,7 +126,7 @@ fgbmfi-ng-rmm-app/
 | `delegates` | Single delegate repository | delegate_id, first_name, last_name, district, chapter, phone, email, rank, office, title, qr_hash, external_id, event_id | Authenticated |
 | `sessions` | Event sessions (sub-events) | session_id, event_id (FK), title, start_time, end_time | Authenticated |
 | `checkins` | Arrival + session attendance | checkin_id, event_id, delegate_id, session_id (nullable), checked_in_at, checked_in_by | Authenticated |
-| `pledges` | Financial pledges | id, event_id, donor_name, district, amount_pledged, amount_redeemed | Authenticated |
+| `pledges` | Financial pledges | id, event_id, donor_name, district, amount_pledged, amount_redeemed, pledge_name | Authenticated |
 | `financial_entries` | Offerings + redemptions | id, event_id, type (OFFERING/PLEDGE_REDEMPTION), amount, session_id, payer_name, pledge_id (FK), remarks | Authenticated |
 | `app_users` | System user profiles | id (UUID, FK to auth.users), email, role, district | Authenticated |
 | `system_settings` | Global config (single row) | id, titles (jsonb), districts (jsonb), ranks (jsonb), offices (jsonb), regions (jsonb), delegate_types (jsonb) | Authenticated |
@@ -429,6 +429,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - `[getStats] RPC success/failed` — which path executed for dashboard stats
 - `[getStats] arrivals exceed delegates — re-counting` — dashboard self-correction fired
 
+### 17. Pledge Name (per-event categories)
+- Pledge names are **configured per event** in EventsModule as `events.event_config.pledge_names` (a `string[]` JSONB array), edited via a chip add/remove editor in the "Delegate Form Fields" config box.
+- The FinancialsPage **New Pledge form** shows a "Pledge Name" dropdown sourced from `activeEvent.event_config.pledge_names`; empty selection = "General".
+- The selected value is stored on the pledge row as `pledges.pledge_name` (nullable, backward compatible — added by `supabase_migration_sprint15_pledge_name.sql`).
+- `db.createPledge` passes through any `Partial<Pledge>` — no service-layer change needed.
+- Display surfaces: Active Pledges table column, Reports Pledge Summary ("By Pledge Name" table), and Reports Pledge List column.
+- **types.ts exception:** `Pledge.pledge_name?: string` and `Event.event_config?: Record<string, boolean | string[]>` were added to support this feature — a documented, additive exception to the "never modify types.ts" rule.
+
 ## Code Conventions
 
 ### Naming
@@ -574,7 +582,7 @@ All v1 business logic (event lifecycle, district scoping, deduplication, harmoni
 - Record key decisions, blockers, and next steps
 
 ### File Modification Priority
-1. **Never modify:** `supabaseClient.ts` (client singleton), `types.ts` (foundational types)
+1. **Never modify:** `supabaseClient.ts` (client singleton), `types.ts` (foundational types) — EXCEPT additive field extensions explicitly required by a feature (e.g., `Pledge.pledge_name`, `Event.event_config` widening in v1.5). Document the exception when it occurs.
 2. **Prefer modifying:** Page components, `supabaseService.ts` methods, utility functions
 3. **Create new files:** Only when a new module/page is required (keep `pages/`, `components/`, `services/` structure)
 

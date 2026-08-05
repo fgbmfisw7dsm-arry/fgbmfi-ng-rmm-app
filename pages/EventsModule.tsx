@@ -14,6 +14,7 @@ const toDatetimeLocal = (utcStr?: string) => {
 const EventsModule = () => {
     const { refreshActiveEvent, refreshEvents, user, events } = useContext(AppContext);
     const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true, event_config: {} });
+    const [pledgeNameInput, setPledgeNameInput] = useState('');
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
     const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -65,10 +66,31 @@ const EventsModule = () => {
             }
             await refreshEvents(); 
             setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true}); 
+            setPledgeNameInput('');
             setEditingEventId(null);
         } catch(e:any) { 
             setStatusMsg({ type: 'error', text: e.message });
         } finally { setLoading(false); }
+    };
+
+    type EventConfig = Record<string, boolean | string[]>;
+    const getPledgeNames = (config: EventConfig = {}): string[] =>
+        Array.isArray(config.pledge_names) ? (config.pledge_names as string[]) : [];
+
+    const addPledgeName = () => {
+        const name = pledgeNameInput.trim();
+        if (!name) return;
+        const config: EventConfig = form.event_config || {};
+        const names = getPledgeNames(config);
+        if (names.includes(name)) { setPledgeNameInput(''); return; }
+        setForm({ ...form, event_config: { ...config, pledge_names: [...names, name] } });
+        setPledgeNameInput('');
+    };
+
+    const removePledgeName = (name: string) => {
+        const config: EventConfig = form.event_config || {};
+        const names = getPledgeNames(config).filter(n => n !== name);
+        setForm({ ...form, event_config: { ...config, pledge_names: names } });
     };
     
     const executeDelete = async (eventId: string, eventName: string) => {
@@ -228,12 +250,41 @@ const EventsModule = () => {
                         })}
                     </div>
 
+                    <div className="space-y-2 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Pledge Names (per-event categories)</label>
+                        <div className="flex gap-2">
+                            <input
+                                className="flex-1 p-2 border rounded-lg bg-white font-bold text-xs"
+                                placeholder="e.g. Building Fund"
+                                value={pledgeNameInput}
+                                onChange={e => setPledgeNameInput(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addPledgeName(); } }}
+                            />
+                            <button type="button" onClick={addPledgeName} className="px-3 py-2 bg-purple-600 text-white rounded-lg font-black uppercase text-[10px] hover:bg-purple-700">Add</button>
+                        </div>
+                        {(() => {
+                            const config: EventConfig = form.event_config || {};
+                            const names = getPledgeNames(config);
+                            if (names.length === 0) return <p className="text-[9px] text-gray-400 font-bold uppercase pt-1">None configured — dropdown will show only "General".</p>;
+                            return (
+                                <div className="flex flex-wrap gap-2 pt-2">
+                                    {names.map(name => (
+                                        <span key={name} className="inline-flex items-center gap-2 px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg font-black uppercase text-[10px]">
+                                            {name}
+                                            <button type="button" onClick={() => removePledgeName(name)} className="text-purple-500 hover:text-red-600 font-black">×</button>
+                                        </span>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+                    </div>
+
                     <div className="flex gap-2 pt-2">
                         <button type="submit" disabled={loading || !isAdmin} className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg hover:bg-blue-700 disabled:opacity-50">
                             {editingEventId ? 'Update' : 'Create'}
                         </button>
                         {editingEventId && (
-                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true, event_config: {}}); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
+                            <button type="button" onClick={() => { setEditingEventId(null); setForm({name:'', start_date:'', end_date:'', region:'National', is_active: true, event_config: {}}); setPledgeNameInput(''); }} className="px-4 bg-gray-200 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
                         )}
                     </div>
                 </form>
