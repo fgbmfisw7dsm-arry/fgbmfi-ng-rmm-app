@@ -68,21 +68,31 @@ export const exportToCSV = (rows: Record<string, any>[], filename: string, colum
 };
 
 /**
- * Enhanced PDF Export: Uses a wider viewport (1600px) for landscape and exact A4
- * inner width (756px) for portrait to prevent html2canvas offset cropping. The
- * onclone callback flattens overflow containers, sticky elements, and min-w-max,
- * strips border-radius and min-height from the root element (prevents capture
- * offset artifacts), removes break-inside-avoid (image-based pagination ignores
- * CSS page-break rules), and applies explicit background/color fallbacks for
- * Tailwind utility classes that html2canvas may fail to resolve.
+ * Enhanced PDF Export: Uses the exact A4 inner width for the default viewport
+ * (portrait: 200mm = 756px, landscape: 287mm = 1085px) so text renders at
+ * proportional PDF sizes. The optional forceViewportWidth override allows
+ * report pages with wide table matrices to use a larger viewport (e.g. 1600px)
+ * without breaking standard document exports. The onclone callback flattens
+ * overflow containers, sticky elements, and min-w-max, strips border-radius
+ * and min-height from the root element (prevents capture offset artifacts),
+ * and applies explicit background/color fallbacks for Tailwind utility classes
+ * that html2canvas may fail to resolve.
  */
-export const exportToPDF = (element: HTMLElement, filename: string, orientation: 'portrait' | 'landscape') => {
+export const exportToPDF = (
+    element: HTMLElement,
+    filename: string,
+    orientation: 'portrait' | 'landscape',
+    forceViewportWidth?: number
+) => {
     if (!element) {
         console.error("PDF export failed: Invalid element.");
         return;
     }
 
-    const viewportWidth = orientation === 'landscape' ? 1600 : Math.round(200 * 96 / 25.4);
+    const defaultWidth = orientation === 'landscape'
+        ? Math.round(287 * 96 / 25.4)
+        : Math.round(200 * 96 / 25.4);
+    const viewportWidth = forceViewportWidth ?? defaultWidth;
     window.scrollTo(0, 0);
 
     if (!document.getElementById('pdf-export-print-styles')) {
@@ -143,9 +153,6 @@ export const exportToPDF = (element: HTMLElement, filename: string, orientation:
                     root.style.borderRadius = '0';
                     root.style.minHeight = '0';
                 }
-                clonedDoc.querySelectorAll('.break-inside-avoid').forEach(el => {
-                    (el as HTMLElement).style.breakInside = 'auto';
-                });
                 clonedDoc.querySelectorAll('.bg-blue-900').forEach(el => {
                     (el as HTMLElement).style.setProperty('background-color', '#1e3a8a', 'important');
                     (el as HTMLElement).style.setProperty('color', '#ffffff', 'important');

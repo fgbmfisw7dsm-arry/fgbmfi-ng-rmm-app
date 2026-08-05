@@ -140,7 +140,7 @@ const ReportsPage = () => {
         return { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges };
     }, [data, selectedSessionId, settings]);
 
-    const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape'); };
+    const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
     const renderMinistryReport = () => {
         if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading sessions data...</div>;

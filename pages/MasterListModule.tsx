@@ -162,7 +162,7 @@ const MasterListModule = () => {
         return list.some(item => item.replace(/\s+/g, ' ').trim().toUpperCase() === normalized);
     };
 
-    const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape'); };
+    const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape', 1600); };
     const handleCSVExport = () => { exportToCSV(delegates, 'Delegate_Master_List.csv'); };
 
     return (

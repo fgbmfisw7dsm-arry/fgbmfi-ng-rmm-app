@@ -271,7 +271,7 @@ const SessionMinistryPage: React.FC = () => {
   };
 
   const handleExportPDF = () => {
-    if (summaryRef) exportToPDF(summaryRef, `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.pdf`, 'landscape');
+    if (summaryRef) exportToPDF(summaryRef, `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.pdf`, 'landscape', 1600);
   };
 
   const handleExportCSV = () => {
