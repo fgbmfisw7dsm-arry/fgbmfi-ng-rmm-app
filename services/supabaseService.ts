@@ -208,12 +208,15 @@ export const auth = {
                 });
                 const status = Number(authErr.status) || 0;
                 if (authErr.name === 'AuthRetryableFetchError' || status >= 500) {
+                    const goTrueDetail = [authErr.code, authErr.message, authErr.details, authErr.hint].filter(Boolean).join(' | ');
                     let diagnosticHint = '';
                     try {
                         const d = await auth.diagnoseLoginFailure(normalizedEmail, password);
                         if (d) diagnosticHint = ` — ${d}`;
                     } catch {}
-                    const serverErr = new Error(`Authentication service temporarily unavailable (HTTP ${status || 'unknown'}).${diagnosticHint} Please retry.`);
+                    const serverErr = new Error(
+                        `Authentication service temporarily unavailable (HTTP ${status || 'unknown'})${goTrueDetail ? ` [GoTrue: ${goTrueDetail}]` : ''}.${diagnosticHint} Please retry.`
+                    );
                     (serverErr as any).status = status;
                     throw serverErr;
                 }
