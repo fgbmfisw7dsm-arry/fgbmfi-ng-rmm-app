@@ -23,8 +23,6 @@
         visibility: visible !important;
         opacity: 1 !important;
         background-color: white !important;
-        padding: 0 !important; 
-        margin: 0 !important;
         box-shadow: none !important;
         border: none !important;
         width: 100% !important;
@@ -43,10 +41,18 @@
       .print-mode * {
         overflow: visible !important;
         max-height: none !important;
-        max-width: none !important;
         box-sizing: border-box !important;
         transition: none !important;
         animation: none !important;
+      }
+
+      /* Aggressive report-only rules (tables + wide matrices) — NOT applied to prose documents */
+      .pdf-export-mode {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .pdf-export-mode * {
+        max-width: none !important;
       }
 
       /* FIXED: Ensure sub-headers are visible in PDF */
@@ -64,13 +70,17 @@
       }
 
       .print-mode table {
-        width: auto !important; 
-        min-width: 100% !important;
         display: table !important;
         border-collapse: collapse !important;
-        margin: 0 !important; 
         table-layout: auto !important;
-        float: left !important; 
+      }
+
+      /* Aggressive table sizing for wide report matrices only */
+      .pdf-export-mode table {
+        width: auto !important;
+        min-width: 100% !important;
+        margin: 0 !important;
+        float: left !important;
       }
       
       .print-mode tr {
@@ -88,10 +98,9 @@
         white-space: nowrap !important;
       }
 
-      /* RESTORATION: Priority Gold Cell Styling */
       .print-mode td.print-gold {
-        background-color: #fbbf24 !important; /* Tailwind yellow-400 / Gold */
-        color: #1e3a8a !important; /* Blue-900 contrast */
+        background-color: #fbbf24 !important;
+        color: #1e3a8a !important;
         font-weight: 900 !important;
       }
       
@@ -103,7 +112,6 @@
         position: static !important;
       }
 
-      /* FIX: Ensure footer clears the floating table and starts on a new line */
       .print-mode .report-footer {
         clear: both !important;
         display: flex !important;
@@ -113,7 +121,6 @@
         border-top: 2px solid #eeeeee !important;
       }
       
-      /* Reset text colors for high-contrast printing */
       .print-mode .text-blue-900 { color: #1e3a8a !important; }
       .print-mode .text-gray-400 { color: #4b5563 !important; }
       .print-mode .text-gray-500 { color: #374151 !important; }

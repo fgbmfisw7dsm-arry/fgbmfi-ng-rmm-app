@@ -213,7 +213,7 @@ const ReportsPage = () => {
                                             <th className="border p-2 text-left">Category</th>
                                             <th className="border p-2 text-center">Scanned</th>
                                             <th className="border p-2 text-center">Manual</th>
-                                            <th className="border p-2 text-center bg-blue-50">Total</th>
+                                            <th className="border p-2 text-center bg-blue-50">Scanned Total</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -232,7 +232,7 @@ const ReportsPage = () => {
                                                     <td className="border p-2 font-black uppercase text-blue-900">{RESPONSE_TYPE_LABELS[type]}</td>
                                                     <td className="border p-2 text-center font-bold">{scanned}</td>
                                                     <td className="border p-2 text-center font-bold">{manual}</td>
-                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned + manual}</td>
+                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned}</td>
                                                 </tr>
                                             );
                                         })}
@@ -476,10 +476,10 @@ const ReportsPage = () => {
                                 <tbody className="divide-y">
                                     {sessions.map(s => {
                                         const att = (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length;
-                                        const ft = ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).reduce((sum: number, r: any) => sum + (Number(r.total_count) || 0), 0));
-                                        const slv = ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).reduce((sum: number, r: any) => sum + (Number(r.total_count) || 0), 0));
-                                        const mi = ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).reduce((sum: number, r: any) => sum + (Number(r.total_count) || 0), 0));
-                                        const hgb = ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).reduce((sum: number, r: any) => sum + (Number(r.total_count) || 0), 0));
+                                        const ft = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length;
+                                        const slv = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length;
+                                        const mi = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length;
+                                        const hgb = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length;
                                         const vd = (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
                                         const offering = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
                                         const redemption = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
@@ -504,10 +504,10 @@ const ReportsPage = () => {
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length, 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).reduce((s2: number, r: any) => s2 + (Number(r.total_count) || 0), 0)), 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).reduce((s2: number, r: any) => s2 + (Number(r.total_count) || 0), 0)), 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).reduce((s2: number, r: any) => s2 + (Number(r.total_count) || 0), 0)), 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + ((ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length) + ((ministryData?.summaries || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).reduce((s2: number, r: any) => s2 + (Number(r.total_count) || 0), 0)), 0)}</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length, 0)}</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length, 0)}</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length, 0)}</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
                                         <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
                                         <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
