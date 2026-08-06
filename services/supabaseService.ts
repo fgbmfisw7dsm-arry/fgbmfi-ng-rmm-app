@@ -1012,6 +1012,15 @@ export const db = {
                 if (arrivalErr && !arrivalErr.message?.includes('duplicate')) throw arrivalErr;
             }
 
+            const { data: sessionCheckin } = await supabase.from('checkins')
+                .select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', sessionId).maybeSingle();
+            if (!sessionCheckin) {
+                const { error: sessionErr } = await supabase.from('checkins').insert({
+                    event_id: eventId, delegate_id: delegateId, session_id: sessionId, checked_in_by: registrar.id
+                });
+                if (sessionErr && !sessionErr.message?.includes('duplicate') && sessionErr.code !== '23505') throw sessionErr;
+            }
+
             const { data: existing } = await supabase.from('session_responses')
                 .select('response_id')
                 .eq('event_id', eventId).eq('delegate_id', delegateId)

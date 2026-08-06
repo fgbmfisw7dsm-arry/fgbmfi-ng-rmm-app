@@ -153,9 +153,14 @@ const SessionMinistryPage: React.FC = () => {
 
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked || !user || !activeEventId) { processingRef.current = false; return; }
+    if (!selectedSessionId) {
+      setFeedback({ type: 'error', msg: 'Please select a session first.' });
+      processingRef.current = false;
+      return;
+    }
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
-      const res = await db.checkInByCode(activeEventId, codeVal, user, undefined);
+      const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
       if (res?.success && res.delegate) {
         await handleRecord(res.delegate.delegate_id);
       } else if (res?.needsRegistration) {
@@ -267,7 +272,7 @@ const SessionMinistryPage: React.FC = () => {
   const total = (type: SessionResponseType): number => {
     if (!currentDashboard) return 0;
     const key = type.toLowerCase();
-    return (Number((currentDashboard as any)[`${key}_count`] || 0)) + (Number((currentDashboard as any)[`${key}_summary`] || 0));
+    return Number((currentDashboard as any)[`${key}_count`] || 0);
   };
 
   const handleExportPDF = () => {
@@ -286,10 +291,10 @@ const SessionMinistryPage: React.FC = () => {
     const dataRows = (dashboard.data || []).map(d => ({
       Session: d.session_title,
       ATT: d.attendance,
-      FT: (d.ft_count + d.ft_summary) || 0,
-      SLV: (d.slv_count + d.slv_summary) || 0,
-      MI: (d.mi_count + d.mi_summary) || 0,
-      HGB: (d.hgb_count + d.hgb_summary) || 0,
+      FT: d.ft_count || 0,
+      SLV: d.slv_count || 0,
+      MI: d.mi_count || 0,
+      HGB: d.hgb_count || 0,
       VD: d.voice_distribution || 0,
     }));
     exportToCSV([...headerRows, ...dataRows], `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.csv`);
@@ -565,10 +570,10 @@ const SessionMinistryPage: React.FC = () => {
                       <tr key={d.session_id} className={`hover:bg-blue-50 transition-colors ${d.session_id === selectedSessionId ? 'bg-blue-50' : ''}`}>
                         <td className="p-3 font-bold uppercase text-blue-900">{d.session_title}</td>
                         <td className="p-3 text-center font-bold">{d.attendance || '-'}</td>
-                        <td className="p-3 text-center font-bold">{d.ft_count + d.ft_summary || '-'}</td>
-                        <td className="p-3 text-center font-bold">{d.slv_count + d.slv_summary || '-'}</td>
-                        <td className="p-3 text-center font-bold">{d.mi_count + d.mi_summary || '-'}</td>
-                        <td className="p-3 text-center font-bold">{d.hgb_count + d.hgb_summary || '-'}</td>
+                        <td className="p-3 text-center font-bold">{d.ft_count || '-'}</td>
+                        <td className="p-3 text-center font-bold">{d.slv_count || '-'}</td>
+                        <td className="p-3 text-center font-bold">{d.mi_count || '-'}</td>
+                        <td className="p-3 text-center font-bold">{d.hgb_count || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.voice_distribution || '-'}</td>
                       </tr>
                     );
@@ -578,10 +583,10 @@ const SessionMinistryPage: React.FC = () => {
                   {(() => {
                     const data = dashboard.data || [];
                     const sumAtt = data.reduce((s, d) => s + (d.attendance || 0), 0);
-                    const sumFT = data.reduce((s, d) => s + (d.ft_count + d.ft_summary), 0);
-                    const sumSLV = data.reduce((s, d) => s + (d.slv_count + d.slv_summary), 0);
-                    const sumMI = data.reduce((s, d) => s + (d.mi_count + d.mi_summary), 0);
-                    const sumHGB = data.reduce((s, d) => s + (d.hgb_count + d.hgb_summary), 0);
+                    const sumFT = data.reduce((s, d) => s + (d.ft_count || 0), 0);
+                    const sumSLV = data.reduce((s, d) => s + (d.slv_count || 0), 0);
+                    const sumMI = data.reduce((s, d) => s + (d.mi_count || 0), 0);
+                    const sumHGB = data.reduce((s, d) => s + (d.hgb_count || 0), 0);
                     const sumVD = data.reduce((s, d) => s + (d.voice_distribution || 0), 0);
                     return (
                       <tr className="bg-blue-900 text-white font-black">
