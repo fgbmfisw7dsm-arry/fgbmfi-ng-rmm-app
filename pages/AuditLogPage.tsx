@@ -72,9 +72,9 @@ const AuditLogPage = () => {
                             <option key={a} value={a}>{formatAction(a)}</option>
                         ))}
                     </select>
-                    <label className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase cursor-pointer">
+                    <label className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase cursor-pointer" title="User create/update/delete — these are not scoped to a specific event">
                         <input type="checkbox" checked={systemOnly} onChange={e => setSystemOnly(e.target.checked)} className="rounded" />
-                        System Events
+                        User &amp; System Events
                     </label>
                     <button onClick={fetchLogs} disabled={loading} className="px-4 py-2 bg-blue-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all">
                         {loading ? 'Loading...' : 'Refresh'}
@@ -118,6 +118,12 @@ const AuditLogPage = () => {
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 text-[10px] text-blue-800 space-y-1">
+                <p className="font-black uppercase tracking-widest">High-Volume Assurance</p>
+                <p>Each audit entry is a fire-and-forget async insert — it never blocks the user's operation. At scale (1000+ check-ins/minute), entries simply queue and write asynchronously.</p>
+                <p>When <span className="font-bold">audit is OFF</span> (System Setup), the audit function returns at the first line — <span className="font-bold">zero overhead</span>. Toggle off during high-traffic sessions if needed.</p>
             </div>
         </div>
     );

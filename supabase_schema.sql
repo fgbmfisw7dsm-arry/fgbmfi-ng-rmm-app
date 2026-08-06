@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
     regions TEXT[] DEFAULT '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}',
     titles TEXT[] DEFAULT '{"Mr", "Mrs", "Ms", "Chief", "Dr", "Prof", "Engr", "Elder"}',
     delegate_types TEXT[] DEFAULT '{"Member","National Guest","Free Guest","Dependant-Adult","Dependant-Teen","Dependant-Children","International"}',
+    audit_enabled BOOLEAN DEFAULT true,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
