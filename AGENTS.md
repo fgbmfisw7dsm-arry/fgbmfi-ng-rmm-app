@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.5 (Event Data Isolation + Dashboard Stats Reconciliation + Diagnostic Logging + Pledge Name categories)
+- **Current Version:** 1.6 (signUp-based User Creation + bcrypt Cost 10 + Session Attendance Cascade + PDF Dual-Mode Export + Scanned/Manual Validation Columns)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -153,26 +153,32 @@ CREATE UNIQUE INDEX idx_checkins_event_delegate_arrival_unique ON checkins(event
 CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_responses(event_id, delegate_id, session_id, response_type);
 ```
 
-### Supabase RPCs (7)
-- `create_app_user(email, password, role, district)` — creates auth.users + app_users row
+### Supabase RPCs (9)
+- `create_app_user(email, password, role, district)` — **LEGACY** — manual auth.users INSERT via RPC. Superseded by `db.createUser → signUp()` for new user creation. Still serves as a fallback/recovery mechanism for re-creating broken auth rows.
+- `confirm_user_by_email(p_email)` — SECURITY DEFINER; auto-confirms a user created via `signUp()` and ensures an email identity row exists. Used by the new `createUser` flow (v1.6).
 - `delete_app_user(user_id_to_delete)` — deletes from app_users + auth.users
-- `reset_user_password(user_id, new_password)` — updates auth.users password
+- `reset_user_password(user_id, new_password)` — updates auth.users password (bcrypt cost 10, manual salt)
 - `get_my_profile()` — returns the caller's `app_users` row
-- `check_login_account(p_email, p_password)` — SECURITY DEFINER login diagnostics (works WITHOUT a session; reports malformed email / no account / wrong password / unconfirmed / missing identity / deactivated)
-- `v_auth_integrity_check` (view) — audit view for broken user detection
+- `check_login_account(p_email, p_password)` — SECURITY DEFINER login diagnostics (works WITHOUT a session; reports malformed email, no account, wrong password, unconfirmed, missing identity, deactivated, AND bcrypt_cost from stored hash)
+- `v_auth_integrity_check` (view) — audit view for broken user detection, includes `bcrypt_cost` column
 - `get_event_dashboard_stats(p_event_id, p_district_filter)` — RPC-based aggregated dashboard counts
 - `get_session_ministry_stats(p_event_id)` — RPC for session response counts + attendance
-- `get_ministry_export_data(p_event_id, p_session_id)` — RPC for ministry CSV export data
+- `get_ministry_export_data(p_event_id, p_session_id)` — RPC for ministry CSV export data (includes attendance)
 - `get_next_batch_number(p_event_id)` — RPC for badge batch sequential numbering
 
-### Auth Row Integrity (2026-08-01 fix)
-Historical `create_app_user` rewrites dropped the `aud`, `instance_id`, and `role` columns on `auth.users`, causing `signInWithPassword()` to silently fail with "Invalid login credentials" for every newly-created user. The fix in `supabase_migration_2026_08_fix_auth_row_integrity.sql` is the reference implementation. **Any future rewrite of `create_app_user` must:**
+### Auth Row Integrity (v1.6 — signUp-based User Creation)
+
+**Current approach (v1.6):** `db.createUser` no longer uses the `create_app_user` RPC. Instead, it calls `supabase.auth.signUp()` via a **temporary Supabase client** (`persistSession: false`, `autoRefreshToken: false`). This lets GoTrue handle all `auth.users` + `auth.identities` row creation natively, eliminating schema drift, bcrypt cost mismatches, and missing-column regressions permanently. After signUp, `confirm_user_by_email` RPC auto-confirms the user, and `app_users` is upserted.
+
+**Legacy RPC (`create_app_user`) — kept as recovery fallback only.** Historical rewrites dropped the `aud`, `instance_id`, and `role` columns on `auth.users`, causing `signInWithPassword()` to silently fail. The `supabase_migration_2026_08_fix_auth_row_integrity.sql` is the reference implementation for this RPC. **Any future rewrite must:**
 1. Always set `aud='authenticated'` and `role='authenticated'`
 2. Pull `instance_id` from a healthy existing user (or omit if none exists)
-3. Use `gen_random_uuid()` for `auth.identities.id` (not `new_user_id`) to avoid PK collision with non-email identities
-4. Confirm the user via `email_confirmed_at` (NEVER) → `confirmed_at` (NEVER) → token-clear fallback, each in its own EXCEPTION block
-5. Use dynamic SQL (`EXECUTE`) for all UPDATE statements on `auth.users` to tolerate GENERATED ALWAYS columns
-6. Build the SET clause dynamically using `information_schema.columns` checks (newer GoTrue versions drop `email_change_token`, `email_change`, `recovery_token`, etc.)
+3. Use `gen_random_uuid()` for `auth.identities.id` (not `new_user_id`) to avoid PK collision
+4. Confirm the user via `email_confirmed_at` (NEVER) → `confirmed_at` (NEVER) → token-clear fallback
+5. Use dynamic SQL (`EXECUTE`) for all UPDATE statements on `auth.users`
+6. Build the SET clause dynamically using `information_schema.columns` checks
+
+**bcrypt Cost Constraint:** GoTrue (Supabase Auth) requires bcrypt cost ≥ 10. `gen_salt('bf')` defaults to cost 6 and MUST NEVER be used — it causes HTTP 500 on login. Use the manual cost-10 salt construction: `'$2a$10$' || substring(translate(encode(decode(md5(random()::text), 'hex'), 'base64'), '+/', './'), 1, 22)`. The `signUp()`-based approach avoids this concern entirely.
 
 ## Authentication & Authorization
 
@@ -306,11 +312,10 @@ supabase.channel('dashboard_sync')
 - **Performance risk at 25K scale:** should filter by `event_id=eq.{activeEventId}`
 
 ### 7. PDF Export
-- `exportToPDF()` in `utils.ts`: clones element → wide viewport (1600px) → html2canvas → html2pdf
-- Includes scale=2 for clarity, orientation toggle
-- CSS injection via `pdf-export-mode` class: removes `overflow`, `min-w-max`, `sticky` from capture
-- `onclone` callback flattens all `.overflow-x-auto`, `.overflow-hidden`, `.min-w-max`, `.sticky` elements in the cloned document
-- `requestAnimationFrame` → `setTimeout(500ms)` ensures DOM layout before capture (replaces fixed 1500ms delay)
+- `exportToPDF(element, filename, orientation, forceViewportWidth, documentType)` in `utils.ts`
+- **Dual-mode:** `'report'` (default) — aggressive table sanitation via `pdf-export-mode` CSS class (oversized viewport, overflow flatten, Tailwind color fallbacks). `'document'` — lightweight capture preserving natural padding/max-width for prose content (User Manual, Training Guide).
+- `index.html` CSS: `.print-mode` keeps layout-safe rules; `.pdf-export-mode` applies aggressive table-reset rules (max-width:none, padding:0, table float:left) only for reports.
+- Clone-based capture: `requestAnimationFrame` → `setTimeout(500ms)` → html2canvas (scale=2) → jsPDF
 - **Does not scale to 25K rows** — use summary-only PDF + full CSV export
 
 ### 8. Bulk Import (CSV Upload + Column Mapping)
@@ -442,6 +447,11 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - `[getPaginatedDelegates] POST-FILTER: stripped N delegates` — cross-event data caught and removed
 - `[getStats] RPC success/failed` — which path executed for dashboard stats
 - `[getStats] arrivals exceed delegates — re-counting` — dashboard self-correction fired
+- `[auth.login] signInWithPassword error:` — full GoTrue error object (name, status, code, details, hint)
+- `[auth.login] FATAL:` — complete serialized error dump for uncaught login exceptions
+- `[diagnoseLoginFailure] RPC failed/exception:` — why the diagnostic RPC couldn't give results
+- `[createUser] confirm_user_by_email ...:` — RPC success/failure during user creation auto-confirm
+- `[createUser] app_users upsert failed:` — profile insertion failed after auth creation
 
 ### 17. Pledge Name (per-event categories)
 - Pledge names are **configured per event** in EventsModule as `events.event_config.pledge_names` (a `string[]` JSONB array), edited via a chip editor in the "Delegate Form Fields" config box.
@@ -453,10 +463,21 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - Display surfaces: Active Pledges table column, Reports Pledge Summary ("By Pledge Name" table), and Reports Pledge List column.
 - **types.ts exception:** `Pledge.pledge_name?: string` and `Event.event_config?: Record<string, boolean | string[]>` were added to support this feature — a documented, additive exception to the "never modify types.ts" rule.
 
-### 18. Login Account Validation & Diagnostics (Sprint 15)
-- **New accounts require a valid email format.** `UsersModule.tsx` and `db.createUser` both validate `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` (after trim/lowercase) and block creation otherwise. Rationale: bare usernames (no `@domain`) cause GoTrue to return HTTP 500 on login — see `supabase_migration_sprint15_check_login_account_rpc.sql`.
-- **`check_login_account(p_email, p_password DEFAULT NULL)`** is a SECURITY DEFINER RPC readable WITHOUT an active session, so `auth.diagnoseLoginFailure()` (invoked on "Invalid login credentials") reports the truthful reason: malformed email, no account, wrong password (when `p_password` passed), unconfirmed, missing identity, or deactivated. It must be deployed to Supabase before the login page can use it (it falls back to the generic message on RPC failure).
+### 18. Login Account Validation & Diagnostics (v1.6)
+- **New user creation uses `signUp()`.** `db.createUser` now calls `supabase.auth.signUp()` via an isolated client (`persistSession: false`, `autoRefreshToken: false`). GoTrue handles all `auth.users` + `auth.identities` creation. `confirm_user_by_email` RPC auto-confirms, then `app_users` is upserted. The admin's session is never affected.
+- **New accounts require a valid email format.** `UsersModule.tsx` and `db.createUser` both validate `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` (after trim/lowercase) and block creation otherwise.
+- **`check_login_account(p_email, p_password DEFAULT NULL)`** is a SECURITY DEFINER RPC readable WITHOUT an active session. Reports: malformed email, no account, wrong password, unconfirmed, missing identity, deactivated, AND **bcrypt_cost** from the stored password hash. Used by `diagnoseLoginFailure` for both "Invalid login credentials" AND HTTP 500 errors.
+- **HTTP 500 diagnostic path:** When `signInWithPassword` returns status ≥ 500, `diagnoseLoginFailure` runs and its output (including raw GoTrue error code/details) is appended to the user-visible error message.
 - `diagnoseLoginFailure` no longer calls `get_my_profile()` (which requires `auth.uid()` and therefore always failed pre-login).
+
+### 19. Session Ministry — Alter Call Recording Cascade (v1.6)
+- **QR scan path:** `handleCodeSubmit` passes `selectedSessionId` to `checkInByCode`, which verifies both arrival AND session attendance before recording the alter call response.
+- **Manual search path:** `handleRecord` → `recordSessionResponse` ensures a three-tier cascade:
+  1. Check-in Arrival (checkins with `session_id IS NULL`) — auto-inserts if missing
+  2. Session Attendance (checkins with `session_id = currentSession`) — auto-inserts if missing
+  3. Alter Call Response (session_responses) — recorded only after both attendance layers exist
+- Duplicate inserts caught via `23505` unique constraint errors — returns "Already recorded" instead of throwing.
+- **Scanned vs Manual columns:** `_count` (individual per-delegate responses) and `_summary` (aggregate manual totals) are separate validation figures, NOT additive. Tables show `_count` in the primary column; manual summaries are available in the detailed Sessions Report tab for cross-validation.
 
 ## Code Conventions
 
@@ -485,6 +506,8 @@ enum FinancialType { OFFERING = 'OFFERING', PLEDGE_REDEMPTION = 'PLEDGE_REDEMPTI
 - Direct `supabase.from().select()` in page components — always go through `supabaseService.ts`
 - Server-side rendering until Next.js migration (v2)
 - Comments unless explaining non-obvious logic
+- **Using `gen_salt('bf')` in any auth RPC** — defaults to bcrypt cost 6, GoTrue requires ≥ 10. Causes HTTP 500 on login. Always use the manual cost-10 salt, or (preferred) use `signUp()` which avoids manual password hashing.
+- **Manually INSERTing into `auth.users`** — fragile, breaks on GoTrue schema updates. Use `supabase.auth.signUp()` via isolated client instead. The legacy `create_app_user` RPC is a recovery fallback only.
 
 ## Deployment
 
@@ -531,6 +554,8 @@ npm run build   # Production build to /dist
 - Rely on 4-digit QR codes as sole check-in method above 10K delegates
 - Create delegates without `event_id` — every delegate INSERT must include `event_id`
 - Add `event_id.is.null` or `OR event_id IS NULL` to any Supabase query
+- Use `gen_salt('bf')` in any auth password function — defaults to bcrypt cost 6, GoTrue requires ≥ 10
+- Manually INSERT into `auth.users` — always use `supabase.auth.signUp()` (v1.6+)
 
 ### Known Vulnerabilities
 1. **4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots
@@ -573,6 +598,12 @@ npm run build   # Production build to /dist
 | Sessions report no session demarcation | Individual records sub-headers now show session name before response type label | RESOLVED | v1.4 |
 | Badge download "404 Bucket not found" | Bucket is private; downloads now use authenticated `storage.download()` blob instead of public URL; `resolveBadgeFileName` derives real filename | RESOLVED | v1.5 |
 | Storage/batch deletes fail silently | `storage.objects` RLS policies added (sprint16); `deleteBadgeBatch`/`deleteBadgeBatches` remove the real filename + cascade logs; StorageModule reports honest failure counts | RESOLVED | v1.5 |
+| Manual auth.users INSERT breaks login | Rewrote `createUser` to use `supabase.auth.signUp()` via isolated client (`persistSession: false`). GoTrue handles all auth internals. Eliminates bcrypt cost mismatches (cost 6→10), missing columns, and schema drift permanently | RESOLVED | v1.6 |
+| PDF export clips left side on prose docs | Added `'document'` mode to `exportToPDF`: preserves padding/max-width, skips aggressive table CSS. `.print-mode` / `.pdf-export-mode` split in `index.html` | RESOLVED | v1.6 |
+| Scanned + Manual columns summed together | Sessions Report, SessionMinistryPage stats/table/tfoot/CSV now use `_count` only (individual scanned responses). Manual summaries shown as separate cross-validation column, not added to total | RESOLVED | v1.6 |
+| Alter call recording missing session attendance | `recordSessionResponse` now performs three-tier cascade: Arrival → Session Attendance → Response. QR path passes `selectedSessionId` to `checkInByCode` for upfront verification | RESOLVED | v1.6 |
+| bcrypt cost 6 in auth migration files | All `gen_salt('bf')` replaced with manual cost-10 salt. Recovery SQL deployed. `check_login_account` and `v_auth_integrity_check` now report `bcrypt_cost`. Preventative comments in `supabase_schema.sql` | RESOLVED | v1.6 |
+| Login HTTP 500 no diagnostics | `diagnoseLoginFailure` now runs for 500 errors; raw GoTrue error code/details/message appended to visible error. `check_login_account` returns `bcrypt_cost` with recommendation | RESOLVED | v1.6 |
 
 ## v2.0 Evolution
 
@@ -625,5 +656,7 @@ All v1 business logic (event lifecycle, district scoping, deduplication, harmoni
 - [ ] No secrets in code or responses
 - [ ] Input validation before Supabase insert/update
 - [ ] Supabase RLS policies cover the operation (check `supabase_schema.sql`)
-- [ ] `create_app_user` RPC: always set `aud='authenticated'`, `role='authenticated'`, pull `instance_id` from existing user, use `gen_random_uuid()` for `auth.identities.id`
-- [ ] `auth.users` rows have `aud`, `instance_id`, `role`, `email_confirmed_at`/`confirmed_at`, and a matching `auth.identities` row (verify via `v_auth_integrity_check`)
+- [ ] User creation: use `db.createUser` (signUp via isolated client) — never manually INSERT into `auth.users`
+- [ ] Auth RPCs: never use `gen_salt('bf')` — always use cost-10 manual salt construction
+- [ ] New users: verify login works via `check_login_account` + `v_auth_integrity_check` (bcrypt_cost ≥ 10, all flags green)
+- [ ] Session attendance: `recordSessionResponse` auto-cascades Arrival + Session Attendance before alter call response
