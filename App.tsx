@@ -28,6 +28,7 @@ import UserManualModule from './pages/UserManualModule';
 import SessionMinistryPage from './pages/SessionMinistryPage';
 import BadgePrintingModule from './pages/BadgePrintingModule';
 import StorageModule from './pages/StorageModule';
+import AuditLogPage from './pages/AuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const ALL_ADMIN_ROLES: UserRole[] = [
@@ -246,6 +247,9 @@ const AppContent = () => {
                      } />
                      <Route path="/admin/storage" element={
                        <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><StorageModule /></ProtectedRoute>
+                     } />
+                     <Route path="/admin/audit" element={
+                       <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><AuditLogPage /></ProtectedRoute>
                      } />
                      <Route path="/admin/badges" element={
                        <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><BadgePrintingModule /></ProtectedRoute>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { db } from '../services/supabaseService';
+import { db, setAuditEnabled } from '../services/supabaseService';
 import { SystemSettings, Chapter, isAdminRole } from '../types';
 import { AppContext } from '../context/AppContext';
 
@@ -374,6 +374,33 @@ const SetupModule = () => {
                                 )}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border shadow-sm p-6 flex flex-col lg:col-span-2">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-900">Audit Logging</h3>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">Track registrar & admin operations (check-ins, calls, finances, edits)</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={settings?.audit_enabled !== false}
+                                onChange={async (e) => {
+                                    const enabled = e.target.checked;
+                                    const newSettings = { ...settings, audit_enabled: enabled } as SystemSettings;
+                                    try {
+                                        const updated = await db.updateSettings(newSettings);
+                                        setSettings(updated);
+                                        setAuditEnabled(enabled);
+                                    } catch { /* toggle state remains unchanged on error */ }
+                                }}
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <span className="ms-3 text-xs font-bold text-gray-700 uppercase">{settings?.audit_enabled !== false ? 'ON' : 'OFF'}</span>
+                        </label>
                     </div>
                 </div>
             </div>

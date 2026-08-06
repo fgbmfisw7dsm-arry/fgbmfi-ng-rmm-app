@@ -190,6 +190,7 @@ export interface SystemSettings {
   regions: string[];
   titles: string[];
   delegate_types: string[];
+  audit_enabled?: boolean;
 }
 
 export enum SessionResponseType {
@@ -328,4 +329,17 @@ export interface BadgeLayoutConfig {
   badgeW: number;
   badgeH: number;
   cutGap: number;
+}
+
+export interface AuditLog {
+  id: number;
+  event_id: string;
+  action_type: string;
+  performed_by: string;
+  performer_email?: string;
+  target_type?: string;
+  target_id?: string;
+  summary: string;
+  metadata?: Record<string, any>;
+  created_at: string;
 }

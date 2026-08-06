@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, RESPONSE_TYPE_LABELS } from '../types';
 import { generateCodeFromId, generateQrHash } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
@@ -313,18 +313,70 @@ export const auth = {
     },
 };
 
+let auditEnabled = true;
+
+export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
+
+const updateAuditSyncCache = (settings: SystemSettings) => {
+    if (settings?.audit_enabled !== undefined) auditEnabled = settings.audit_enabled;
+    else auditEnabled = true;
+};
+
+const recordAuditLog = (
+    eventId: string,
+    actionType: string,
+    summary: string,
+    performer: User | null,
+    targetType?: string,
+    targetId?: string,
+    metadata?: Record<string, any>
+) => {
+    if (!auditEnabled) return;
+    const effectiveEventId = eventId || null;
+    (async () => {
+        let pid = performer?.id;
+        let pemail = performer?.email;
+        if (!pid) {
+            const { data } = await supabase.auth.getUser();
+            pid = data.user?.id;
+            pemail = data.user?.email;
+            if (!pid) return;
+        }
+        await supabase.from('audit_log').insert({
+            event_id: effectiveEventId,
+            action_type: actionType,
+            performed_by: pid,
+            performer_email: pemail || null,
+            target_type: targetType || null,
+            target_id: targetId || null,
+            summary,
+            metadata: metadata || {}
+        });
+    })().catch(() => {});
+};
+
 export const db = {
     getEvents: async (): Promise<Event[]> =>
         handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
 
-    createEvent: async (event: Omit<Event, 'event_id'>): Promise<Event> =>
-        handleSupabaseError(await supabase.from('events').insert(event).select().single()),
+    createEvent: async (event: Omit<Event, 'event_id'>): Promise<Event> => {
+        const result = handleSupabaseError(await supabase.from('events').insert(event).select().single());
+        recordAuditLog(result.event_id, 'event_create', `Event created: ${result.name}`, null, 'event', result.event_id);
+        return result;
+    },
 
-    updateEvent: async (id: string, updates: Partial<Event>): Promise<Event> =>
-        handleSupabaseError(await supabase.from('events').update(updates).eq('event_id', id).select().single()),
+    updateEvent: async (id: string, updates: Partial<Event>): Promise<Event> => {
+        const result = handleSupabaseError(await supabase.from('events').update(updates).eq('event_id', id).select().single());
+        recordAuditLog(id, 'event_update', `Event updated: ${result.name}`, null, 'event', id, { changes: Object.keys(updates) });
+        return result;
+    },
 
-    deleteEvent: async (id: string) => 
-        handleSupabaseError(await supabase.from('events').delete().eq('event_id', id)),
+    deleteEvent: async (id: string) => {
+        const { data: ev } = await supabase.from('events').select('name').eq('event_id', id).maybeSingle();
+        const result = handleSupabaseError(await supabase.from('events').delete().eq('event_id', id));
+        recordAuditLog(id, 'event_delete', `Event deleted: ${ev?.name || id}`, null, 'event', id);
+        return result;
+    },
 
     getSessions: async (eventId: string): Promise<Session[]> => {
         if (!eventId) return [];
@@ -408,6 +460,8 @@ export const db = {
                 settings.districts = merged;
             }
         } catch { /* chapters table may not exist yet */ }
+        if (settings.audit_enabled === undefined) settings.audit_enabled = true;
+        updateAuditSyncCache(settings);
         return settings;
     },
 
@@ -417,14 +471,16 @@ export const db = {
         if (current) {
             const { data, error } = await supabase.from('system_settings').update(payload).eq('id', current.id).select().single();
             if (error) throw error;
+            if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         } else {
             const { data, error } = await supabase.from('system_settings').insert(payload).select().single();
             if (error) throw error;
+            if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         }
     },
-    
+
     getUsers: async (): Promise<User[]> => 
         handleSupabaseError(await supabase.from('app_users').select('*')),
 
@@ -489,6 +545,8 @@ export const db = {
             throw new Error(`Account was created in Auth but profile could not be saved: ${insertError.message}. Please have an administrator check the app_users table.`);
         }
 
+        // Use empty string for system-level audit (event_id is nullable)
+        recordAuditLog('', 'user_create', `User created: ${email} (${role})`, null, 'user', newUserId, { role, district, region });
         return { status: 'success', id: newUserId, email };
     },
 
@@ -496,11 +554,17 @@ export const db = {
         const clean = { ...updates };
         if (clean.district === '') delete clean.district;
         if (clean.region === '') delete clean.region;
-        return handleSupabaseError(await supabase.from('app_users').update(clean).eq('id', userId).select().single());
+        const result = handleSupabaseError(await supabase.from('app_users').update(clean).eq('id', userId).select().single());
+        recordAuditLog('', 'user_update', `User updated: ${result.email || userId}`, null, 'user', userId, { changes: Object.keys(clean) });
+        return result;
     },
 
-    deleteUser: async (userId: string) => 
-        handleRpcResponse(await supabase.rpc('delete_app_user', { user_id_to_delete: userId }), 'delete_app_user'),
+    deleteUser: async (userId: string) => {
+        const { data: usr } = await supabase.from('app_users').select('email').eq('id', userId).maybeSingle();
+        const result = handleRpcResponse(await supabase.rpc('delete_app_user', { user_id_to_delete: userId }), 'delete_app_user');
+        recordAuditLog('', 'user_delete', `User deleted: ${usr?.email || userId}`, null, 'user', userId);
+        return result;
+    },
 
     resetUserPassword: async (userId: string, newPassword: string) => 
         handleRpcResponse(await supabase.rpc('reset_user_password', { user_id: userId, new_password: newPassword }), 'reset_user_password'),
@@ -613,11 +677,14 @@ export const db = {
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
         const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
-        return handleSupabaseError(await supabase.from('delegates').update({
+        const result = handleSupabaseError(await supabase.from('delegates').update({
             ...validUpdates,
             district: normalize(validUpdates.district),
             chapter: normalize(validUpdates.chapter)
         }).eq('delegate_id', id).select().single());
+        const changes = Object.keys(validUpdates).filter(k => validUpdates[k] !== undefined);
+        recordAuditLog(result.event_id, 'delegate_update', `Delegate updated: ${result.first_name} ${result.last_name}`, null, 'delegate', id, { changes });
+        return result;
     },
 
     // Fix: Corrected variable name mismatch from event_id to eventId
@@ -626,6 +693,7 @@ export const db = {
         return withRetry(async () => {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
+        const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name, district, chapter').eq('delegate_id', delegateId).maybeSingle();
 
         if (safeSessionId) {
             const { data: arrival } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).is('session_id', null).maybeSingle();
@@ -635,15 +703,21 @@ export const db = {
             }
         }
 
-        const { data: existing } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle();
-        if (existing) {
-            const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name').eq('delegate_id', delegateId).maybeSingle();
-            return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+        const isNewCheckin: boolean = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle()
+            .then(({ data }) => !data);
+        if (!isNewCheckin) {
+            const code = generateCodeFromId(delegateId, eventId);
+            return { success: true, message: 'Verified', code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
         if (error && error.code !== '23505' && !error.message?.includes('duplicate')) throw error;
-        const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name').eq('delegate_id', delegateId).maybeSingle();
-        return { success: true, message: 'Verified', code: generateCodeFromId(delegateId, eventId), delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+
+        const label = safeSessionId ? 'Session Attendance' : 'Arrival';
+        const detail = del ? `${del.first_name} ${del.last_name} (${del.district || '?'} ${del.chapter || ''})`.trim() : delegateId;
+        recordAuditLog(eventId, safeSessionId ? 'checkin_session' : 'checkin_arrival', `${label}: ${detail}`, registrar, 'checkin', delegateId, { session_id: safeSessionId });
+
+        const code = generateCodeFromId(delegateId, eventId);
+        return { success: true, message: 'Verified', code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         });
     },
 
@@ -988,12 +1062,17 @@ export const db = {
 
     addFinancialEntry: async (entry: Partial<FinancialEntry>) => {
         if (entry.event_id) await ensureEventActive(entry.event_id);
-        return handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single());
+        const result = handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single());
+        const typeLabel = entry.type === FinancialType.OFFERING ? 'Offering' : 'Pledge Redemption';
+        recordAuditLog(result.event_id, `financial_${entry.type?.toLowerCase() || 'entry'}`, `${typeLabel}: ${result.payer_name || 'N/A'} — ₦${Number(result.amount).toLocaleString()}`, null, 'financial', result.id);
+        return result;
     },
 
     createPledge: async (pledge: Partial<Pledge>) => {
         if (pledge.event_id) await ensureEventActive(pledge.event_id);
-        return handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single());
+        const result = handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single());
+        recordAuditLog(result.event_id, 'pledge_create', `Pledge: ${result.donor_name} — ₦${Number(result.amount_pledged).toLocaleString()}`, null, 'pledge', result.id);
+        return result;
     },
 
     clearEventData: async (eventId: string) => { 
@@ -1001,6 +1080,7 @@ export const db = {
         await supabase.from('checkins').delete().eq('event_id', eventId); 
         await supabase.from('financial_entries').delete().eq('event_id', eventId); 
         await supabase.from('pledges').delete().eq('event_id', eventId); 
+        recordAuditLog(eventId, 'event_clear_data', 'All checkins, financials, and pledges cleared', null, 'event', eventId);
     },
 
     deleteDelegatesByDistrict: async (district: string) => { const { data } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select(); return data?.length || 0; },
@@ -1084,6 +1164,12 @@ export const db = {
                 }
                 throw error;
             }
+
+            const { data: audDel } = await supabase.from('delegates').select('first_name, last_name, district, chapter').eq('delegate_id', delegateId).maybeSingle();
+            const audName = audDel ? `${audDel.first_name} ${audDel.last_name}` : delegateId;
+            const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
+            recordAuditLog(eventId, `session_call_${responseType.toLowerCase()}`, `${RESPONSE_TYPE_LABELS[responseType]}: ${audName} (${audSess?.title || sessionId})`, registrar, 'session_response', delegateId, { session_id: sessionId, response_type: responseType });
+
             return { success: true, message: 'Saved' };
         });
     },
@@ -1119,6 +1205,7 @@ export const db = {
             }, { onConflict: 'session_id,response_type' })
             .select().single();
         if (error) throw error;
+        recordAuditLog(eventId, `session_summary_${responseType.toLowerCase()}`, `${RESPONSE_TYPE_LABELS[responseType]} summary: ${totalCount} (${sessionId})`, registrar, 'session_response_summary', sessionId, { response_type: responseType, total_count: totalCount });
         return data as SessionResponseSummary;
     },
 
@@ -1137,6 +1224,8 @@ export const db = {
             }, { onConflict: 'session_id' })
             .select().single();
         if (error) throw error;
+        const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
+        recordAuditLog(eventId, 'voice_distribution', `Voice Distribution: ${total} distributed (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
         return data as VoiceDistribution;
     },
 
