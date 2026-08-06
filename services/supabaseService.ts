@@ -1164,16 +1164,17 @@ export const db = {
     },
 
     getMinistryDataForExport: async (eventId: string): Promise<MinistryExportData> => {
+        let rpcResponses: any[] = [];
+        let rpcSummaries: any[] = [];
+        let rpcVD: any[] = [];
+
         try {
             const { data, error } = await supabase.rpc('get_ministry_export_data', { p_event_id: eventId });
             if (!error && data) {
                 const d = data as any;
-                return {
-                    responses: Array.isArray(d.responses) ? d.responses : [],
-                    summaries: Array.isArray(d.summaries) ? d.summaries : [],
-                    voiceDistribution: Array.isArray(d.voiceDistribution) ? d.voiceDistribution : [],
-                    attendance: Array.isArray(d.attendance) ? d.attendance : [],
-                };
+                rpcResponses = Array.isArray(d.responses) ? d.responses : [];
+                rpcSummaries = Array.isArray(d.summaries) ? d.summaries : [];
+                rpcVD = Array.isArray(d.voiceDistribution) ? d.voiceDistribution : [];
             }
         } catch {}
 
@@ -1181,25 +1182,12 @@ export const db = {
         const sessionIds = (sessions || []).map(s => s.session_id);
         if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [], attendance: [] };
 
-        const { data: responses } = await supabase.from('session_responses')
-            .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
-            .eq('event_id', eventId).in('session_id', sessionIds).order('recorded_at', { ascending: false });
-        const { data: summaries } = await supabase.from('session_response_summaries')
-            .select('*').eq('event_id', eventId).in('session_id', sessionIds);
-        const { data: vd } = await supabase.from('session_voice_distribution')
-            .select('*').eq('event_id', eventId).in('session_id', sessionIds);
-        const { data: ck } = await supabase.from('checkins')
-            .select('delegate_id, session_id').eq('event_id', eventId).in('session_id', sessionIds).not('session_id', 'is', null);
-
-        const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
-        const attendance = (sessions || []).map(s => ({
-            session_id: s.session_id,
-            session_title: s.title,
-            attendance: new Set((ck || []).filter(c => c.session_id === s.session_id).map(c => c.delegate_id)).size,
-        }));
-
-        return {
-            responses: (responses || []).map((r: any) => ({
+        if (!rpcResponses.length) {
+            const { data: responses } = await supabase.from('session_responses')
+                .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
+                .eq('event_id', eventId).in('session_id', sessionIds).order('recorded_at', { ascending: false });
+            const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+            rpcResponses = (responses || []).map((r: any) => ({
                 ...r,
                 first_name: r.delegates?.first_name,
                 last_name: r.delegates?.last_name,
@@ -1210,9 +1198,34 @@ export const db = {
                 office: r.delegates?.office,
                 delegate_name: r.delegates ? `${r.delegates.first_name} ${r.delegates.last_name}` : '',
                 session_title: sessionMap.get(r.session_id) || '',
-            })),
-            summaries: (summaries || []).map((s: any) => ({ ...s, session_title: sessionMap.get(s.session_id) || '' })),
-            voiceDistribution: (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' })),
+            }));
+        }
+        if (!rpcSummaries.length) {
+            const { data: summaries } = await supabase.from('session_response_summaries')
+                .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+            const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+            rpcSummaries = (summaries || []).map((s: any) => ({ ...s, session_title: sessionMap.get(s.session_id) || '' }));
+        }
+        if (!rpcVD.length) {
+            const { data: vd } = await supabase.from('session_voice_distribution')
+                .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+            const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+            rpcVD = (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' }));
+        }
+
+        const { data: ck } = await supabase.from('checkins')
+            .select('delegate_id, session_id').eq('event_id', eventId).in('session_id', sessionIds).not('session_id', 'is', null);
+
+        const attendance = (sessions || []).map(s => ({
+            session_id: s.session_id,
+            session_title: s.title,
+            attendance: new Set((ck || []).filter(c => c.session_id === s.session_id).map(c => c.delegate_id)).size,
+        }));
+
+        return {
+            responses: rpcResponses,
+            summaries: rpcSummaries,
+            voiceDistribution: rpcVD,
             attendance,
         };
     },

@@ -185,7 +185,7 @@ BEGIN
 END;
 $func$;
 
--- 7. RPC: get_ministry_export_data — for Reports tab
+-- 7. RPC: get_ministry_export_data — for Reports tab (synced with sprint10_attendance version)
 CREATE OR REPLACE FUNCTION get_ministry_export_data(p_event_id UUID)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
@@ -194,6 +194,7 @@ DECLARE
     responses_json JSON;
     summaries_json JSON;
     vd_json JSON;
+    attendance_json JSON;
 BEGIN
     SELECT COALESCE(json_agg(r), '[]'::JSON) INTO responses_json
     FROM (
@@ -226,10 +227,24 @@ BEGIN
         ORDER BY svd.updated_at DESC
     ) v;
 
+    SELECT COALESCE(json_agg(a), '[]'::JSON) INTO attendance_json
+    FROM (
+        SELECT
+            s.session_id,
+            s.title AS session_title,
+            COUNT(DISTINCT c.delegate_id) AS attendance
+        FROM sessions s
+        LEFT JOIN checkins c ON c.session_id = s.session_id AND c.event_id = p_event_id
+        WHERE s.event_id = p_event_id
+        GROUP BY s.session_id, s.title, s.start_time
+        ORDER BY s.start_time
+    ) a;
+
     RETURN json_build_object(
         'responses', responses_json,
         'summaries', summaries_json,
-        'voiceDistribution', vd_json
+        'voiceDistribution', vd_json,
+        'attendance', attendance_json
     );
 END;
 $func$;
