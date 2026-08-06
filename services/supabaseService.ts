@@ -1078,9 +1078,12 @@ export const db = {
     clearEventData: async (eventId: string) => { 
         await ensureEventActive(eventId);
         await supabase.from('checkins').delete().eq('event_id', eventId); 
+        await supabase.from('session_responses').delete().eq('event_id', eventId);
+        await supabase.from('session_response_summaries').delete().eq('event_id', eventId);
+        await supabase.from('session_voice_distribution').delete().eq('event_id', eventId); 
         await supabase.from('financial_entries').delete().eq('event_id', eventId); 
         await supabase.from('pledges').delete().eq('event_id', eventId); 
-        recordAuditLog(eventId, 'event_clear_data', 'All checkins, financials, and pledges cleared', null, 'event', eventId);
+        recordAuditLog(eventId, 'event_clear_data', 'All checkins, session calls, financials, and pledges cleared', null, 'event', eventId);
     },
 
     deleteDelegatesByDistrict: async (district: string) => { const { data } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select(); return data?.length || 0; },
