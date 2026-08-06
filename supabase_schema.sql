@@ -168,6 +168,9 @@ BEGIN
 
     ins_cols := 'id, email, encrypted_password, created_at, updated_at, '
              || 'raw_app_meta_data, aud, role, instance_id';
+    -- WARNING: GoTrue (Supabase Auth) requires bcrypt cost >= 10.
+    -- NEVER use gen_salt('bf') — it defaults to cost 6, which causes HTTP 500 at login.
+    -- The manual salt below produces cost 10. Any rewrite MUST preserve this.
     ins_vals := '$1, $2, crypt($3, ''$2a$10$'' || substring(translate(encode(decode(md5(random()::text), ''hex''), ''base64''), ''+/'', ''./''), 1, 22)), NOW(), NOW(), '
              || '$4, ''authenticated'', ''authenticated'', $5';
 
@@ -306,6 +309,7 @@ DECLARE
 BEGIN
     v_uid := user_id::uuid;
     UPDATE auth.users
+    -- WARNING: GoTrue requires bcrypt cost >= 10. NEVER use gen_salt('bf').
     SET encrypted_password = crypt(new_password, '$2a$10$' || substring(translate(encode(decode(md5(random()::text), 'hex'), 'base64'), '+/', './'), 1, 22)),
         updated_at = NOW()
     WHERE id = v_uid;

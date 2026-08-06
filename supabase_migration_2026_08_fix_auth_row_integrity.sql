@@ -550,13 +550,18 @@ SELECT
     SELECT 1 FROM auth.identities i
     WHERE i.user_id = u.id AND i.provider = 'email'
   )                                                                AS has_email_identity,
+  CASE
+    WHEN u.encrypted_password IS NOT NULL THEN
+      substring(u.encrypted_password FROM '\$2[aby]\$(\d+)')::INT
+    ELSE NULL
+  END                                                              AS bcrypt_cost,
   u.created_at,
   u.updated_at
 FROM auth.users u;
 
 COMMENT ON VIEW v_auth_integrity_check IS
-  'Audit view. A user is login-ready only when ALL flags are true. '
-  'Query broken rows with: SELECT * FROM v_auth_integrity_check WHERE NOT has_aud OR NOT has_instance_id OR NOT is_confirmed OR NOT has_email_identity;';
+  'Audit view. A user is login-ready only when ALL flags are true AND bcrypt_cost >= 10. '
+  'Query broken rows with: SELECT * FROM v_auth_integrity_check WHERE NOT has_aud OR NOT has_instance_id OR NOT is_confirmed OR NOT has_email_identity OR bcrypt_cost < 10;';
 
 -- ============================================================
 -- §5. REWRITE create_app_user (FULL COLUMN COVERAGE)
@@ -605,7 +610,7 @@ BEGIN
 
     ins_cols := 'id, email, encrypted_password, created_at, updated_at, '
              || 'raw_app_meta_data, aud, role, instance_id';
-    ins_vals := '$1, $2, crypt($3, gen_salt(''bf'')), NOW(), NOW(), '
+    ins_vals := '$1, $2, crypt($3, ''$2a$10$'' || substring(translate(encode(decode(md5(random()::text), ''hex''), ''base64''), ''+/'', ''./''), 1, 22)), NOW(), NOW(), '
              || '$4, ''authenticated'', ''authenticated'', $5';
 
     IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -734,7 +739,7 @@ DECLARE
 BEGIN
     v_uid := user_id::uuid;
     UPDATE auth.users
-    SET encrypted_password = crypt(new_password, gen_salt('bf')),
+    SET encrypted_password = crypt(new_password, '$2a$10$' || substring(translate(encode(decode(md5(random()::text), 'hex'), 'base64'), '+/', './'), 1, 22)),
         updated_at = NOW()
     WHERE id = v_uid;
     GET DIAGNOSTICS v_found = ROW_COUNT;
@@ -812,14 +817,15 @@ BEGIN
         RAISE EXCEPTION 'SELF-TEST FAILED: encrypted_password was not set';
     END IF;
 
-    -- Verify the integrity view agrees
+    -- Verify the integrity view agrees (including bcrypt cost)
     IF NOT EXISTS (
         SELECT 1 FROM v_auth_integrity_check
         WHERE id = v_user_id
           AND has_aud AND has_instance_id AND has_role AND is_confirmed
           AND has_password AND has_email_identity
+          AND bcrypt_cost >= 10
     ) THEN
-        RAISE EXCEPTION 'SELF-TEST FAILED: v_auth_integrity_check reports user is not login-ready';
+        RAISE EXCEPTION 'SELF-TEST FAILED: v_auth_integrity_check reports user is not login-ready (check bcrypt_cost >= 10)';
     END IF;
 
     -- Verify a clean lookup by provider_id (this is what signInWithPassword uses)
