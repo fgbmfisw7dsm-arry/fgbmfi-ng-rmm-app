@@ -392,7 +392,7 @@ const SetupModule = () => {
                                     const enabled = e.target.checked;
                                     const newSettings = { ...settings, audit_enabled: enabled } as SystemSettings;
                                     try {
-                                        const updated = await db.updateSettings(newSettings);
+                                        const updated = await db.updateSettings(newSettings, 'audit_enabled');
                                         setSettings(updated);
                                         setAuditEnabled(enabled);
                                     } catch (err: any) {
