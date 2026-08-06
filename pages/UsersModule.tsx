@@ -97,7 +97,6 @@ const UsersModule = () => {
                 setStatus({ type: 'success', msg: "Account updated successfully." });
             } else {
                 const res = await db.createUser(form, form.password);
-                if (res && res.error) throw new Error(res.error);
                 setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this email.` });
             }
             

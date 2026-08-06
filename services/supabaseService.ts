@@ -436,28 +436,61 @@ export const db = {
         const district = user.district || null;
         const region = user.region || null;
 
-        const result = await supabase.rpc('create_app_user', {
-            email, password, role, district, region
+        const { data: { session: adminSession } } = await supabase.auth.getSession();
+
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { role, district, region } }
         });
-        const data = handleRpcResponse(result, 'create_app_user') as any;
-        if (data && typeof data === 'object' && data.status === 'error') {
-            throw new Error(data.error || 'create_app_user returned an error');
+
+        if (signUpError) {
+            const msg = signUpError.message || 'signUp failed';
+            if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('duplicate')) {
+                throw new Error(`A user with email "${email}" already exists.`);
+            }
+            throw new Error(`Account creation failed: ${msg}`);
         }
-        if (data && typeof data === 'object' && data.status === 'success') {
-            if (data.aud_set === false) {
-                throw new Error("Account was created but the auth row is missing the 'aud' column. The user will not be able to log in. Re-run supabase_migration_2026_08_fix_auth_row_integrity.sql.");
-            }
-            if (data.instance_id_set === false) {
-                throw new Error("Account was created but the auth row is missing the project instance_id. The user may not be able to log in. Ensure at least one healthy user exists in auth.users and re-run the migration.");
-            }
-            if (data.confirmed === false) {
-                throw new Error("Account was created but could not be auto-confirmed. The user will not be able to log in until an administrator confirms the email. Re-run the auth integrity fix migration.");
-            }
-            if (data.identities_inserted === false) {
-                throw new Error("Account was created but the email identity row was not inserted. The user will not be able to log in. Re-run the auth integrity fix migration.");
-            }
+        if (!signUpData.user) {
+            throw new Error('Account creation failed: no user returned from Supabase Auth.');
         }
-        return data;
+
+        const newUserId = signUpData.user.id;
+
+        if (signUpData.session && adminSession && adminSession.user.id !== newUserId) {
+            await supabase.auth.signOut({ scope: 'local' });
+            await supabase.auth.setSession({
+                access_token: adminSession.access_token,
+                refresh_token: adminSession.refresh_token
+            });
+        }
+
+        const { data: confirmData, error: confirmError } = await supabase.rpc('confirm_user_by_email', {
+            p_email: email
+        });
+
+        if (confirmError) {
+            console.warn('[createUser] confirm_user_by_email RPC failed:', confirmError.message);
+        }
+        if (confirmData && (confirmData as any).status === 'error') {
+            console.warn('[createUser] confirm_user_by_email returned error:', (confirmData as any).error);
+        }
+
+        const { error: insertError } = await supabase.from('app_users').upsert({
+            id: newUserId,
+            email,
+            role,
+            district,
+            region,
+            is_active: true
+        }, { onConflict: 'id' });
+
+        if (insertError) {
+            console.error('[createUser] app_users upsert failed:', insertError.message);
+            throw new Error(`Account was created in Auth but profile could not be saved: ${insertError.message}. Please have an administrator check the app_users table.`);
+        }
+
+        return { status: 'success', id: newUserId, email };
     },
 
     updateUser: async (userId: string, updates: Partial<User>) => {
