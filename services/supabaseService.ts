@@ -208,7 +208,12 @@ export const auth = {
                 });
                 const status = Number(authErr.status) || 0;
                 if (authErr.name === 'AuthRetryableFetchError' || status >= 500) {
-                    const serverErr = new Error(`Authentication service temporarily unavailable (HTTP ${status || 'unknown'}). Please retry.`);
+                    let diagnosticHint = '';
+                    try {
+                        const d = await auth.diagnoseLoginFailure(normalizedEmail, password);
+                        if (d) diagnosticHint = ` — ${d}`;
+                    } catch {}
+                    const serverErr = new Error(`Authentication service temporarily unavailable (HTTP ${status || 'unknown'}).${diagnosticHint} Please retry.`);
                     (serverErr as any).status = status;
                     throw serverErr;
                 }
@@ -274,23 +279,27 @@ export const auth = {
                 return "Login Failed: Invalid email or password. Please check for typos and try again.";
             }
             const d = diag as any;
+            const costInfo = d.bcrypt_cost != null ? ` [bcrypt cost: ${d.bcrypt_cost}${d.bcrypt_cost < 10 ? ' — REQUIRES ≥ 10' : ''}]` : '';
             if (d.email_format_valid === false) {
-                return "This account uses an invalid email format. Please contact your administrator to correct the account email (e.g. officer@fgbmfi.ng).";
+                return `This account uses an invalid email format.${costInfo} Please contact your administrator to correct the account email (e.g. officer@fgbmfi.ng).`;
             }
             if (d.account_exists === false) {
                 return "Account not found for this email. Please ask your administrator to create the account.";
             }
             if (d.password_matches === false) {
-                return "Login Failed: Invalid email or password. Please check for typos and try again.";
+                return `Login Failed: Invalid email or password.${costInfo} Please check for typos and try again.`;
             }
             if (d.is_active === false) {
                 return "This account has been deactivated. Please contact your administrator to reactivate it.";
             }
             if (d.confirmed === false) {
-                return "This account is not confirmed. Please contact your administrator to re-run the auth integrity fix migration.";
+                return `This account is not confirmed.${costInfo} Please contact your administrator to re-run the auth integrity fix migration.`;
             }
             if (d.has_identity === false) {
-                return "This account is missing its login identity record. Please contact your administrator to re-run the auth integrity fix migration.";
+                return `This account is missing its login identity record.${costInfo} Please contact your administrator to re-run the auth integrity fix migration.`;
+            }
+            if (d.bcrypt_cost != null && d.bcrypt_cost < 10) {
+                return `bcrypt cost is ${d.bcrypt_cost} — GoTrue requires >= 10. The password hash is too weak. This account must be re-created or its password reset via admin UI.`;
             }
             return d.recommendation || "Login Failed: Invalid email or password. Please check for typos and try again.";
         } catch (e: any) {

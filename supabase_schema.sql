@@ -446,6 +446,7 @@ DECLARE
     v_has_identity   BOOLEAN := false;
     v_password_match BOOLEAN;
     v_format_ok      BOOLEAN;
+    v_bcrypt_cost    INT;
 BEGIN
     v_format_ok := (v_email ~ '^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
@@ -458,6 +459,7 @@ BEGIN
             'has_identity', NULL::boolean,
             'is_active', NULL::boolean,
             'role', NULL::text,
+            'bcrypt_cost', NULL::int,
             'recommendation', 'The account email is missing an @domain. Contact the administrator to correct the account email (e.g. officer@fgbmfi.ng).'
         );
     END IF;
@@ -476,12 +478,22 @@ BEGIN
             'has_identity', NULL::boolean,
             'is_active', NULL::boolean,
             'role', NULL::text,
+            'bcrypt_cost', NULL::int,
             'recommendation', 'No auth.users row exists for this email. The account may never have been created.'
         );
     END IF;
 
     SELECT is_active, role INTO v_is_active, v_role
     FROM public.app_users WHERE id = v_uid;
+
+    -- Extract bcrypt cost from stored password hash
+    IF v_encrypted IS NOT NULL THEN
+        BEGIN
+            v_bcrypt_cost := substring(v_encrypted FROM '\$2[aby]\$(\d+)')::INT;
+        EXCEPTION WHEN OTHERS THEN
+            v_bcrypt_cost := NULL;
+        END;
+    END IF;
 
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'auth' AND table_name = 'users'
@@ -511,7 +523,14 @@ BEGIN
         'has_identity', v_has_identity,
         'is_active', v_is_active,
         'role', v_role,
-        'recommendation', 'Account exists. If login still fails, re-run the auth integrity fix migration and verify via the v_auth_integrity_check view.'
+        'bcrypt_cost', v_bcrypt_cost,
+        'recommendation', CASE
+            WHEN v_bcrypt_cost IS NOT NULL AND v_bcrypt_cost < 10
+                THEN 'bcrypt cost is ' || v_bcrypt_cost || ' — GoTrue requires >= 10. The account must be re-created or its password reset via admin UI.'
+            WHEN NOT v_confirmed THEN 'Account is not confirmed. Re-run the auth integrity fix migration.'
+            WHEN NOT v_has_identity THEN 'Account is missing its email identity row. Re-run the auth integrity fix migration.'
+            ELSE 'Account exists and appears structurally sound. If login still fails, check GoTrue service health.'
+        END
     );
 EXCEPTION WHEN OTHERS THEN
     RETURN json_build_object(
