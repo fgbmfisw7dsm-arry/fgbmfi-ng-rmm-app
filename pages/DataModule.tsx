@@ -50,12 +50,12 @@ const DataModule = () => {
 
     // --- LOGIC: HARMONIZE DISTRICTS ---
     const handleHarmonize = async () => {
-        if (!window.confirm("This will scan the entire database and remove hidden spaces/whitespace from all district names. This also cleans up the System Settings. Proceed?")) return;
+        if (!window.confirm("This will scan the active event database and remove hidden spaces/whitespace from all district names. Proceed?")) return;
         
         setLoading(true);
         try {
-            const count = await db.harmonizeDistricts();
-            alert(`SUCCESS: Database Harmonization complete.\n\nModified ${count} records.\n- Trailing spaces removed.\n- Casing unified with System Setup.\n- Reports will now group correctly.`);
+            const count = await db.harmonizeDistricts(activeEventId);
+            alert(`SUCCESS: District Harmonization complete for ${activeEvent?.name || 'active event'}.\n\nModified ${count} records.\n- Trailing spaces removed.\n- Casing unified with System Setup.\n- Reports will now group correctly.`);
         } catch (e: any) {
             console.error("UI: Harmonize failed:", e);
             alert("TASK FAILED: " + (e.message || "Database connection error."));
@@ -66,12 +66,12 @@ const DataModule = () => {
 
     // --- LOGIC: DEDUPLICATE DELEGATES ---
     const handleDeduplicate = async () => {
-        if (!window.confirm("This will scan the Regional Master List for duplicate delegates (same Name and Phone). Redundant records will be permanently removed. Continue?")) return;
+        if (!window.confirm("This will scan the active event's master list for duplicate delegates (same Name and Phone). Redundant records will be permanently removed. Continue?")) return;
         
         setLoading(true);
         try {
-            const count = await db.deduplicateDelegates();
-            alert(`SUCCESS: Master List Cleanup complete.\n\nRemoved ${count} duplicate delegate records.\nYour database is now lean and accurate.`);
+            const count = await db.deduplicateDelegates(activeEventId);
+            alert(`SUCCESS: Master List Cleanup complete for ${activeEvent?.name || 'active event'}.\n\nRemoved ${count} duplicate delegate records.\nYour database is now lean and accurate.`);
         } catch (e: any) {
             console.error("UI: Deduplicate failed:", e);
             alert("TASK FAILED: " + (e.message || "Database connection error."));
@@ -116,9 +116,10 @@ const DataModule = () => {
     // --- LOGIC: DELETE DISTRICT ---
     const prepareDistrictBackup = async () => {
         if (!selectedDistrict) return alert("Select a district first.");
+        if (!activeEventId) return alert("Select an active event first.");
         setLoading(true);
         try {
-            const allData = await db.getAllDelegates();
+            const allData = await db.getAllDelegates(activeEventId);
             const districtData = allData.filter(d => (d.district || '').trim() === selectedDistrict.trim());
             downloadJSON(districtData, `BACKUP_DISTRICT_${selectedDistrict}_${Date.now()}.json`);
             setDistrictBackupReady(true);
@@ -132,11 +133,12 @@ const DataModule = () => {
 
     const handleDeleteDistrict = async () => {
         if (districtConfirmText !== `DELETE ${selectedDistrict.toUpperCase()}`) return alert(`Please type 'DELETE ${selectedDistrict.toUpperCase()}' exactly.`);
+        if (!activeEventId) return alert("Select an active event first.");
         
         setLoading(true);
         try {
-            const count = await db.deleteDelegatesByDistrict(selectedDistrict);
-            alert(`SUCCESS: Removed ${count} delegates and their history from the system.`);
+            const count = await db.deleteDelegatesByDistrict(selectedDistrict, activeEventId);
+            alert(`SUCCESS: Removed ${count} delegates and their history from ${activeEvent?.name || 'active event'}.`);
             setDistrictBackupReady(false);
             setDistrictConfirmText('');
             setSelectedDistrict('');
@@ -178,7 +180,7 @@ const DataModule = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="bg-blue-900 p-8 rounded-3xl shadow-xl text-white border-4 border-blue-700">
                     <h3 className="text-xl font-black uppercase tracking-tight">District Harmonization</h3>
-                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mt-1 mb-6">Cleans whitespace and hidden characters in District/Chapter names across the entire database.</p>
+                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mt-1 mb-6">Cleans whitespace &amp; hidden characters in district names for the active event.</p>
                     <button 
                         onClick={handleHarmonize}
                         disabled={loading}
@@ -190,7 +192,7 @@ const DataModule = () => {
                 
                 <div className="bg-slate-900 p-8 rounded-3xl shadow-xl text-white border-4 border-slate-700">
                     <h3 className="text-xl font-black uppercase tracking-tight">Master List Deduplication</h3>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 mb-6">Removes redundant delegate records across the Regional Master List to improve search accuracy.</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 mb-6">Removes duplicate delegate records (same Name &amp; Phone) within the active event.</p>
                     <button 
                         onClick={handleDeduplicate}
                         disabled={loading}
@@ -207,7 +209,7 @@ const DataModule = () => {
                 <div className="bg-white rounded-3xl shadow-xl border-t-8 border-orange-500 overflow-hidden flex flex-col">
                     <div className="p-6 bg-orange-50 border-b border-orange-100">
                         <h3 className="text-lg font-black text-orange-900 uppercase">Clear Active Event Data</h3>
-                        <p className="text-[10px] font-bold text-orange-700 uppercase">Wipe Attendance, Offerings & Pledges for the current event</p>
+                        <p className="text-[10px] font-bold text-orange-700 uppercase">Wipe attendance, session calls &amp; financials for current event</p>
                     </div>
                     <div className="p-8 flex-1 space-y-6">
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
@@ -257,7 +259,7 @@ const DataModule = () => {
                 <div className="bg-white rounded-3xl shadow-xl border-t-8 border-red-600 overflow-hidden flex flex-col">
                     <div className="p-6 bg-red-50 border-b border-red-100">
                         <h3 className="text-lg font-black text-red-900 uppercase">District Master Purge</h3>
-                        <p className="text-[10px] font-bold text-red-700 uppercase">Permanently remove all delegates from a specific district</p>
+                        <p className="text-[10px] font-bold text-red-700 uppercase">Remove all delegates from a district within the active event</p>
                     </div>
                     <div className="p-8 flex-1 space-y-6">
                         <div className="space-y-2">

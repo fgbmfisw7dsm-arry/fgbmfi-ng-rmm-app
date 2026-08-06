@@ -1086,14 +1086,21 @@ export const db = {
         recordAuditLog(eventId, 'event_clear_data', 'All checkins, session calls, financials, and pledges cleared', null, 'event', eventId);
     },
 
-    deleteDelegatesByDistrict: async (district: string) => { const { data } = await supabase.from('delegates').delete().ilike('district', normalize(district)).select(); return data?.length || 0; },
+    deleteDelegatesByDistrict: async (district: string, eventId?: string) => { 
+        let q = supabase.from('delegates').delete().ilike('district', normalize(district));
+        if (eventId) q = q.eq('event_id', eventId);
+        const { data } = await q.select();
+        return data?.length || 0; 
+    },
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
     
-    harmonizeDistricts: async () => {
+    harmonizeDistricts: async (eventId?: string) => {
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
         const official = (settings.districts || []).map(d => normalize(d));
-        const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').limit(5000);
+        let q = supabase.from('delegates').select('delegate_id, district').limit(5000);
+        if (eventId) q = q.eq('event_id', eventId);
+        const { data: delegates } = await q;
         let count = 0;
         for (const d of (delegates || [])) {
             const matched = official.find(o => o.toUpperCase() === (d.district || '').trim().toUpperCase());
@@ -1105,8 +1112,10 @@ export const db = {
         return count;
     },
     
-    deduplicateDelegates: async () => {
-        const { data } = await supabase.from('delegates').select('*').limit(5000);
+    deduplicateDelegates: async (eventId?: string) => {
+        let q = supabase.from('delegates').select('*').limit(5000);
+        if (eventId) q = q.eq('event_id', eventId);
+        const { data } = await q;
         if (!data) return 0;
         const seen = new Set();
         const dups = [];
