@@ -1,7 +1,8 @@
 
-import { supabase } from './supabaseClient';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction } from '../types';
 import { generateCodeFromId, generateQrHash } from './utils';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * Normalizes email for transmission. 
@@ -436,9 +437,15 @@ export const db = {
         const district = user.district || null;
         const region = user.region || null;
 
-        const { data: { session: adminSession } } = await supabase.auth.getSession();
+        const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+            auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+                detectSessionInUrl: false
+            }
+        });
 
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        const { data: signUpData, error: signUpError } = await tempClient.auth.signUp({
             email,
             password,
             options: { data: { role, district, region } }
@@ -456,14 +463,6 @@ export const db = {
         }
 
         const newUserId = signUpData.user.id;
-
-        if (signUpData.session && adminSession && adminSession.user.id !== newUserId) {
-            await supabase.auth.signOut({ scope: 'local' });
-            await supabase.auth.setSession({
-                access_token: adminSession.access_token,
-                refresh_token: adminSession.refresh_token
-            });
-        }
 
         const { data: confirmData, error: confirmError } = await supabase.rpc('confirm_user_by_email', {
             p_email: email
