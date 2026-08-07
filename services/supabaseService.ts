@@ -667,8 +667,6 @@ export const db = {
             if (filtered.length !== result.data.length) {
                 console.warn('[getPaginatedDelegates] POST-FILTER: stripped', result.data.length - filtered.length, 'delegates from other events. eventId:', eventId);
                 result.data = filtered;
-                result.total = filtered.length;
-                result.totalPages = Math.ceil(filtered.length / pageSize);
             }
         }
 

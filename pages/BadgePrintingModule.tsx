@@ -276,7 +276,7 @@ const BadgePrintingModule = () => {
     let delegatesToPrint: Delegate[] = allSelected;
 
     if (!allSelected.length) {
-      const activeFilters: BadgeFilter = { ...filters };
+      const activeFilters: BadgeFilter = { ...filters, registrationStatus: 'all' };
       const hasFilters =
         activeFilters.district ||
         activeFilters.chapter ||

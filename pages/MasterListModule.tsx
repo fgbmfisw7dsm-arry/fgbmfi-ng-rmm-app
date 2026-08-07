@@ -52,11 +52,12 @@ const MasterListModule = () => {
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(0);
     const [totalRecords, setTotalRecords] = useState(0);
+    const pageRef = useRef(1);
     const listRef = useRef<HTMLDivElement>(null);
 
     const loadData = useCallback(async (p?: number) => {
         if (!activeEventId) return;
-        const currentPage = p ?? page;
+        const currentPage = p ?? pageRef.current;
         setLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
@@ -67,21 +68,22 @@ const MasterListModule = () => {
             setTotalPages(paginated.totalPages);
             setTotalRecords(paginated.total);
             setSettings(settData);
-            if (p !== undefined) setPage(p);
+            setPage(currentPage);
+            pageRef.current = currentPage;
         } catch (err) {
             console.error("Master List Load Error:", err);
         } finally {
             setLoading(false);
         }
-    }, [page, searchTerm, selectedDistrict, activeEventId]);
+    }, [searchTerm, selectedDistrict, activeEventId]);
 
     useEffect(() => {
         loadData(1);
         const delegateSub = supabase.channel(`master_list_sync_${activeEventId}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData(pageRef.current))
           .subscribe();
         const settingsSub = supabase.channel('settings_sync_master')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => loadData())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => loadData(pageRef.current))
           .subscribe();
         return () => { supabase.removeChannel(delegateSub); settingsSub.unsubscribe(); };
     }, [loadData]);
