@@ -138,14 +138,23 @@ export const auth = {
                 throw new Error("ACCOUNT_DELETED: Your account has been permanently removed. Please contact your administrator.");
             }
 
+            const { data: directProfile } = await supabase.from('app_users').select('*').eq('id', authId).maybeSingle();
+            if (directProfile) {
+                console.log('[auth.getOrCreateProfile] Step C: existing profile found via direct SELECT (RPC missed it), preserving role=', directProfile.role);
+                if (directProfile.is_active === false) {
+                    throw new Error("ACCOUNT_DEACTIVATED: Your account has been deactivated. Please contact your administrator.");
+                }
+                return directProfile as User;
+            }
+
             let role = metadata?.app_metadata?.role || metadata?.user_metadata?.role || metadata?.role || 'registrar';
-            console.log('[auth.getOrCreateProfile] Step C: role from metadata=', role);
+            console.log('[auth.getOrCreateProfile] Step D: role from metadata=', role);
             if (role === 'registrar') {
                 try {
                     const { data: authRole } = await supabase.rpc('get_auth_user_role');
                     if (authRole && typeof authRole === 'string') {
                         role = authRole;
-                        console.log('[auth.getOrCreateProfile] Step C: role from get_auth_user_role=', role);
+                        console.log('[auth.getOrCreateProfile] Step D: role from get_auth_user_role=', role);
                     }
                 } catch (rpcErr: any) {
                     console.warn('[auth.getOrCreateProfile] get_auth_user_role failed:', rpcErr?.message);
@@ -162,7 +171,7 @@ export const auth = {
                 role = 'registrar';
             }
 
-            console.log('[auth.getOrCreateProfile] Step D: upserting app_users with role=', role);
+            console.log('[auth.getOrCreateProfile] Step E: upserting app_users with role=', role);
             const { data: newProfile, error: createError } = await supabase
                 .from('app_users')
                 .upsert({ id: authId, email: normalizeEmail(email), is_active: true, role }, { onConflict: 'id' })
@@ -170,15 +179,15 @@ export const auth = {
 
             if (createError) {
                 const ce: any = createError;
-                console.error('[auth.getOrCreateProfile] Step D upsert failed:', ce);
+                console.error('[auth.getOrCreateProfile] Step E upsert failed:', ce);
                 const ceMessage = ce?.message || ce?.error_description || ce?.hint || ce?.details || JSON.stringify(ce) || 'unknown error';
                 throw new Error(`Failed to create app_users profile: ${ceMessage} (code=${ce?.code || 'unknown'})`);
             }
             if (!newProfile) {
-                console.error('[auth.getOrCreateProfile] Step D upsert returned no data');
+                console.error('[auth.getOrCreateProfile] Step E upsert returned no data');
                 throw new Error('Failed to create app_users profile: upsert returned no data (likely RLS policy blocked the write)');
             }
-            console.log('[auth.getOrCreateProfile] Step D: upsert succeeded, newProfile=', newProfile);
+            console.log('[auth.getOrCreateProfile] Step E: upsert succeeded, newProfile=', newProfile);
             return newProfile as User;
         } catch (err) {
             if ((err as any)?.message?.startsWith?.('ACCOUNT_DEACTIVATED')) throw err;
