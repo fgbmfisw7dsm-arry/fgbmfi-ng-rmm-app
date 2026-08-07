@@ -703,9 +703,9 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
               <div className="flex-1 w-full text-left">
                 <div className="flex items-center flex-wrap gap-2">
                     <h3 className="font-black text-blue-900 uppercase text-lg leading-tight">{d.title} {d.first_name} {d.last_name}</h3>
-                    <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>
+                    {showRank && <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">RANK: {d.rank}</span>}
                 </div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT • {d.chapter || 'INDIVIDUAL'} • {d.office}</p>
+                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{d.district} DISTRICT • {d.chapter || 'INDIVIDUAL'}{showOffice && d.office ? ` • ${d.office}` : ''}{showDelegateType && d.delegate_type ? ` • ${d.delegate_type}` : ''}</p>
               </div>
               <div className="flex items-center gap-4 w-full md:w-auto justify-end">
                   {d.checkedIn ? (
