@@ -1119,6 +1119,17 @@ export const db = {
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
     
     harmonizeDistricts: async (eventId?: string) => {
+        const REGION_PREFIXES: Record<string, string> = {
+            'NC': 'North Central', 'NE': 'North East', 'NW': 'North West',
+            'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
+        };
+        const resolveAbbreviation = (abbreviated: string, officialList: string[]): string | null => {
+            const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
+            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+            if (!match) return null;
+            const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+            return officialList.find(o => o.toUpperCase() === fullName.toUpperCase()) || null;
+        };
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
         const official = (settings.districts || []).map(d => normalize(d));
@@ -1127,8 +1138,16 @@ export const db = {
         const { data: delegates } = await q;
         let count = 0;
         for (const d of (delegates || [])) {
-            const matched = official.find(o => o.toUpperCase() === (d.district || '').trim().toUpperCase());
-            if (matched && matched !== d.district) {
+            const rawDistrict = (d.district || '').replace(/\s+/g, ' ').trim();
+            if (!rawDistrict) continue;
+            const abbrResolved = resolveAbbreviation(rawDistrict, official);
+            if (abbrResolved && abbrResolved !== rawDistrict) {
+                await supabase.from('delegates').update({ district: abbrResolved }).eq('delegate_id', d.delegate_id);
+                count++;
+                continue;
+            }
+            const matched = official.find(o => o.toUpperCase() === rawDistrict.toUpperCase());
+            if (matched && matched !== rawDistrict) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
             }

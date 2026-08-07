@@ -50,12 +50,12 @@ const DataModule = () => {
 
     // --- LOGIC: HARMONIZE DISTRICTS ---
     const handleHarmonize = async () => {
-        if (!window.confirm("This will scan the active event database and remove hidden spaces/whitespace from all district names. Proceed?")) return;
+        if (!window.confirm("This will scan the active event and normalize all district names — resolving abbreviations (e.g., SW7 \u2192 South West 7), cleaning whitespace, and fixing casing. Proceed?")) return;
         
         setLoading(true);
         try {
             const count = await db.harmonizeDistricts(activeEventId);
-            alert(`SUCCESS: District Harmonization complete for ${activeEvent?.name || 'active event'}.\n\nModified ${count} records.\n- Trailing spaces removed.\n- Casing unified with System Setup.\n- Reports will now group correctly.`);
+            alert(`SUCCESS: District Harmonization complete for ${activeEvent?.name || 'active event'}.\n\nModified ${count} records.\n- Abbreviations resolved (e.g., SW7 → South West 7)\n- Whitespace cleaned & casing unified.\n- Reports will now group correctly.`);
         } catch (e: any) {
             console.error("UI: Harmonize failed:", e);
             alert("TASK FAILED: " + (e.message || "Database connection error."));
