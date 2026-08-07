@@ -877,11 +877,12 @@ export const db = {
         return data;
     },
 
-    importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, skipped: number, total: number) => void): Promise<{ inserted: number; skipped: number }> => {
+    importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
         const BATCH_SIZE = 500;
         let inserted = 0;
+        let updated = 0;
         let skipped = 0;
 
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
@@ -903,22 +904,47 @@ export const db = {
                 registration_source: 'import'
             }));
 
-            // Try the RPC first (server-side dedup, faster)
             try {
-                const { data, error } = await supabase.rpc('import_delegates_batch', {
-                    p_delegates: JSON.parse(JSON.stringify(payload))
+                const { data, error } = await supabase.rpc('import_delegates_batch_merge', {
+                    p_delegates: JSON.parse(JSON.stringify(payload)),
+                    p_event_id: eventId
                 });
                 if (error) throw error;
                 inserted += data?.inserted || 0;
+                updated += data?.updated || 0;
                 skipped += data?.skipped || 0;
             } catch {
-                // Fallback: direct insert with individual error handling
                 for (const rec of payload) {
                     try {
                         const { error } = await supabase.from('delegates').insert(rec);
                         if (error) {
-                            if (error.message?.includes('duplicate')) {
-                                skipped++;
+                            if (error.code === '23505' || error.message?.includes('duplicate')) {
+                                const { data: existing } = await supabase.from('delegates')
+                                    .select('delegate_id, title, email, district, chapter, rank, office, delegate_type, external_id')
+                                    .eq('event_id', eventId)
+                                    .eq('first_name', rec.first_name)
+                                    .eq('last_name', rec.last_name)
+                                    .eq('phone', rec.phone)
+                                    .maybeSingle();
+                                if (existing) {
+                                    const updates: Record<string, string> = {};
+                                    if (!existing.title?.trim() && rec.title?.trim()) updates.title = rec.title;
+                                    if (!existing.email?.trim() && rec.email?.trim()) updates.email = rec.email;
+                                    if (!existing.district?.trim() && rec.district?.trim()) updates.district = rec.district;
+                                    if (!existing.chapter?.trim() && rec.chapter?.trim()) updates.chapter = rec.chapter;
+                                    if (!existing.rank?.trim() && rec.rank?.trim()) updates.rank = rec.rank;
+                                    if (!existing.office?.trim() && rec.office?.trim()) updates.office = rec.office;
+                                    if (!existing.delegate_type?.trim() && rec.delegate_type?.trim()) updates.delegate_type = rec.delegate_type;
+                                    if (!existing.external_id?.trim() && rec.external_id?.trim()) updates.external_id = rec.external_id;
+                                    if (Object.keys(updates).length > 0) {
+                                        await supabase.from('delegates').update(updates).eq('delegate_id', existing.delegate_id);
+                                        updated++;
+                                    } else {
+                                        skipped++;
+                                    }
+                                } else {
+                                    skipped++;
+                                }
                             } else {
                                 throw error;
                             }
@@ -931,10 +957,10 @@ export const db = {
                 }
             }
 
-            if (onProgress) onProgress(inserted, skipped, lines.length);
+            if (onProgress) onProgress(inserted, updated, skipped, lines.length);
         }
 
-        return { inserted, skipped };
+        return { inserted, updated, skipped };
     },
 
     getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {

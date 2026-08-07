@@ -3,6 +3,38 @@ import React, { useState, useContext, useMemo, useRef } from 'react';
 import { db } from '../services/supabaseService';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole } from '../types';
+import { exportToCSV } from '../services/utils';
+
+const KNOWN_TITLES = new Set([
+  'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
+  'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
+  'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
+  'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia'
+]);
+
+function parseFullName(fullName: string): { title: string; firstName: string; lastName: string } {
+  if (!fullName || !fullName.trim()) return { title: 'Mr', firstName: '', lastName: '' };
+  const parts = fullName.trim().split(/\s+/);
+  let titleEnd = 0;
+  if (parts.length >= 2) {
+    const firstWord = parts[0].toLowerCase().replace(/\.$/, '');
+    const secondWord = parts[1].toLowerCase().replace(/\.$/, '');
+    if (KNOWN_TITLES.has(firstWord) && KNOWN_TITLES.has(secondWord)) {
+      titleEnd = 2;
+    }
+  }
+  if (titleEnd === 0 && parts.length >= 1) {
+    const firstWord = parts[0].toLowerCase().replace(/\.$/, '');
+    if (KNOWN_TITLES.has(firstWord)) {
+      titleEnd = 1;
+    }
+  }
+  const title = titleEnd > 0 ? parts.slice(0, titleEnd).join(' ') : 'Mr';
+  const nameParts = parts.slice(titleEnd);
+  const firstName = nameParts[0] || '';
+  const lastName = nameParts.slice(1).join(' ');
+  return { title, firstName, lastName };
+}
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -25,7 +57,7 @@ const ImportModule = () => {
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, skipped?: number} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -35,6 +67,7 @@ const ImportModule = () => {
       'title': 'Title', 'title.': 'Title', 'honorific': 'Title', 'prefix': 'Title', 'mr': 'Title',
       'first_name': 'First Name', 'first name': 'First Name', 'firstname': 'First Name', 'given name': 'First Name', 'name': 'First Name',
       'last_name': 'Last Name', 'last name': 'Last Name', 'lastname': 'Last Name', 'surname': 'Last Name', 'family name': 'Last Name',
+      'full_name': 'Full Name', 'full name': 'Full Name', 'fullname': 'Full Name', 'complete name': 'Full Name',
       'district': 'District', 'zone': 'District', 'region': 'District',
       'chapter': 'Chapter', 'branch': 'Chapter', 'unit': 'Chapter',
       'phone': 'Phone', 'phone number': 'Phone', 'mobile': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'cell': 'Phone', 'contact': 'Phone',
@@ -49,6 +82,8 @@ const ImportModule = () => {
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
 
+    const normalizeKey = (h: string) => h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+
     const parseHeaders = (headerLine: string): string[] => {
       return headerLine.split(',').map(h => h.trim().replace(/^["']|["']$/g, '')).filter(h => h.length > 0);
     };
@@ -56,20 +91,20 @@ const ImportModule = () => {
     const matchColumns = (headers: string[]) => {
       const map: Record<string, boolean> = {};
       headers.forEach(h => {
-        const key = h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const key = normalizeKey(h);
         const matched = KNOWN_FIELDS[key] || null;
         map[h] = !!matched;
       });
       if (!showRank) {
-        const rankCol = headers.find(h => KNOWN_FIELDS[h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()] === 'Rank');
+        const rankCol = headers.find(h => KNOWN_FIELDS[normalizeKey(h)] === 'Rank');
         if (rankCol) map[rankCol] = false;
       }
       if (!showOffice) {
-        const officeCol = headers.find(h => KNOWN_FIELDS[h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()] === 'Office');
+        const officeCol = headers.find(h => KNOWN_FIELDS[normalizeKey(h)] === 'Office');
         if (officeCol) map[officeCol] = false;
       }
       if (!showDelegateType) {
-        const dtCol = headers.find(h => KNOWN_FIELDS[h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()] === 'DelegateType');
+        const dtCol = headers.find(h => KNOWN_FIELDS[normalizeKey(h)] === 'DelegateType');
         if (dtCol) map[dtCol] = false;
       }
       return map;
@@ -104,6 +139,21 @@ const ImportModule = () => {
       setColumnMap(prev => ({ ...prev, [col]: !prev[col] }));
     };
 
+    const toggleAllColumns = (enable: boolean) => {
+      setColumnMap(prev => {
+        const next: Record<string, boolean> = {};
+        for (const col of detectedColumns) {
+          const matched = KNOWN_FIELDS[normalizeKey(col)] || null;
+          const isHiddenByConfig =
+            (!showRank && matched === 'Rank') ||
+            (!showOffice && matched === 'Office') ||
+            (!showDelegateType && matched === 'DelegateType');
+          next[col] = enable ? (!!matched && !isHiddenByConfig) : false;
+        }
+        return next;
+      });
+    };
+
     const buildFieldOrder = (): string[] => {
       const fieldOrder = ['Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
       if (!showRank) {
@@ -124,7 +174,7 @@ const ImportModule = () => {
     const getColumnIndex = (headers: string[], fieldName: string): number => {
       const key = fieldName.toLowerCase();
       for (let i = 0; i < headers.length; i++) {
-        const hKey = headers[i].toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const hKey = normalizeKey(headers[i]);
         if (KNOWN_FIELDS[hKey] === fieldName || hKey === key) return i;
       }
       return -1;
@@ -135,6 +185,39 @@ const ImportModule = () => {
       const lines = csv.trim().split('\n');
       if (lines.length < 2) return csv;
       const headers = parseHeaders(lines[0]);
+
+      const fullNameColIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+      const titleColIdx = getColumnIndex(headers, 'Title');
+      const firstNameColIdx = getColumnIndex(headers, 'First Name');
+      const lastNameColIdx = getColumnIndex(headers, 'Last Name');
+
+      const useFullName = fullNameColIdx >= 0 && columnMap[headers[fullNameColIdx]] !== false
+        && (titleColIdx < 0 || columnMap[headers[titleColIdx]] === false
+         || firstNameColIdx < 0 || columnMap[headers[firstNameColIdx]] === false
+         || lastNameColIdx < 0 || columnMap[headers[lastNameColIdx]] === false);
+
+      if (useFullName) {
+        const fieldOrder = buildFieldOrder();
+        const resultLines: string[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+          const parsed = parseFullName(values[fullNameColIdx] || '');
+          const colValues: Record<string, string> = {};
+          for (const field of fieldOrder) {
+            if (field === 'Title') colValues[field] = parsed.title;
+            else if (field === 'First Name') colValues[field] = parsed.firstName;
+            else if (field === 'Last Name') colValues[field] = parsed.lastName;
+            else {
+              const idx = getColumnIndex(headers, field);
+              colValues[field] = (idx >= 0 && columnMap[headers[idx]] !== false) ? (values[idx] || '') : '';
+            }
+          }
+          const row = fieldOrder.map(f => colValues[f]).join(',');
+          if (row.trim().replace(/,/g, '')) resultLines.push(row);
+        }
+        return resultLines.join('\n');
+      }
+
       const fieldOrder = buildFieldOrder();
       const colIndices: number[] = [];
       for (const field of fieldOrder) {
@@ -162,6 +245,18 @@ const ImportModule = () => {
       return resultLines.join('\n');
     }, [csv, showMapping, detectedColumns, columnMap]);
 
+    const handleDownloadTemplate = () => {
+      const fieldOrder = buildFieldOrder();
+      const sampleRow: Record<string, string> = {
+        'Title': 'Mr', 'First Name': 'John', 'Last Name': 'Doe',
+        'District': 'Lagos Central', 'Chapter': 'Ikeja Chapter',
+        'Phone': '08012345678', 'Email': 'john@email.com',
+        'Rank': 'CP', 'Office': 'OTHER', 'DelegateType': 'Member'
+      };
+      const templateRows = [{ ...Object.fromEntries(fieldOrder.map(f => [f, sampleRow[f] || ''])) }];
+      exportToCSV(templateRows, 'FGBMFI_Delegate_Import_Template.csv', fieldOrder);
+    };
+
     const handleImport = async () => {
         const dataToImport = mappedCsvData;
         if (!dataToImport.trim()) {
@@ -174,23 +269,24 @@ const ImportModule = () => {
         setFeedback(null);
 
         try {
-            const result = await db.importDelegates(dataToImport, activeEventId, (inserted, skipped, total) => {
-                setProgress({ current: inserted + skipped, total });
+            const result = await db.importDelegates(dataToImport, activeEventId, (inserted, updated, skipped, total) => {
+                setProgress({ current: inserted + updated + skipped, total });
             });
-            
-            if (result.inserted > 0 || result.skipped > 0) {
-                setFeedback({ 
-                    type: 'success', 
-                    msg: 'Import Complete!', 
+
+            if (result.inserted > 0 || result.updated > 0 || result.skipped > 0) {
+                setFeedback({
+                    type: 'success',
+                    msg: 'Import Complete!',
                     inserted: result.inserted,
+                    updated: result.updated,
                     skipped: result.skipped
                 });
                 setProgress(null);
                 setCsv('');
             } else {
-                setFeedback({ 
-                    type: 'error', 
-                    msg: 'Import failed. No valid records found. Please check your format.' 
+                setFeedback({
+                    type: 'error',
+                    msg: 'Import failed. No valid records found. Please check your format.'
                 });
             }
         } catch (e: any) {
@@ -201,6 +297,10 @@ const ImportModule = () => {
             setProgress(null);
         }
     };
+
+    const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
+    const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
+    const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
 
     return (
         <div className="max-w-4xl mx-auto space-y-6 pb-20">
@@ -220,7 +320,7 @@ const ImportModule = () => {
                             </div>
                             {progress && progress.total > 0 && (
                                 <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                    <div 
+                                    <div
                                         className="h-full bg-blue-600 rounded-full transition-all duration-300"
                                         style={{ width: `${(progress.current / progress.total) * 100}%` }}
                                     />
@@ -232,7 +332,16 @@ const ImportModule = () => {
 
                 {/* --- FIELD ORDER INSTRUCTIONS --- */}
                 <div className="bg-slate-900 p-6 rounded-2xl mb-8 border-b-4 border-blue-600 shadow-lg">
-                    <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-4">CSV Field Order ({buildFieldOrder().length} Columns):</h4>
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">CSV Field Order ({buildFieldOrder().length} Columns):</h4>
+                        <button
+                            onClick={handleDownloadTemplate}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider transition-all"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            Download Template
+                        </button>
+                    </div>
                     <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
                         {buildFieldOrder().map((field, idx) => (
                             <div key={field} className="bg-white/10 p-2 rounded-lg border border-white/5 text-center">
@@ -252,30 +361,35 @@ const ImportModule = () => {
                 {/* --- SUCCESS / ERROR FEEDBACK --- */}
                 {feedback && (
                     <div className={`p-6 mb-6 rounded-2xl border-2 animate-in zoom-in duration-300 flex items-center justify-between ${
-                        feedback.type === 'success' 
-                            ? 'bg-green-50 border-green-200 text-green-800' 
+                        feedback.type === 'success'
+                            ? 'bg-green-50 border-green-200 text-green-800'
                             : 'bg-red-50 border-red-200 text-red-800'
                     }`}>
                         <div className="flex items-center gap-4">
                             <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl ${
                                 feedback.type === 'success' ? 'bg-green-100' : 'bg-red-100'
                             }`}>
-                                {feedback.type === 'success' ? '✅' : '⚠️'}
+                                {feedback.type === 'success' ? '\u2705' : '\u26A0\uFE0F'}
                             </div>
                             <div>
                                 <p className="font-black uppercase text-sm tracking-widest">{feedback.msg}</p>
-                                {feedback.inserted !== undefined && (
-                                    <div className="mt-1 space-y-0.5">
+                                <div className="mt-1 space-y-0.5">
+                                    {feedback.inserted !== undefined && feedback.inserted > 0 && (
                                         <p className="text-[10px] font-bold text-green-700 uppercase">
-                                            ✅ {feedback.inserted} records imported
+                                            {'\u2705'} {feedback.inserted} new records imported
                                         </p>
-                                        {feedback.skipped !== undefined && feedback.skipped > 0 && (
-                                            <p className="text-[10px] font-bold text-amber-600 uppercase">
-                                                ⏭️ {feedback.skipped} duplicates skipped
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
+                                    )}
+                                    {feedback.updated !== undefined && feedback.updated > 0 && (
+                                        <p className="text-[10px] font-bold text-blue-600 uppercase">
+                                            {'\uD83D\uDD04'} {feedback.updated} existing records updated (gaps filled)
+                                        </p>
+                                    )}
+                                    {feedback.skipped !== undefined && feedback.skipped > 0 && (
+                                        <p className="text-[10px] font-bold text-amber-600 uppercase">
+                                            {'\u23ED\uFE0F'} {feedback.skipped} records skipped (already complete)
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                         <button onClick={() => setFeedback(null)} className="text-[10px] font-black uppercase opacity-50 hover:opacity-100 px-4 py-2">Dismiss</button>
@@ -313,41 +427,78 @@ const ImportModule = () => {
                     {showMapping && detectedColumns.length > 0 && (
                         <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 animate-in slide-in-from-top-2">
                             <div className="flex justify-between items-center mb-3">
-                                <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-wider">CSV Columns Detected</h4>
-                                <span className="text-[8px] font-bold text-amber-500 uppercase">Toggle to include/exclude</span>
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-wider">CSV Columns Detected</h4>
+                                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase ${matchedCount === knownCount && matchedCount > 0 ? 'bg-green-200 text-green-800' : 'bg-amber-200 text-amber-800'}`}>
+                                        {matchedCount}/{knownCount} matched
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => toggleAllColumns(true)}
+                                        className="text-[8px] font-bold text-amber-700 uppercase hover:text-amber-900 px-2 py-0.5 rounded"
+                                    >
+                                        Select All
+                                    </button>
+                                    <span className="text-amber-300">|</span>
+                                    <button
+                                        onClick={() => toggleAllColumns(false)}
+                                        className="text-[8px] font-bold text-amber-500 uppercase hover:text-amber-700 px-2 py-0.5 rounded"
+                                    >
+                                        Deselect All
+                                    </button>
+                                </div>
                             </div>
                             <div className="flex flex-wrap gap-2 mb-3">
                                 {detectedColumns.map(col => {
-                                    const matched = KNOWN_FIELDS[col.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()];
+                                    const matched = KNOWN_FIELDS[normalizeKey(col)];
+                                    const isFullName = matched === 'Full Name';
                                     return (
                                         <button
                                             key={col}
                                             onClick={() => toggleColumn(col)}
                                             className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wide border-2 transition-all ${
                                                 columnMap[col] !== false
-                                                    ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                                                    : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300'
+                                                    ? isFullName
+                                                        ? 'bg-purple-600 border-purple-600 text-white shadow-md'
+                                                        : matched
+                                                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                                                            : 'bg-green-600 border-green-600 text-white shadow-md'
+                                                    : matched
+                                                        ? 'bg-white border-gray-300 text-gray-500 hover:border-blue-300'
+                                                        : 'bg-gray-100 border-gray-200 text-gray-300 line-through'
                                             }`}>
-                                            {col}{matched ? ` → ${matched}` : ''}
+                                            {col}{matched ? ` \u2192 ${matched}` : ''}
                                         </button>
                                     );
                                 })}
                             </div>
+                            {detectedColumns.some(c => normalizeKey(c) === 'full_name' || normalizeKey(c) === 'full name') && (
+                                <div className="bg-purple-50 p-2 rounded-xl border border-purple-200 mb-2">
+                                    <p className="text-[8px] font-bold text-purple-700 uppercase">
+                                        {'\u2139\uFE0F'} Full Name column detected: will be parsed into Title + FirstName + LastName if separate name columns are missing.
+                                    </p>
+                                </div>
+                            )}
                             <p className="text-[8px] font-bold text-amber-600 uppercase">
-                                Only checked columns will be imported. {!showRank && 'Rank is hidden per event config. '}{!showOffice && 'Office is hidden per event config. '}{!showDelegateType && 'DelegateType is hidden per event config. '}
+                                Only checked columns will be imported.{' '}
+                                {!showRank && 'Rank is hidden per event config. '}
+                                {!showOffice && 'Office is hidden per event config. '}
+                                {!showDelegateType && 'DelegateType is hidden per event config. '}
+                                Extra/unknown columns are automatically excluded.
                             </p>
                         </div>
                     )}
 
-                    <textarea 
-                        className="w-full h-64 p-6 border-2 border-gray-100 rounded-[2rem] font-mono text-xs bg-gray-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none shadow-inner" 
-                        value={csv} 
+                    <textarea
+                        className="w-full h-64 p-6 border-2 border-gray-100 rounded-[2rem] font-mono text-xs bg-gray-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none shadow-inner"
+                        value={csv}
                         onChange={e => {
                             setCsv(e.target.value);
                             const lines = e.target.value.trim().split('\n');
                             if (lines.length > 1) {
                                 const headers = parseHeaders(lines[0]);
-                                if (headers.length > 1 && headers.some(h => KNOWN_FIELDS[h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()])) {
+                                if (headers.length > 1 && headers.some(h => KNOWN_FIELDS[normalizeKey(h)])) {
                                     if (detectedColumns.length === 0) {
                                         setDetectedColumns(headers);
                                         const map = matchColumns(headers);
@@ -356,12 +507,12 @@ const ImportModule = () => {
                                     setShowMapping(true);
                                 }
                             }
-                        }} 
+                        }}
                         placeholder="Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType..."
                     />
-                    
-                    <button 
-                        onClick={handleImport} 
+
+                    <button
+                        onClick={handleImport}
                         disabled={loading || !csv.trim()}
                         className="w-full py-5 bg-blue-900 hover:bg-slate-800 text-white font-black rounded-2xl shadow-2xl transition-all disabled:opacity-50 uppercase tracking-[0.2em] text-sm mt-4 transform active:scale-95"
                     >
@@ -372,7 +523,7 @@ const ImportModule = () => {
 
             <div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-slate-200 text-center">
                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-relaxed max-w-2xl mx-auto">
-                    Note: The system performs an intelligent data cleanse during import. It will automatically strip extra spaces and validate name fields. Ensure each record is on a new line.
+                    Note: The system performs an intelligent merge during import. Existing records (matched by Name + Phone per event) will have their missing fields auto-populated from the CSV. Records with all fields already complete are skipped. Extra whitespace is automatically stripped.
                 </p>
             </div>
         </div>
