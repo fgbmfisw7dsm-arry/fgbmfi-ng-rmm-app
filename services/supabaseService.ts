@@ -673,7 +673,10 @@ export const db = {
                 q = q.ilike('district', normalize(district));
             }
             const from = (page - 1) * pageSize;
-            const { data: rows, count, error } = await q.order('first_name').range(from, from + pageSize - 1);
+            const sortOrder = district ? 'first_name' : 'district';
+            const q2 = q.order(sortOrder);
+            if (!district) (q2 as any).order('first_name');
+            const { data: rows, count, error } = await q2.range(from, from + pageSize - 1);
             if (error) throw error;
             result = {
                 data: (rows || []) as Delegate[],

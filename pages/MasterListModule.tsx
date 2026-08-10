@@ -274,10 +274,48 @@ const MasterListModule = () => {
 
                 {loading ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
-                ) : displayGroups.length === 0 ? (
+                ) : delegates.length === 0 ? (
                     <div className="py-20 text-center space-y-4">
                         <div className="text-5xl opacity-20">📂</div>
                         <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No records found matching your filter.</div>
+                    </div>
+                ) : !selectedDistrict ? (
+                    /* --- FLAT VIEW: All Official Districts --- */
+                    <div>
+                        <div className="bg-slate-900 text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest rounded-xl mb-4">
+                            <span>All Districts</span>
+                            <span className="bg-white/10 px-3 py-1 rounded-full">{totalRecords} TOTAL</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-[10px] text-left min-w-[1000px]">
+                                <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
+                                    <tr><th className="p-3 w-20">District</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {delegates.map(d => (
+                                        <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
+                                            <td className={`p-3 font-black uppercase text-[9px] ${isValueOfficial(d.district, officialDistricts) ? 'text-slate-700' : 'text-orange-600'}`}>{d.district || '-'}</td>
+                                            <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
+                                            <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
+                                            <td className="p-3 font-medium">{d.chapter || '-'}</td>
+                                            <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
+                                            {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
+                                            {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
+                                            {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
+                                            <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
+                                            <td className="p-3 no-print text-center">
+                                                <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
+                                        <tr key={`__allpad_${i}`} className="bg-gray-50/50">
+                                            <td colSpan={8 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 ) : displayGroups.map(groupName => {
                     const distDelegates = delegates.filter(d => (d.district || '').trim().toUpperCase() === groupName.toUpperCase());
