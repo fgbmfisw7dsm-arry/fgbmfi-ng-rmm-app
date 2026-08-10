@@ -698,6 +698,24 @@ export const db = {
         return result;
     },
 
+    getDistrictsWithDelegates: async (eventId: string): Promise<{ district: string; count: number }[]> => {
+        const { data, error } = await supabase
+            .from('delegates')
+            .select('district')
+            .eq('event_id', eventId)
+            .not('district', 'is', null)
+            .neq('district', '');
+        if (error || !data) return [];
+        const counts = new Map<string, number>();
+        for (const d of data) {
+            const key = normalize(d.district).toUpperCase();
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        return Array.from(counts.entries())
+            .map(([district, count]) => ({ district, count }))
+            .sort((a, b) => a.district.localeCompare(b.district, undefined, { sensitivity: 'base', numeric: true }));
+    },
+
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
         const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
         const result = handleSupabaseError(await supabase.from('delegates').update({
