@@ -323,6 +323,13 @@ const BadgePrintingModule = () => {
       return;
     }
 
+    const externalIdMap = await db.repairExternalIds(delegatesToPrint);
+    if (externalIdMap.size > 0) {
+      delegatesToPrint = delegatesToPrint.map(d =>
+        externalIdMap.has(d.delegate_id) ? { ...d, external_id: externalIdMap.get(d.delegate_id)! } : d
+      );
+    }
+
     const batches: Delegate[][] = [];
     for (let i = 0; i < delegatesToPrint.length; i += batchSize) {
       batches.push(delegatesToPrint.slice(i, i + batchSize));
