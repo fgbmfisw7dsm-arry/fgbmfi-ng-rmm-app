@@ -397,7 +397,7 @@ const MasterListModule = () => {
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
-                {loading || districtListLoading ? (
+                {((!selectedDistrict && !searchTerm) ? districtListLoading : loading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
                 ) : !selectedDistrict && !searchTerm ? (
                     /* --- MULTI-DISTRICT VIEW: per-district sections with independent pagination --- */
