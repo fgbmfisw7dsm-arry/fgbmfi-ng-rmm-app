@@ -1162,7 +1162,7 @@ export const db = {
     },
 
     deleteScrambledImportDelegates: async (eventId: string, dryRun: boolean = false): Promise<{ deleted: number; preview: string[] }> => {
-        await ensureEventActive(eventId);
+        if (!dryRun) await ensureEventActive(eventId);
         const TITLE_VALUES = [
           'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
           'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',

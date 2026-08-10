@@ -64,6 +64,7 @@ const ImportModule = () => {
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
     const [scrambledPreview, setScrambledPreview] = useState<string[]>([]);
     const [scrambledDeleting, setScrambledDeleting] = useState(false);
+    const [scrambledLoading, setScrambledLoading] = useState(false);
     const [scrambledResult, setScrambledResult] = useState<{ deleted: number } | null>(null);
 
     const KNOWN_FIELDS: Record<string, string> = {
@@ -365,11 +366,20 @@ const ImportModule = () => {
 
     const handleScramblePreview = async () => {
         if (!activeEventId) return;
+        setScrambledLoading(true);
+        setScrambledResult(null);
+        setScrambledPreview([]);
         try {
             const { preview } = await db.deleteScrambledImportDelegates(activeEventId, true);
             setScrambledPreview(preview);
+            if (preview.length === 0) {
+                setScrambledResult({ deleted: 0 });
+            }
         } catch (e: any) {
             console.error('Preview error:', e);
+            setScrambledResult({ deleted: -1 });
+        } finally {
+            setScrambledLoading(false);
         }
     };
 
@@ -484,10 +494,10 @@ const ImportModule = () => {
                     <div className="flex gap-2">
                         <button
                             onClick={handleScramblePreview}
-                            disabled={scrambledDeleting || !activeEventId}
+                            disabled={scrambledDeleting || scrambledLoading || !activeEventId}
                             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
-                            Preview Affected Records
+                            {scrambledLoading ? 'SCANNING...' : 'Preview Affected Records'}
                         </button>
                         <button
                             onClick={handleCleanupScrambled}
