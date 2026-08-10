@@ -267,7 +267,9 @@ const BadgePrintingModule = () => {
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!activeEventId || !activeEvent || !user?.id) return;
+    if (!activeEventId) { console.warn('[BadgePrinting] No activeEventId'); return; }
+    if (!activeEvent) { console.warn('[BadgePrinting] No activeEvent'); return; }
+    if (!user?.id) { console.warn('[BadgePrinting] No user.id'); return; }
 
     const allSelected =
       selectedDelegates.length > 0
@@ -376,6 +378,7 @@ const BadgePrintingModule = () => {
         const batchDelegates = batches[batchIdx];
         const idxOffset = batchIdx * batchSize;
 
+        console.log('[BadgePrinting] generating batch', batchIdx + 1, 'of', batches.length, 'delegates:', batchDelegates.length, 'layout:', layout);
         const pdfBytes = await generateBadgePDF(
           batchDelegates,
           layout,
@@ -468,11 +471,12 @@ const BadgePrintingModule = () => {
         }, 200);
       }
     } catch (err: any) {
+      console.error('[BadgePrinting] generate failed:', err?.message || err);
       setGenerating(false);
       setProgress(null);
       setFeedback({
         type: 'error',
-        msg: err?.message || 'PDF generation failed',
+        msg: err?.message || String(err) || 'PDF generation failed',
       });
     }
   }, [

@@ -234,6 +234,8 @@ function drawBadge(
   const badgeBottom = by;
   const badgeLeft = bx;
 
+  try {
+
   if (isPortrait) {
     const headerTop = badgeBottom + bh;
     const headerBottom = badgeBottom + bh - headerH;
@@ -612,6 +614,14 @@ function drawBadge(
     font: fontBold as any,
     color: HEADER_TEXT,
   });
+  } catch (badgeErr: any) {
+    console.error('drawBadge failed:', badgeErr?.message || badgeErr);
+    try {
+      page.drawRectangle({ x: bx, y: by, width: bw, height: bh, borderColor: rgb(1, 0, 0), borderWidth: 1, color: BODY_BG });
+      const errMsg = (badgeErr?.message || 'Badge error').substring(0, 40);
+      page.drawText(errMsg, { x: bx + mmToPt(2), y: by + bh / 2, size: 7, font: font, color: rgb(1, 0, 0) });
+    } catch {}
+  }
 }
 
 export async function generateBadgePDF(
@@ -650,6 +660,10 @@ export async function generateBadgePDF(
   }
 
   const config = LAYOUTS[layout];
+  if (!config) {
+    console.error('[generateBadgePDF] Unknown layout:', layout);
+    throw new Error(`Unknown badge layout: ${layout}`);
+  }
   const badgeW = mmToPt(config.badgeW);
   const badgeH = mmToPt(config.badgeH);
   const cutGapW = mmToPt(config.cutGap);
@@ -725,8 +739,13 @@ export async function generateBadgePDF(
   pdfDoc.setTitle('FGBMFI Delegate Badges');
   pdfDoc.setSubject('Event Delegate Badge Batch');
   pdfDoc.setCreator('FGBMFI Nigeria EMS');
-  const pdfBytes = await pdfDoc.save();
-  return pdfBytes;
+  try {
+    const pdfBytes = await pdfDoc.save();
+    return pdfBytes;
+  } catch (saveErr: any) {
+    console.error('[generateBadgePDF] pdfDoc.save() failed:', saveErr?.message || saveErr);
+    throw saveErr;
+  }
 }
 
 export function getBadgePageCount(
