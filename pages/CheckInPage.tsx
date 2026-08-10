@@ -209,7 +209,7 @@ const CheckInPage = () => {
     }
   };
 
-  const handleReprintBadge = useCallback(async (delegate: Delegate) => {
+  const handleReprintBadge = async (delegate: Delegate) => {
     try {
       if (!delegate.external_id?.startsWith('CON26')) {
         const repaired = await db.repairExternalId(delegate.delegate_id);
@@ -250,7 +250,7 @@ const CheckInPage = () => {
       setFeedback({ type: 'error', msg: 'Failed to generate badge. Please try again.' });
       setTimeout(() => setFeedback(null), 3000);
     }
-  }, [activeEventId]);
+  };
 
   const generateBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, bannerDataUrl: string): Promise<string> => {
     const mmToPx = 3.779527559;
