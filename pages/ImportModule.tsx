@@ -65,6 +65,8 @@ const ImportModule = () => {
     const [scrambledPreview, setScrambledPreview] = useState<string[]>([]);
     const [scrambledDeleting, setScrambledDeleting] = useState(false);
     const [scrambledLoading, setScrambledLoading] = useState(false);
+    const [scrambledSamples, setScrambledSamples] = useState<string[]>([]);
+    const [scrambledTotal, setScrambledTotal] = useState(0);
     const [scrambledResult, setScrambledResult] = useState<{ deleted: number } | null>(null);
 
     const KNOWN_FIELDS: Record<string, string> = {
@@ -353,8 +355,10 @@ const ImportModule = () => {
         setScrambledDeleting(true);
         setScrambledResult(null);
         try {
-            const { preview, deleted } = await db.deleteScrambledImportDelegates(activeEventId);
+            const { preview, deleted, samples, totalDelegates } = await db.deleteScrambledImportDelegates(activeEventId);
             setScrambledPreview(preview);
+            setScrambledSamples(samples);
+            setScrambledTotal(totalDelegates);
             setScrambledResult({ deleted });
         } catch (e: any) {
             console.error('Cleanup error:', e);
@@ -369,9 +373,13 @@ const ImportModule = () => {
         setScrambledLoading(true);
         setScrambledResult(null);
         setScrambledPreview([]);
+        setScrambledSamples([]);
+        setScrambledTotal(0);
         try {
-            const { preview } = await db.deleteScrambledImportDelegates(activeEventId, true);
+            const { preview, samples, totalDelegates } = await db.deleteScrambledImportDelegates(activeEventId, true);
             setScrambledPreview(preview);
+            setScrambledSamples(samples);
+            setScrambledTotal(totalDelegates);
             if (preview.length === 0) {
                 setScrambledResult({ deleted: 0 });
             }
@@ -527,8 +535,33 @@ const ImportModule = () => {
                             <p className="text-[9px] font-black uppercase">
                                 {scrambledResult.deleted > 0
                                     ? `Successfully deleted ${scrambledResult.deleted} scrambled delegate record(s). Dashboard counts will auto-update.`
-                                    : 'No scrambled records found. Nothing to delete.'}
+                                    : 'No scrambled records found in this event.'}
                             </p>
+                            {scrambledResult.deleted === 0 && scrambledTotal > 0 && (
+                                <div className="mt-2">
+                                    <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
+                                        Scanned {scrambledTotal} delegates. District values found in this event:
+                                    </p>
+                                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                                        {scrambledSamples.slice(0, 40).map((s, i) => (
+                                            <span key={i} className="px-1.5 py-0.5 bg-white rounded text-[8px] font-mono text-gray-700 border border-gray-200">
+                                                {s || '(empty)'}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    {scrambledSamples.length > 40 && (
+                                        <p className="text-[7px] text-amber-500 mt-1">... and {scrambledSamples.length - 40} more unique values</p>
+                                    )}
+                                    <p className="text-[7px] text-amber-400 mt-2 italic">
+                                        If no district above looks like a title (Mr, Mrs, Dr, etc.), the scrambled records may already be cleaned up or were imported into a different event.
+                                    </p>
+                                </div>
+                            )}
+                            {scrambledResult.deleted === 0 && scrambledTotal === 0 && (
+                                <p className="text-[8px] text-amber-600 mt-1">
+                                    No delegates found in this event. Ensure the correct event is selected in the header dropdown.
+                                </p>
+                            )}
                         </div>
                     )}
                     {scrambledResult !== null && scrambledResult.deleted < 0 && (

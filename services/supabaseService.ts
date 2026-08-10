@@ -1161,7 +1161,7 @@ export const db = {
         recordAuditLog(eventId, 'event_clear_data', 'All checkins, session calls, financials, and pledges cleared', null, 'event', eventId);
     },
 
-    deleteScrambledImportDelegates: async (eventId: string, dryRun: boolean = false): Promise<{ deleted: number; preview: string[] }> => {
+    deleteScrambledImportDelegates: async (eventId: string, dryRun: boolean = false): Promise<{ deleted: number; preview: string[]; samples: string[]; totalDelegates: number }> => {
         if (!dryRun) await ensureEventActive(eventId);
         const TITLE_VALUES = [
           'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -1178,21 +1178,27 @@ export const db = {
           .select('delegate_id, first_name, last_name, district, chapter')
           .eq('event_id', eventId)
           .limit(10000);
+        const totalDelegates = candidates?.length || 0;
+        const districtSamples = new Set<string>();
+        if (candidates) {
+          for (const d of candidates) {
+            districtSamples.add((d.district || '').trim());
+          }
+        }
+        const sampleList = Array.from(districtSamples).filter(Boolean).sort().slice(0, 50);
         if (fetchErr) {
           console.error('[deleteScrambledImportDelegates] fetch error:', fetchErr);
-          return { deleted: 0, preview: [] };
+          return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         if (!candidates || candidates.length === 0) {
           console.log(`[deleteScrambledImportDelegates] No delegates found for event ${eventId}`);
-          return { deleted: 0, preview: [] };
+          return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         console.log(`[deleteScrambledImportDelegates] Event ${eventId}: ${candidates.length} total delegates, scanning districts...`);
-        const districtSamples = new Set<string>();
         const scrambledIds: string[] = [];
         const previewLines: string[] = [];
         for (const d of candidates) {
           const distRaw = (d.district || '').trim();
-          districtSamples.add(distRaw);
           const distLower = distRaw.toLowerCase();
           const distClean = distLower.replace(/\(.*/, '').trim().replace(/\.$/, '');
           if (TITLE_VALUES.includes(distClean)) {
@@ -1200,15 +1206,13 @@ export const db = {
             previewLines.push(`${d.first_name} ${d.last_name} | district=${d.district} | chapter=${d.chapter}`);
           }
         }
-        const samples = Array.from(districtSamples).slice(0, 30).join(', ');
-        console.log(`[deleteScrambledImportDelegates] District values found (${districtSamples.size} unique): ${samples}`);
-        console.log(`[deleteScrambledImportDelegates] TITLE_VALUES checked: ${TITLE_VALUES.join(', ')}`);
+        console.log(`[deleteScrambledImportDelegates] District values found (${districtSamples.size} unique): ${sampleList.join(', ')}`);
         if (scrambledIds.length === 0) {
           console.log(`[deleteScrambledImportDelegates] No district matched any title value`);
-          return { deleted: 0, preview: [] };
+          return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         if (dryRun) {
-          return { deleted: 0, preview: previewLines };
+          return { deleted: 0, preview: previewLines, samples: sampleList, totalDelegates };
         }
         await supabase.from('checkins').delete().in('delegate_id', scrambledIds);
         await supabase.from('session_responses').delete().in('delegate_id', scrambledIds);
@@ -1219,10 +1223,10 @@ export const db = {
           .in('delegate_id', scrambledIds);
         if (delErr) {
           console.error('[deleteScrambledImportDelegates] delete error:', delErr);
-          return { deleted: 0, preview: previewLines };
+          return { deleted: 0, preview: previewLines, samples: sampleList, totalDelegates };
         }
         console.log(`[deleteScrambledImportDelegates] Deleted ${scrambledIds.length} scrambled delegate(s) from event ${eventId}`);
-        return { deleted: scrambledIds.length, preview: previewLines };
+        return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
     },
 
     deleteDelegatesByDistrict: async (district: string, eventId?: string) => { 
