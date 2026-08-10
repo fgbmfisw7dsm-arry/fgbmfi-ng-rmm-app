@@ -707,6 +707,15 @@ export const db = {
             }
         }
 
+        if (result.data && result.data.length > 1) {
+            result.data.sort((a, b) => {
+                const la = (a.last_name || '').toLowerCase();
+                const lb = (b.last_name || '').toLowerCase();
+                if (la !== lb) return la.localeCompare(lb);
+                return (a.first_name || '').toLowerCase().localeCompare((b.first_name || '').toLowerCase());
+            });
+        }
+
         return result;
     },
 
