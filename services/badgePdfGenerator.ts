@@ -283,7 +283,7 @@ function drawBadge(
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
-        ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
+        ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
       ];
 
       for (const [label, value] of fields) {
@@ -373,7 +373,7 @@ function drawBadge(
     const fields: [string, string][] = [
       ['District', delegate.district || 'N/A'],
       ['Chapter', delegate.chapter || 'N/A'],
-      ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
+      ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
     ];
 
     for (const [label, value] of fields) {
@@ -535,7 +535,7 @@ function drawBadge(
   const fields: [string, string][] = [
     ['District', delegate.district || 'N/A'],
     ['Chapter', delegate.chapter || 'N/A'],
-    ['ID', delegate.external_id || delegate.delegate_id.slice(0, 8)],
+    ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
   ];
 
   if (showRank && delegate.rank && delegate.rank !== 'CP') {

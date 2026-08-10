@@ -380,7 +380,8 @@ const CheckInPage = () => {
 
         ctx.fillStyle = '#1e3a5f';
         ctx.font = 'bold 8px sans-serif';
-        ctx.fillText('ID: ' + (delegate.external_id || delegate.delegate_id.slice(0, 8)), bw / 2, textY);
+        const displayId = delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8);
+        ctx.fillText('ID: ' + displayId, bw / 2, textY);
       } catch {}
     }
 
@@ -838,9 +839,9 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                          {showRank && badgeDelegate.rank && (
                            <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Rank: {badgeDelegate.rank}</div>
                          )}
-                         {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                           <div className="text-[8px] font-black text-gray-500 uppercase">ID: <span className="text-gray-700 font-mono text-[8px]">{badgeDelegate.external_id || badgeDelegate.delegate_id.slice(0, 8)}</span></div>
-                         )}
+                          {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
+                            (() => { const displayId = badgeDelegate.external_id?.startsWith('CON26') ? badgeDelegate.external_id : badgeDelegate.delegate_id.slice(0, 8); return <div className="text-[8px] font-black text-gray-500 uppercase">ID: <span className="text-gray-700 font-mono text-[8px]">{displayId}</span></div>; })()
+                          )}
                        </div>
                      </div>
                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '13%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
