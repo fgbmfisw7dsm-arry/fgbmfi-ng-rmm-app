@@ -1163,16 +1163,13 @@ export const db = {
 
     deleteScrambledImportDelegates: async (eventId: string, dryRun: boolean = false): Promise<{ deleted: number; preview: string[]; samples: string[]; totalDelegates: number }> => {
         if (!dryRun) await ensureEventActive(eventId);
-        const TITLE_VALUES = [
-          'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
-          'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
-          'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
-          'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia', 'arc', 'pst',
-          'esv', 'evang', 'dcn', 'judge', 'justice', 'dame', 'avm', 'asc',
-          'pharm', 'cmd', 'cmdr', 'amb', 'sen', 'cp', 'prof.', 'pharm.',
-          'amb.', 'barr.', 'engr.', 'ms.', 'mr.', 'r.adm', 'rear', 'rear a',
-          'avch', 'rm', 'radm'
-        ];
+        const { data: settings } = await supabase.from('system_settings').select('districts').limit(1).maybeSingle();
+        const officialDistricts = new Set<string>();
+        if (settings?.districts && Array.isArray(settings.districts)) {
+          for (const d of settings.districts) {
+            officialDistricts.add(normalize(d).toUpperCase());
+          }
+        }
         const { data: candidates, error: fetchErr } = await supabase
           .from('delegates')
           .select('delegate_id, first_name, last_name, district, chapter')
@@ -1191,24 +1188,28 @@ export const db = {
           return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         if (!candidates || candidates.length === 0) {
-          console.log(`[deleteScrambledImportDelegates] No delegates found for event ${eventId}`);
           return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
-        console.log(`[deleteScrambledImportDelegates] Event ${eventId}: ${candidates.length} total delegates, scanning districts...`);
+        function isOfficialDistrict(dist: string): boolean {
+          const d = normalize(dist).toUpperCase();
+          if (!d) return false;
+          if (officialDistricts.has(d)) return true;
+          const abbr = d.replace(/[^A-Z0-9]/g, '');
+          if (/^(NC|NE|NW|SE|SS|SW)\d+$/.test(abbr)) return true;
+          if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
+          return false;
+        }
         const scrambledIds: string[] = [];
         const previewLines: string[] = [];
         for (const d of candidates) {
           const distRaw = (d.district || '').trim();
-          const distLower = distRaw.toLowerCase();
-          const distClean = distLower.replace(/\(.*/, '').trim().replace(/\.$/, '');
-          if (TITLE_VALUES.includes(distClean)) {
+          if (!distRaw) continue;
+          if (!isOfficialDistrict(distRaw)) {
             scrambledIds.push(d.delegate_id);
-            previewLines.push(`${d.first_name} ${d.last_name} | district=${d.district} | chapter=${d.chapter}`);
+            previewLines.push(`${d.first_name} ${d.last_name} | district="${d.district}" | chapter=${d.chapter}`);
           }
         }
-        console.log(`[deleteScrambledImportDelegates] District values found (${districtSamples.size} unique): ${sampleList.join(', ')}`);
         if (scrambledIds.length === 0) {
-          console.log(`[deleteScrambledImportDelegates] No district matched any title value`);
           return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         if (dryRun) {
@@ -1225,7 +1226,7 @@ export const db = {
           console.error('[deleteScrambledImportDelegates] delete error:', delErr);
           return { deleted: 0, preview: previewLines, samples: sampleList, totalDelegates };
         }
-        console.log(`[deleteScrambledImportDelegates] Deleted ${scrambledIds.length} scrambled delegate(s) from event ${eventId}`);
+        console.log(`[deleteScrambledImportDelegates] Deleted ${scrambledIds.length} delegate(s) with non-official district from event ${eventId}`);
         return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
     },
 

@@ -495,7 +495,7 @@ const ImportModule = () => {
                         <div>
                             <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider">Recover Scrambled Import</h4>
                             <p className="text-[8px] font-bold text-red-500 uppercase mt-0.5">
-                                Identifies &amp; deletes delegate records where district was filled with title values (Mr, Mrs, Dr, etc.) — a sign of misaligned column mapping during previous imports. Also removes associated checkins &amp; session responses to keep dashboard counts accurate.
+                                Identifies delegates whose district does NOT match any official district in system settings (a sign of misaligned column mapping during import). Also removes associated checkins, session responses, and badge logs to keep dashboard counts accurate.
                             </p>
                         </div>
                     </div>
@@ -553,7 +553,7 @@ const ImportModule = () => {
                                         <p className="text-[7px] text-amber-500 mt-1">... and {scrambledSamples.length - 40} more unique values</p>
                                     )}
                                     <p className="text-[7px] text-amber-400 mt-2 italic">
-                                        If no district above looks like a title (Mr, Mrs, Dr, etc.), the scrambled records may already be cleaned up or were imported into a different event.
+                                        If no district above appears to be from a misaligned import, the scrambled records may already be cleaned up or were imported into a different event.
                                     </p>
                                 </div>
                             )}
