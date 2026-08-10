@@ -68,6 +68,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       try { await html5ScannerRef.current.stop(); } catch {}
       html5ScannerRef.current = null;
     }
+    await new Promise(r => setTimeout(r, 200));
   }, []);
 
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
@@ -133,9 +134,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
           setError('No camera detected on this device.');
         } else {
-          log(`Camera error, retrying with default...`);
+          log(`Camera error${deviceId ? ' for selected cam' : ''}, retrying with default...`);
           setError('');
-          setTimeout(() => startBarcodeDetector(null), 300);
+          if (deviceId) {
+            localStorage.removeItem('qr-camera-device-id');
+            selectedCameraRef.current = null;
+            setSelectedCameraId(null);
+          }
+          setTimeout(() => startBarcodeDetector(null), 500);
         }
         setScanning(false);
       }
@@ -193,14 +199,29 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     } catch (e: any) {
       html5ScannerRef.current = null;
       if (mountedRef.current) {
-        if (e.message && e.message.includes('NotFound')) {
+        const msg = e.message || '';
+        if (msg.includes('NotFound')) {
           log('html5-qrcode camera not found, retrying with default...');
           setError('');
-          setTimeout(() => tryHtml5Qrcode(null), 300);
+          if (deviceId) {
+            localStorage.removeItem('qr-camera-device-id');
+            selectedCameraRef.current = null;
+            setSelectedCameraId(null);
+          }
+          setTimeout(() => tryHtml5Qrcode(null), 500);
         } else {
-          setError(e.message || 'Failed to start camera.');
+          log(`html5-qrcode error: ${msg || 'unknown'}`);
+          if (deviceId) {
+            localStorage.removeItem('qr-camera-device-id');
+            selectedCameraRef.current = null;
+            setSelectedCameraId(null);
+            setScanning(false);
+            setTimeout(() => tryHtml5Qrcode(null), 500);
+          } else {
+            setError(msg || 'Failed to start camera.');
+            setScanning(false);
+          }
         }
-        setScanning(false);
       }
     }
   }, [log, refreshCameras]);
