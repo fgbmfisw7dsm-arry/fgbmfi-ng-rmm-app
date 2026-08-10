@@ -1183,19 +1183,28 @@ export const db = {
           return { deleted: 0, preview: [] };
         }
         if (!candidates || candidates.length === 0) {
+          console.log(`[deleteScrambledImportDelegates] No delegates found for event ${eventId}`);
           return { deleted: 0, preview: [] };
         }
+        console.log(`[deleteScrambledImportDelegates] Event ${eventId}: ${candidates.length} total delegates, scanning districts...`);
+        const districtSamples = new Set<string>();
         const scrambledIds: string[] = [];
         const previewLines: string[] = [];
         for (const d of candidates) {
-          const distRaw = (d.district || '').trim().toLowerCase();
-          const distClean = distRaw.replace(/\(.*/, '').trim().replace(/\.$/, '');
+          const distRaw = (d.district || '').trim();
+          districtSamples.add(distRaw);
+          const distLower = distRaw.toLowerCase();
+          const distClean = distLower.replace(/\(.*/, '').trim().replace(/\.$/, '');
           if (TITLE_VALUES.includes(distClean)) {
             scrambledIds.push(d.delegate_id);
             previewLines.push(`${d.first_name} ${d.last_name} | district=${d.district} | chapter=${d.chapter}`);
           }
         }
+        const samples = Array.from(districtSamples).slice(0, 30).join(', ');
+        console.log(`[deleteScrambledImportDelegates] District values found (${districtSamples.size} unique): ${samples}`);
+        console.log(`[deleteScrambledImportDelegates] TITLE_VALUES checked: ${TITLE_VALUES.join(', ')}`);
         if (scrambledIds.length === 0) {
+          console.log(`[deleteScrambledImportDelegates] No district matched any title value`);
           return { deleted: 0, preview: [] };
         }
         if (dryRun) {
