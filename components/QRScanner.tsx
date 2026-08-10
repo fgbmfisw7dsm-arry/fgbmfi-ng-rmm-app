@@ -17,7 +17,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
-  const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [forceHtml5, setForceHtml5] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,6 +36,20 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   }, []);
 
   const switchingRef = useRef(false);
+
+  const refreshCameras = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices
+        .filter(d => d.kind === 'videoinput')
+        .map((d, i) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Camera ${i + 1}`
+        }));
+      camerasRef.current = videoDevices;
+      setCameras(videoDevices);
+    } catch {}
+  }, []);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -88,6 +101,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         }
       }
 
+      refreshCameras();
+
       setScanning(true);
       setError('');
 
@@ -125,7 +140,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log]);
+  }, [log, refreshCameras]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
@@ -174,6 +189,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       );
       log('html5-qrcode active (15fps)');
       html5ScannerRef.current = scanner;
+      refreshCameras();
     } catch (e: any) {
       html5ScannerRef.current = null;
       if (mountedRef.current) {
@@ -187,7 +203,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log]);
+  }, [log, refreshCameras]);
 
   const startWithEngine = useCallback(async (deviceId: string | null) => {
     if (forceHtml5Ref.current) {
@@ -206,7 +222,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       selectedCameraRef.current = deviceId;
       setSelectedCameraId(deviceId);
       localStorage.setItem('qr-camera-device-id', deviceId);
-      setShowCameraMenu(false);
       setScanning(false);
       setError('');
       await stopScanner();
@@ -286,7 +301,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     };
   }, [startWithEngine]);
 
-  const activeLabel = cameras.find(c => c.deviceId === selectedCameraId)?.label;
   const hasBarcodeDetector = 'BarcodeDetector' in window;
 
   return (
@@ -296,39 +310,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         <div className="relative flex-1 md:h-72">
           <div id="qr-scanner-view" className="absolute inset-0" />
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
-          {cameras.length > 1 && (
-            <>
-              <button
-                onClick={() => setShowCameraMenu(!showCameraMenu)}
-                className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white transition-colors"
-                title="Switch camera"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 7l-5 5 5 5" />
-                  <path d="M1 17l5-5-5-5" />
-                  <path d="M3 7h1a8 8 0 0 1 14.5 4M3 17h16a5 5 0 0 0 2-9.5" />
-                </svg>
-              </button>
-              {showCameraMenu && (
-                <div className="absolute top-12 right-3 z-20 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-[180px]">
-                  {cameras.map(cam => (
-                    <button
-                      key={cam.deviceId}
-                      onClick={() => switchCamera(cam.deviceId)}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/10 transition-colors ${
-                        cam.deviceId === selectedCameraId ? 'text-white font-bold' : 'text-gray-400'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        cam.deviceId === selectedCameraId ? 'bg-blue-400' : 'bg-gray-600'
-                      }`} />
-                      <span className="truncate">{cam.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
         </div>
       ) : (
         <div className="relative flex-1 md:h-72">
@@ -343,44 +324,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               </div>
             )}
           </div>
-          {cameras.length > 1 && (
-            <>
-              <button
-                onClick={() => setShowCameraMenu(!showCameraMenu)}
-                className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white transition-colors"
-                title="Switch camera"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 7l-5 5 5 5" />
-                  <path d="M1 17l5-5-5-5" />
-                  <path d="M3 7h1a8 8 0 0 1 14.5 4M3 17h16a5 5 0 0 0 2-9.5" />
-                </svg>
-              </button>
-              {showCameraMenu && (
-                <div className="absolute top-12 right-3 z-20 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-[180px]">
-                  {cameras.map(cam => (
-                    <button
-                      key={cam.deviceId}
-                      onClick={() => switchCamera(cam.deviceId)}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/10 transition-colors ${
-                        cam.deviceId === selectedCameraId ? 'text-white font-bold' : 'text-gray-400'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        cam.deviceId === selectedCameraId ? 'bg-blue-400' : 'bg-gray-600'
-                      }`} />
-                      <span className="truncate">{cam.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
         </div>
       )}
 
-      <div className="bg-black/90 px-6 py-4 flex items-center justify-between">
-        <div className="flex flex-col min-w-0">
+      <div className="bg-black/90 px-4 py-3 flex items-center justify-between gap-2">
+        <div className="flex flex-col min-w-0 flex-1">
           {scanning && !error && (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
@@ -390,15 +338,23 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             </div>
           )}
           {error && <span className="text-xs font-bold text-red-400 truncate">{error}</span>}
-          {activeLabel && cameras.length > 1 && !scanning && !error && (
-            <span className="text-[10px] text-gray-500 truncate">{activeLabel}</span>
-          )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {cameras.length > 1 && (
+            <select
+              value={selectedCameraId || ''}
+              onChange={(e) => { const v = e.target.value; if (v) switchCamera(v); }}
+              className="bg-gray-800 text-white text-[10px] font-medium rounded-lg px-2 py-2 border border-gray-600 max-w-[130px] truncate appearance-none cursor-pointer hover:border-gray-400 transition-colors"
+            >
+              {cameras.map(cam => (
+                <option key={cam.deviceId} value={cam.deviceId}>{cam.label}</option>
+              ))}
+            </select>
+          )}
           {hasBarcodeDetector && (
             <button
               onClick={toggleEngine}
-              className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all ${
+              className={`px-2.5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
                 forceHtml5
                   ? 'bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-300'
                   : 'bg-blue-600/30 hover:bg-blue-600/50 text-blue-300'
@@ -408,7 +364,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               {forceHtml5 ? 'html5' : 'BD'}
             </button>
           )}
-          <button onClick={onClose} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all">
+          <button onClick={onClose} className="px-5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-[10px] uppercase tracking-widest transition-all">
             Cancel
           </button>
         </div>
