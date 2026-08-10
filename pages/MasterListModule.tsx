@@ -7,7 +7,7 @@ import { exportToPDF, exportToCSV } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 
 const MasterListModule = () => {
     const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
