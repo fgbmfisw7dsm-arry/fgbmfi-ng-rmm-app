@@ -462,40 +462,28 @@ const CheckInPage = () => {
   };
 
   const downloadBadgeImage = async () => {
-    const badgeEl = document.getElementById('badge-print-area');
-    if (!badgeEl) return;
+    if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
-    const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
     try {
-      // @ts-ignore
-      const canvas = await window.html2canvas(badgeEl, { scale: isMobile ? 2 : 3, useCORS: true, logging: false, backgroundColor: '#ffffff' });
-      canvas.toBlob((blob: Blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `FGBMFI_Badge_${nameSlug}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 'image/png');
+      const a = document.createElement('a');
+      a.href = badgeCanvasUrl;
+      a.download = `FGBMFI_Badge_${nameSlug}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       setFeedback({ type: 'success', msg: 'Image downloaded!' });
       setTimeout(() => setFeedback(null), 2000);
     } catch (e) {
-      console.error('Image generation failed:', e);
+      console.error('Image download failed:', e);
     }
   };
 
   const shareBadge = async () => {
-    const badgeEl = document.getElementById('badge-print-area');
-    if (!badgeEl) return;
+    if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
-    const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
     try {
-      // @ts-ignore
-      const canvas = await window.html2canvas(badgeEl, { scale: isMobile ? 2 : 3, useCORS: true, logging: false, backgroundColor: '#ffffff' });
-      const blob: Blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const resp = await fetch(badgeCanvasUrl);
+      const blob = await resp.blob();
       const file = new File([blob], `FGBMFI_Badge_${nameSlug}.png`, { type: 'image/png' });
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
