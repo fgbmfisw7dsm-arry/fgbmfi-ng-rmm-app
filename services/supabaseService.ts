@@ -1170,13 +1170,14 @@ export const db = {
           'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia', 'arc', 'pst',
           'esv', 'evang', 'dcn', 'judge', 'justice', 'dame', 'avm', 'asc',
           'pharm', 'cmd', 'cmdr', 'amb', 'sen', 'cp', 'prof.', 'pharm.',
-          'amb.', 'barr.', 'engr.', 'ms.', 'mr.'
+          'amb.', 'barr.', 'engr.', 'ms.', 'mr.', 'r.adm', 'rear', 'rear a',
+          'avch', 'rm', 'radm'
         ];
         const { data: candidates, error: fetchErr } = await supabase
           .from('delegates')
           .select('delegate_id, first_name, last_name, district, chapter')
           .eq('event_id', eventId)
-          .eq('registration_source', 'import');
+          .limit(10000);
         if (fetchErr) {
           console.error('[deleteScrambledImportDelegates] fetch error:', fetchErr);
           return { deleted: 0, preview: [] };
@@ -1187,8 +1188,9 @@ export const db = {
         const scrambledIds: string[] = [];
         const previewLines: string[] = [];
         for (const d of candidates) {
-          const distLower = (d.district || '').trim().toLowerCase();
-          if (TITLE_VALUES.includes(distLower)) {
+          const distRaw = (d.district || '').trim().toLowerCase();
+          const distClean = distRaw.replace(/\(.*/, '').trim().replace(/\.$/, '');
+          if (TITLE_VALUES.includes(distClean)) {
             scrambledIds.push(d.delegate_id);
             previewLines.push(`${d.first_name} ${d.last_name} | district=${d.district} | chapter=${d.chapter}`);
           }
