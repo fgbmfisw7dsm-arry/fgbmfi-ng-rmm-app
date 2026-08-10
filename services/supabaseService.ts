@@ -765,8 +765,13 @@ export const db = {
             }
         }
 
-        const isNewCheckin: boolean = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).eq('session_id', safeSessionId as any).maybeSingle()
-            .then(({ data }) => !data);
+        let checkQuery = supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId);
+        if (safeSessionId) {
+          checkQuery = checkQuery.eq('session_id', safeSessionId);
+        } else {
+          checkQuery = checkQuery.is('session_id', null);
+        }
+        const isNewCheckin: boolean = await checkQuery.maybeSingle().then(({ data }) => !data);
         if (!isNewCheckin) {
             const code = generateCodeFromId(delegateId, eventId);
             return { success: true, message: 'Already Verified', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
