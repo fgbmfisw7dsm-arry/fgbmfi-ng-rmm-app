@@ -687,9 +687,7 @@ export const db = {
                 q = q.ilike('district', normalize(district));
             }
             const from = (page - 1) * pageSize;
-            const sortOrder = district ? 'first_name' : 'district';
-            const q2 = q.order(sortOrder);
-            if (!district) (q2 as any).order('first_name');
+            const q2 = q.order('chapter').order('last_name').order('first_name');
             const { data: rows, count, error } = await q2.range(from, from + pageSize - 1);
             if (error) throw error;
             result = {

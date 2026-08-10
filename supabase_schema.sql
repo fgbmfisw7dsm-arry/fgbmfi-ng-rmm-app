@@ -811,7 +811,7 @@ BEGIN
       p_event_id IS NULL OR
       event_id = p_event_id
     )
-    ORDER BY first_name, last_name
+    ORDER BY chapter, last_name, first_name
     LIMIT p_page_size
     OFFSET offset_val
   ) delegate_rows;
@@ -841,7 +841,7 @@ BEGIN
   FROM (
     SELECT delegate_id, title, first_name, last_name, district, chapter, phone, email, rank, office, room_number, created_at
     FROM delegates
-    ORDER BY first_name, last_name
+    ORDER BY chapter, last_name, first_name
   ) d;
 
   SELECT COALESCE(json_agg(c), '[]'::JSON) INTO checkins_json
