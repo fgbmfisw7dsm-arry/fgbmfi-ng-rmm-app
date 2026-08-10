@@ -769,17 +769,26 @@ export const db = {
             .then(({ data }) => !data);
         if (!isNewCheckin) {
             const code = generateCodeFromId(delegateId, eventId);
-            return { success: true, message: 'Verified', code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+            return { success: true, message: 'Already Verified', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
+        let actuallyInserted = true;
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
-        if (error && error.code !== '23505' && !error.message?.includes('duplicate')) throw error;
+        if (error) {
+            if (error.code === '23505' || error.message?.includes('duplicate')) {
+                actuallyInserted = false;
+            } else {
+                throw error;
+            }
+        }
 
-        const label = safeSessionId ? 'Session Attendance' : 'Arrival';
-        const detail = del ? `${del.first_name} ${del.last_name} (${del.district || '?'} ${del.chapter || ''})`.trim() : delegateId;
-        recordAuditLog(eventId, safeSessionId ? 'checkin_session' : 'checkin_arrival', `${label}: ${detail}`, registrar, 'checkin', delegateId, { session_id: safeSessionId });
+        if (actuallyInserted) {
+            const label = safeSessionId ? 'Session Attendance' : 'Arrival';
+            const detail = del ? `${del.first_name} ${del.last_name} (${del.district || '?'} ${del.chapter || ''})`.trim() : delegateId;
+            recordAuditLog(eventId, safeSessionId ? 'checkin_session' : 'checkin_arrival', `${label}: ${detail}`, registrar, 'checkin', delegateId, { session_id: safeSessionId });
+        }
 
         const code = generateCodeFromId(delegateId, eventId);
-        return { success: true, message: 'Verified', code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Verified', alreadyCheckedIn: !actuallyInserted, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         });
     },
 

@@ -143,6 +143,7 @@ export interface CheckInResult {
   needsRegistration?: boolean;
   scannedCode?: string;
   parsedData?: Record<string, string> | null;
+  alreadyCheckedIn?: boolean;
 }
 
 export interface Pledge {

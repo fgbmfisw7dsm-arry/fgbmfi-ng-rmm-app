@@ -100,6 +100,7 @@ const CheckInPage = () => {
       return {
         ...d,
         checkedIn: d.checkedIn || isVerifiedLocally,
+        verifiedLocally: isVerifiedLocally,
         code: d.code || generateCodeFromId(d.delegate_id, activeEventId)
       };
     });
@@ -135,12 +136,14 @@ const CheckInPage = () => {
     try {
         const res = await db.checkInDelegate(activeEventId, delegateId, user, selectedSessionId);
         if (res && res.success) {
-            localVerifiedIds.current.add(`${delegateId}_${selectedSessionId || 'arrival'}`);
+            if (!res.alreadyCheckedIn) {
+              localVerifiedIds.current.add(`${delegateId}_${selectedSessionId || 'arrival'}`);
+            }
             setResults(prev => prev.map(d => 
-              d.delegate_id === delegateId ? { ...d, checkedIn: true, code: res.code || generateCodeFromId(delegateId, activeEventId), qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
+              d.delegate_id === delegateId ? { ...d, checkedIn: true, verifiedLocally: !res.alreadyCheckedIn, code: res.code || generateCodeFromId(delegateId, activeEventId), qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
             ));
-            setFeedback({ type: 'success', msg: 'Verified!' });
-            setTimeout(() => setFeedback(null), 2000);
+            setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' });
+            setTimeout(() => setFeedback(null), res.alreadyCheckedIn ? 3000 : 2000);
         } else {
             setFeedback({ type: 'error', msg: res.message || 'Verification failed.' });
         }
@@ -159,10 +162,10 @@ const CheckInPage = () => {
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
         if(res && res.success) { 
-          setFeedback({ type: 'success', msg: res.message || 'Verified!' }); 
+          setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
-          setTimeout(() => { setFeedback(null); setCode(''); }, 5000);
+          setTimeout(() => { setFeedback(null); setCode(''); }, res.alreadyCheckedIn ? 3000 : 5000);
         } else if (res.needsRegistration) {
           setFeedback(null);
           setCode(res.scannedCode || '');
@@ -751,7 +754,11 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
               <div className="flex items-center gap-4 w-full md:w-auto justify-end">
                   {d.checkedIn ? (
                     <div className="flex flex-col items-end gap-3">
-                        <span className="px-6 py-2 bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-green-100 animate-in zoom-in">Verified</span>
+                        {d.verifiedLocally ? (
+                          <span className="px-6 py-2 bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-green-100 animate-in zoom-in">Verified</span>
+                        ) : (
+                          <span className="px-6 py-2 bg-red-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-red-100 animate-in zoom-in">Already Verified</span>
+                        )}
                         <div className="flex items-center gap-3">
                           <canvas 
                             ref={el => { qrCanvasRefs.current[d.delegate_id] = el; }}
