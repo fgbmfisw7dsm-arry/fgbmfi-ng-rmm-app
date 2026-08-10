@@ -1375,8 +1375,8 @@ export const db = {
         return { analyses, samples: sampleList, totalDelegates, officialDistricts: offList };
     },
 
-    /** B: Apply in-place field remapping repairs (event must be active). */
-    applyScrambleRepairs: async (eventId: string, repairs: Array<{ delegate_id: string; updates: Record<string, string> }>): Promise<{ repaired: number; errors: number }> => {
+    /** B: Apply in-place field remapping repairs + auto-harmonize district abbreviations (event must be active). */
+    applyScrambleRepairs: async (eventId: string, repairs: Array<{ delegate_id: string; updates: Record<string, string> }>): Promise<{ repaired: number; errors: number; harmonized: number }> => {
         await ensureEventActive(eventId);
         let repaired = 0;
         let errors = 0;
@@ -1385,7 +1385,36 @@ export const db = {
             if (error) { errors++; console.error('[applyScrambleRepairs] update error:', error); }
             else repaired++;
         }
-        return { repaired, errors };
+        const repairedIds = repairs.map(r => r.delegate_id);
+        let harmonized = 0;
+        if (repairedIds.length > 0) {
+            const { data: settings } = await supabase.from('system_settings').select('districts').limit(1).maybeSingle();
+            if (settings?.districts && Array.isArray(settings.districts)) {
+                const REGION_PREFIXES: Record<string, string> = {
+                    'NC': 'North Central', 'NE': 'North East', 'NW': 'North West',
+                    'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
+                };
+                const official = settings.districts.map((d: string) => normalize(d));
+                const { data: patched } = await supabase.from('delegates')
+                    .select('delegate_id, district').in('delegate_id', repairedIds);
+                for (const d of (patched || [])) {
+                    const raw = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
+                    if (!raw) continue;
+                    const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+                    if (!match) continue;
+                    const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+                    let resolved = official.find((o: string) => o.toUpperCase() === fullName.toUpperCase());
+                    if (!resolved) resolved = official.find((o: string) => o.replace(/[^A-Z0-9]/g, '').toUpperCase() === fullName.replace(/[^A-Z0-9]/g, '').toUpperCase());
+                    if (!resolved) resolved = official.find((o: string) => o.toUpperCase() === cleaned);
+                    if (resolved && resolved !== raw) {
+                        await supabase.from('delegates').update({ district: resolved }).eq('delegate_id', d.delegate_id);
+                        harmonized++;
+                    }
+                }
+            }
+        }
+        return { repaired, errors, harmonized };
     },
 
     /** C: Backup scrambled delegates as downloadable JSON (read-only — no event-lock check needed). */
@@ -1421,15 +1450,31 @@ export const db = {
             const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
             if (!match) return null;
             const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
-            return officialList.find(o => o.toUpperCase() === fullName.toUpperCase()) || null;
+            const exact = officialList.find(o => o.toUpperCase() === fullName.toUpperCase());
+            if (exact) return exact;
+            const fuzzy = officialList.find(o => o.replace(/[^A-Z0-9]/g, '').toUpperCase() === fullName.replace(/[^A-Z0-9]/g, '').toUpperCase());
+            if (fuzzy) {
+                console.log(`[harmonizeDistricts] Fuzzy match: "${abbreviated}" → "${fullName}" → "${fuzzy}"`);
+                return fuzzy;
+            }
+            const selfMatch = officialList.find(o => o.toUpperCase() === cleaned);
+            if (selfMatch) {
+                console.log(`[harmonizeDistricts] Abbreviation-is-official: "${abbreviated}" → "${selfMatch}"`);
+                return selfMatch;
+            }
+            console.log(`[harmonizeDistricts] UNRESOLVED: "${abbreviated}" → "${fullName}" — not found in official list. Add it in SetupModule.`);
+            return null;
         };
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
         const official = (settings.districts || []).map(d => normalize(d));
+        console.log(`[harmonizeDistricts] Official districts (${official.length}): ${official.join(', ')}`);
         let q = supabase.from('delegates').select('delegate_id, district').limit(5000);
         if (eventId) q = q.eq('event_id', eventId);
         const { data: delegates } = await q;
         let count = 0;
+        const unresolved = new Set<string>();
+        const resolved = new Map<string, string>();
         for (const d of (delegates || [])) {
             const rawDistrict = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
             if (!rawDistrict) continue;
@@ -1437,14 +1482,27 @@ export const db = {
             if (abbrResolved && abbrResolved !== rawDistrict) {
                 await supabase.from('delegates').update({ district: abbrResolved }).eq('delegate_id', d.delegate_id);
                 count++;
+                if (!resolved.has(rawDistrict)) resolved.set(rawDistrict, abbrResolved);
                 continue;
+            }
+            if (!abbrResolved && /^(NC|NE|NW|SE|SS|SW)\d+$/i.test(rawDistrict.toUpperCase().replace(/[^A-Z0-9]/g, ''))) {
+                unresolved.add(rawDistrict);
             }
             const matched = official.find(o => o.toUpperCase() === rawDistrict.toUpperCase());
             if (matched && matched !== rawDistrict) {
                 await supabase.from('delegates').update({ district: matched }).eq('delegate_id', d.delegate_id);
                 count++;
+                if (!resolved.has(rawDistrict)) resolved.set(rawDistrict, matched);
             }
         }
+        if (resolved.size > 0) {
+            const summary = Array.from(resolved.entries()).map(([k, v]) => `"${k}" → "${v}"`).join(', ');
+            console.log(`[harmonizeDistricts] Resolved: ${summary}`);
+        }
+        if (unresolved.size > 0) {
+            console.warn(`[harmonizeDistricts] Could NOT resolve: ${Array.from(unresolved).join(', ')}. Add these to system_settings.districts in SetupModule.`);
+        }
+        console.log(`[harmonizeDistricts] Total harmonized: ${count}`);
         return count;
     },
     

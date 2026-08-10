@@ -389,8 +389,12 @@ const ImportModule = () => {
         setScrambleResult(null);
         try {
             const repairs = repairable.map((a: any) => ({ delegate_id: a.delegate_id, updates: { ...a.proposed } }));
-            const { repaired, errors } = await db.applyScrambleRepairs(activeEventId, repairs);
-            setScrambleResult({ type: 'repaired', count: repaired, msg: `Repaired ${repaired} records in-place` + (errors > 0 ? ` (${errors} errors).` : '.') });
+            const { repaired, errors, harmonized } = await db.applyScrambleRepairs(activeEventId, repairs);
+            let msg = `Repaired ${repaired} records in-place`;
+            if (harmonized > 0) msg += `. Harmonized ${harmonized} district(s) to full name`;
+            if (errors > 0) msg += ` (${errors} errors)`;
+            msg += '.';
+            setScrambleResult({ type: 'repaired', count: repaired, msg });
             setScrambleAnalyses([]);
             setScrambleShowRepairs(false);
         } catch (e: any) {
