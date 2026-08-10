@@ -64,6 +64,7 @@ const ImportModule = () => {
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
 
     const KNOWN_FIELDS: Record<string, string> = {
+      'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
       'title': 'Title', 'title.': 'Title', 'honorific': 'Title', 'prefix': 'Title', 'mr': 'Title',
       'first_name': 'First Name', 'first name': 'First Name', 'firstname': 'First Name', 'given name': 'First Name', 'name': 'First Name',
       'last_name': 'Last Name', 'last name': 'Last Name', 'lastname': 'Last Name', 'surname': 'Last Name', 'family name': 'Last Name',
@@ -155,7 +156,7 @@ const ImportModule = () => {
     };
 
     const buildFieldOrder = (): string[] => {
-      const fieldOrder = ['Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
+      const fieldOrder = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
       if (!showRank) {
         const idx = fieldOrder.indexOf('Rank');
         if (idx !== -1) fieldOrder.splice(idx, 1);
@@ -226,12 +227,15 @@ const ImportModule = () => {
       }
       const remaining = colIndices.every(i => i >= 0);
       if (!remaining) {
+        const regIdInHeaders = getColumnIndex(headers, 'RegId') >= 0;
         const activeColumns = headers.filter((h, i) => columnMap[h] !== false);
-        const resultLines = [activeColumns.join(',')];
+        const outputColumns = regIdInHeaders ? activeColumns : ['RegId', ...activeColumns];
+        const resultLines = [outputColumns.join(',')];
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
           const selected = headers.map((h, idx) => ({ h, idx })).filter(({ h }) => columnMap[h] !== false);
-          const row = selected.map(({ idx }) => values[idx] || '').join(',');
+          const rowData = selected.map(({ idx }) => values[idx] || '');
+          const row = regIdInHeaders ? rowData.join(',') : (['', ...rowData].join(','));
           if (row.trim()) resultLines.push(row);
         }
         return resultLines.join('\n');
@@ -248,6 +252,7 @@ const ImportModule = () => {
     const handleDownloadTemplate = () => {
       const fieldOrder = buildFieldOrder();
       const sampleRow: Record<string, string> = {
+        'RegId': 'CON260806093100193667ef9e',
         'Title': 'Mr', 'First Name': 'John', 'Last Name': 'Doe',
         'District': 'Lagos Central', 'Chapter': 'Ikeja Chapter',
         'Phone': '08012345678', 'Email': 'john@email.com',

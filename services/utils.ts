@@ -19,6 +19,23 @@ export const generateQrHash = (): string => {
  * where QR scanning is not available. 10K code slots — not suitable
  * as primary identifier above 10K delegates.
  */
+export const generateRegId = (): string => {
+    const now = new Date();
+    const ts = [
+        now.getMonth() + 1,
+        now.getDate(),
+        now.getHours(),
+        now.getMinutes(),
+        now.getSeconds()
+    ].map(n => String(n).padStart(2, '0')).join('');
+
+    const hexChars = '0123456789abcdef';
+    const suffix = Array.from(crypto.getRandomValues(new Uint8Array(10)))
+        .map(b => hexChars[b & 0x0f]).join('');
+
+    return `CON26${ts}${suffix}`;
+};
+
 export const generateCodeFromId = (delegateId: string, eventId: string): string => {
     if (!delegateId || !eventId) return "0000";
     const salt = delegateId + eventId;

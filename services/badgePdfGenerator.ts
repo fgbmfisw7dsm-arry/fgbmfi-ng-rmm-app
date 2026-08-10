@@ -13,6 +13,7 @@ const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '6-up-portrait': { cols: 3, rows: 2, badgeW: 63, badgeH: 95, cutGap: 3 },
   '9-up-portrait': { cols: 3, rows: 3, badgeW: 55, badgeH: 80, cutGap: 3 },
   '8-up-portrait': { cols: 4, rows: 2, badgeW: 63, badgeH: 90, cutGap: 3 },
+  '4-up-3x4': { cols: 2, rows: 2, badgeW: 76.2, badgeH: 101.6, cutGap: 3 },
 };
 
 const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
@@ -21,6 +22,7 @@ const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
   '6-up-portrait': true,
   '9-up-portrait': true,
   '8-up-portrait': true,
+  '4-up-3x4': true,
 };
 
 const ZONES = {
@@ -54,6 +56,62 @@ const HEADER_STRIP_BG = rgb(0.027, 0.000, 0.000);
 
 function encodeQRData(delegate: Delegate, event: Event): string {
   return delegate.qr_hash || delegate.delegate_id;
+}
+
+function wrapWords(text: string, font: any, maxWidth: number, fontSize: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+  for (const word of words) {
+    const testLine = currentLine ? currentLine + ' ' + word : word;
+    if (font.widthOfTextAtSize(testLine, fontSize) > maxWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines.length > 0 ? lines : [text];
+}
+
+interface FittedName {
+  lines: string[];
+  fontSize: number;
+}
+
+function fitNameToSpace(
+  text: string,
+  font: any,
+  availableWidth: number,
+  availableHeight: number,
+  maxFontSize: number,
+  minFontSize: number,
+  lineHeightRatio: number
+): FittedName {
+  for (let fs = maxFontSize; fs >= minFontSize; fs -= 0.5) {
+    const lines = wrapWords(text, font, availableWidth, fs);
+    const totalH = lines.length * fs * lineHeightRatio;
+    if (totalH <= availableHeight || fs <= minFontSize) {
+      if (fs <= minFontSize) {
+        const truncated = wrapWords(text, font, availableWidth, minFontSize);
+        while (truncated.length * minFontSize * lineHeightRatio > availableHeight && truncated.length > 1) {
+          truncated.pop();
+        }
+        if (truncated.length > 0) {
+          let last = truncated[truncated.length - 1];
+          const ellipsis = '\u2026';
+          while (font.widthOfTextAtSize(last + ellipsis, minFontSize) > availableWidth && last.length > 1) {
+            last = last.slice(0, -1);
+          }
+          truncated[truncated.length - 1] = last + ellipsis;
+        }
+        return { lines: truncated, fontSize: minFontSize };
+      }
+      return { lines, fontSize: fs };
+    }
+  }
+  return { lines: [text], fontSize: minFontSize };
 }
 
 function drawCropMarks(page: PDFPage, x: number, y: number, w: number, h: number) {
@@ -199,16 +257,29 @@ function drawBadge(
 
       const isSmall = bw < mmToPt(60) || bh < mmToPt(92);
       const isExtraSmall = bh < mmToPt(82);
-      const nameSize = isExtraSmall ? 8.0 : (isSmall ? 9.0 : 12.0);
+      const baseNameSize = isExtraSmall ? 8.0 : (isSmall ? 9.0 : 12.0);
       const fieldLabelSize = isExtraSmall ? 5.5 : (isSmall ? 6.5 : 7.5);
       const fieldSize = isExtraSmall ? 6.0 : (isSmall ? 7.5 : 8.5);
       const fieldSpacing = isExtraSmall ? 1.3 : 1.5;
 
       const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-      const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
-      page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
+      const nameMaxWidth = bw - mmToPt(4);
+      const mandatoryFieldCount = 3;
+      const totalAvail = (qrY - mmToPt(6)) - (bodyBottom + mmToPt(3));
+      const fieldReserve = mandatoryFieldCount * fieldSize * fieldSpacing;
+      const nameAvail = Math.max(mmToPt(3), totalAvail - fieldReserve - baseNameSize * 0.5);
+      const minNameSize = isExtraSmall ? 4.5 : 5.0;
 
-      let textY = qrY - mmToPt(6) - nameSize * 1.6;
+      const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxWidth, nameAvail, baseNameSize, minNameSize, 1.2);
+
+      let nameTextY = qrY - mmToPt(6);
+      for (let i = 0; i < fitted.lines.length; i++) {
+        const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
+        page.drawText(fitted.lines[i], { x: badgeLeft + Math.max(0, (bw - lw) / 2), y: nameTextY, size: fitted.fontSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: nameMaxWidth });
+        nameTextY -= fitted.fontSize * 1.05;
+      }
+      const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
+      let textY = nameTextY - nameToFieldGap;
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
@@ -276,16 +347,29 @@ function drawBadge(
 
     const isSmall = bw < mmToPt(60) || bh < mmToPt(92);
     const isExtraSmall = bh < mmToPt(82);
-    const nameSize = isExtraSmall ? 8.0 : (isSmall ? 9.0 : 12.0);
+    const baseNameSize = isExtraSmall ? 8.0 : (isSmall ? 9.0 : 12.0);
     const fieldLabelSize = isExtraSmall ? 5.5 : (isSmall ? 6.5 : 7.5);
     const fieldSize = isExtraSmall ? 6.0 : (isSmall ? 7.5 : 8.5);
     const fieldSpacing = isExtraSmall ? 1.3 : 1.5;
 
     const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-    const nameW = fontBold.widthOfTextAtSize(fullName, nameSize);
-    page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
+    const nameMaxWidth = bw - mmToPt(4);
+    const mandatoryFieldCount = 3;
+    const totalAvail = (qrY - mmToPt(6)) - (bodyBottom + mmToPt(3));
+    const fieldReserve = mandatoryFieldCount * fieldSize * fieldSpacing;
+    const nameAvail = Math.max(mmToPt(3), totalAvail - fieldReserve - baseNameSize * 0.5);
+    const minNameSize = isExtraSmall ? 4.5 : 5.0;
 
-    let textY = qrY - mmToPt(6) - nameSize * 1.6;
+    const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxWidth, nameAvail, baseNameSize, minNameSize, 1.2);
+
+    let nameTextY = qrY - mmToPt(6);
+    for (let i = 0; i < fitted.lines.length; i++) {
+      const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
+      page.drawText(fitted.lines[i], { x: badgeLeft + Math.max(0, (bw - lw) / 2), y: nameTextY, size: fitted.fontSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: nameMaxWidth });
+      nameTextY -= fitted.fontSize * 1.05;
+    }
+    const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
+    let textY = nameTextY - nameToFieldGap;
     const fields: [string, string][] = [
       ['District', delegate.district || 'N/A'],
       ['Chapter', delegate.chapter || 'N/A'],
@@ -422,7 +506,7 @@ function drawBadge(
   const detailW = bw - (detailX - badgeLeft) - mmToPt(2);
   const isSmall = bw < mmToPt(85);
 
-  const nameSize = isSmall ? 9.0 : 12.0;
+  const baseNameSize = isSmall ? 9.0 : 12.0;
   const fieldSize = isSmall ? 7.5 : 8.5;
   const labelSize = isSmall ? 6.5 : 7.5;
 
@@ -433,21 +517,20 @@ function drawBadge(
 
   let textY = bodyTop - mmToPt(5);
 
-  const nameWidth = fontBold.widthOfTextAtSize(fullName, nameSize);
-  if (nameWidth > detailW && fullName.includes(' ')) {
-    const midIdx = Math.floor(fullName.length / 2);
-    let splitIdx = fullName.lastIndexOf(' ', midIdx);
-    if (splitIdx < 0) splitIdx = fullName.indexOf(' ');
-    const line1 = fullName.substring(0, splitIdx);
-    const line2 = fullName.substring(splitIdx + 1);
-    page.drawText(line1, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
-    textY -= nameSize * 1.05;
-    page.drawText(line2, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
-    textY -= nameSize * 1.2;
-  } else {
-    page.drawText(fullName, { x: detailX, y: textY, size: nameSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
-    textY -= nameSize * 2.2;
+  const fieldCount = 3 + (showRank && delegate.rank && delegate.rank !== 'CP' ? 1 : 0) + (showOffice && delegate.office && delegate.office !== 'OTHER' ? 1 : 0);
+  const detailAreaBottom = badgeBottom + bandH + mmToPt(3);
+  const totalDetailHeight = textY - detailAreaBottom;
+  const fieldSpaceNeeded = fieldCount * fieldSize * 1.6;
+  const nameAvail = Math.max(mmToPt(4), totalDetailHeight - fieldSpaceNeeded - mmToPt(2));
+  const minNameSize = isSmall ? 5.0 : 6.0;
+
+  const fitted = fitNameToSpace(fullName, fontBold as any, detailW, nameAvail, baseNameSize, minNameSize, 1.2);
+
+  for (let i = 0; i < fitted.lines.length; i++) {
+    page.drawText(fitted.lines[i], { x: detailX, y: textY, size: fitted.fontSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
+    textY -= fitted.fontSize * 1.05;
   }
+  textY -= fitted.fontSize * 0.15;
 
   const fields: [string, string][] = [
     ['District', delegate.district || 'N/A'],

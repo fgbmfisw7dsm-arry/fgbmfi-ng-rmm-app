@@ -298,15 +298,62 @@ const CheckInPage = () => {
         const qrY = bodyTop + 8;
         ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
-        const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-        const nameY = qrY + qrSize + 16;
-        ctx.fillStyle = '#1e3a5f';
-        ctx.font = 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(fullName, bw / 2, nameY);
+        const wrapCanvasText = (ctx2: CanvasRenderingContext2D, text: string, maxWidth: number): string[] => {
+          const words = text.split(' ');
+          const lines: string[] = [];
+          let cur = '';
+          for (const word of words) {
+            const test = cur ? cur + ' ' + word : word;
+            if (ctx2.measureText(test).width > maxWidth && cur) { lines.push(cur); cur = word; }
+            else { cur = test; }
+          }
+          if (cur) lines.push(cur);
+          return lines.length > 0 ? lines : [text];
+        };
 
+        const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+        const nameMaxW = bw - 16;
+        const nameY = qrY + qrSize + 16;
+        const fieldCount = 3 + (showOffice && delegate.office ? 1 : 0) + (showRank && delegate.rank ? 1 : 0);
         const lineGap = 18;
-        let textY = nameY + lineGap;
+        const fieldsNeeded = fieldCount * lineGap;
+        const bodyBottom = bodyTop + bodyH;
+        const availForName = bodyBottom - nameY - fieldsNeeded - 8;
+
+        let nameFontSize = 14;
+        let nameLines: string[] = [];
+        const minNameSize = 9;
+
+        for (let fs = nameFontSize; fs >= minNameSize; fs -= 0.5) {
+          ctx.font = 'bold ' + fs + 'px sans-serif';
+          const lines = wrapCanvasText(ctx, fullName, nameMaxW);
+          const totalH = lines.length * fs * 1.15;
+          if (totalH <= availForName || fs <= minNameSize) {
+            nameFontSize = fs;
+            nameLines = lines;
+            if (fs <= minNameSize && totalH > availForName) {
+              while (nameLines.length * minNameSize * 1.15 > availForName && nameLines.length > 1) nameLines.pop();
+              if (nameLines.length > 0) {
+                let last = nameLines[nameLines.length - 1];
+                ctx.font = 'bold ' + minNameSize + 'px sans-serif';
+                while (ctx.measureText(last + '\u2026').width > nameMaxW && last.length > 1) last = last.slice(0, -1);
+                nameLines[nameLines.length - 1] = last + '\u2026';
+              }
+            }
+            break;
+          }
+        }
+
+        ctx.fillStyle = '#1e3a5f';
+        ctx.textAlign = 'center';
+        let currentNameY = nameY;
+        for (const line of nameLines) {
+          ctx.font = 'bold ' + nameFontSize + 'px sans-serif';
+          ctx.fillText(line, bw / 2, currentNameY);
+          currentNameY += nameFontSize * 1.15;
+        }
+
+        let textY = currentNameY + 4;
 
         ctx.fillStyle = '#4b5563';
         ctx.font = 'bold 9px sans-serif';
@@ -778,7 +825,11 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                          {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
                        </div>
                        <div style={{ marginTop: '1.5mm', lineHeight: '1.4' }}>
-                         <div className="text-[14px] font-black text-blue-900 uppercase tracking-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>
+                          {(() => {
+                            const nameText = [badgeDelegate.title, badgeDelegate.first_name, badgeDelegate.last_name].filter(Boolean).join(' ').toUpperCase();
+                            const fs = nameText.length > 22 ? '11px' : nameText.length > 18 ? '12px' : nameText.length > 14 ? '13px' : '14px';
+                            return <div style={{ fontSize: fs, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', maxWidth: '95%', margin: '0 auto' }} className="font-black text-blue-900 uppercase tracking-tight leading-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>;
+                          })()}
                          <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">District: {badgeDelegate.district || 'N/A'}</div>
                          <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Chapter: {badgeDelegate.chapter || 'N/A'}</div>
                          {showOffice && badgeDelegate.office && (

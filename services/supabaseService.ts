@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, RESPONSE_TYPE_LABELS } from '../types';
-import { generateCodeFromId, generateQrHash } from './utils';
+import { generateCodeFromId, generateQrHash, generateRegId } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -840,7 +840,7 @@ export const db = {
         const { data, error } = await supabase.from('delegates').insert({
             ...delegate,
             qr_hash: delegate.qr_hash || generateQrHash(),
-            external_id: delegate.external_id || delegate.delegate_id,
+            external_id: delegate.external_id || generateRegId(),
             registration_source: delegate.registration_source || 'manual'
         }).select().single();
         if (error) throw error;
@@ -848,7 +848,7 @@ export const db = {
     },
 
     registerDelegateFromQR: async (eventId: string, scannedCode: string, parsedData: Record<string, string>): Promise<Delegate> => {
-        const externalIdValue = parsedData['delegate_id'] || parsedData['external_id'] || scannedCode;
+        const externalIdValue = parsedData['reg_id'] || parsedData['RegId'] || parsedData['delegate_id'] || parsedData['external_id'] || scannedCode;
 
         if (externalIdValue) {
             const { data: existing } = await supabase.from('delegates').select('*').eq('external_id', externalIdValue).eq('event_id', eventId).maybeSingle();
@@ -875,7 +875,7 @@ export const db = {
             office: parsedData['office'] || 'OTHER',
             room_number: parsedData['room_number'] || '',
             event_id: eventId,
-            external_id: externalIdValue,
+            external_id: (externalIdValue && externalIdValue.startsWith('CON26')) ? externalIdValue : generateRegId(),
             qr_hash: generateQrHash(),
             registration_source: 'qr_scan' as const
         };
@@ -895,17 +895,17 @@ export const db = {
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
             const payload = batch.map(p => ({
-                external_id: p[0],
-                title: p[0],
-                first_name: p[1],
-                last_name: p[2],
-                district: p[3],
-                chapter: p[4],
-                phone: p[5],
-                email: p[6],
-                rank: p[7] || 'CP',
-                office: p[8] || 'OTHER',
-                delegate_type: p[9] || 'Member',
+                external_id: (p[0] && p[0].startsWith('CON26')) ? p[0] : generateRegId(),
+                title: p[1] || '',
+                first_name: p[2],
+                last_name: p[3],
+                district: p[4],
+                chapter: p[5],
+                phone: p[6],
+                email: p[7],
+                rank: p[8] || 'CP',
+                office: p[9] || 'OTHER',
+                delegate_type: p[10] || 'Member',
                 qr_hash: generateQrHash(),
                 event_id: eventId,
                 registration_source: 'import'

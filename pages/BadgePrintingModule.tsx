@@ -15,6 +15,7 @@ const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '6-up-portrait', label: '6-up Portrait (63×95mm)' },
   { value: '9-up-portrait', label: '9-up Portrait (55×80mm)' },
   { value: '8-up-portrait', label: '8-up Portrait (63×90mm)' },
+  { value: '4-up-3x4', label: '4-up 3×4″ Portrait (76×102mm)' },
 ];
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
