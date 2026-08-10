@@ -31,10 +31,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const forceHtml5Ref = useRef(false);
   const selectedCameraRef = useRef<string | null>(null);
 
-  const log = (msg: string) => {
+  const log = useCallback((msg: string) => {
     console.log('[QRScanner]', msg);
     setDebugInfo(prev => [...prev.slice(-4), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
-  };
+  }, []);
+
+  const switchingRef = useRef(false);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -153,7 +155,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
       await new Promise(r => setTimeout(r, 150));
       const scanner = new Html5Qrcode('qr-scanner-view');
-      html5ScannerRef.current = scanner;
       await scanner.start(
         cameraId,
         {
@@ -172,7 +173,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         () => {}
       );
       log('html5-qrcode active (15fps)');
+      html5ScannerRef.current = scanner;
     } catch (e: any) {
+      html5ScannerRef.current = null;
       if (mountedRef.current) {
         if (e.message && e.message.includes('NotFound')) {
           log('html5-qrcode camera not found, retrying with default...');
@@ -197,27 +200,39 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   }, [startBarcodeDetector, tryHtml5Qrcode]);
 
   const switchCamera = useCallback(async (deviceId: string) => {
-    selectedCameraRef.current = deviceId;
-    setSelectedCameraId(deviceId);
-    localStorage.setItem('qr-camera-device-id', deviceId);
-    setShowCameraMenu(false);
-    setScanning(false);
-    setError('');
-    await stopScanner();
-    if (!mountedRef.current) return;
-    await startWithEngine(deviceId);
+    if (switchingRef.current) return;
+    switchingRef.current = true;
+    try {
+      selectedCameraRef.current = deviceId;
+      setSelectedCameraId(deviceId);
+      localStorage.setItem('qr-camera-device-id', deviceId);
+      setShowCameraMenu(false);
+      setScanning(false);
+      setError('');
+      await stopScanner();
+      if (!mountedRef.current) return;
+      await startWithEngine(deviceId);
+    } finally {
+      switchingRef.current = false;
+    }
   }, [stopScanner, startWithEngine]);
 
   const toggleEngine = useCallback(async () => {
-    const next = !forceHtml5Ref.current;
-    forceHtml5Ref.current = next;
-    setForceHtml5(next);
-    localStorage.setItem('qr-force-html5', String(next));
-    setScanning(false);
-    setError('');
-    await stopScanner();
-    if (!mountedRef.current) return;
-    await startWithEngine(selectedCameraRef.current);
+    if (switchingRef.current) return;
+    switchingRef.current = true;
+    try {
+      const next = !forceHtml5Ref.current;
+      forceHtml5Ref.current = next;
+      setForceHtml5(next);
+      localStorage.setItem('qr-force-html5', String(next));
+      setScanning(false);
+      setError('');
+      await stopScanner();
+      if (!mountedRef.current) return;
+      await startWithEngine(selectedCameraRef.current);
+    } finally {
+      switchingRef.current = false;
+    }
   }, [stopScanner, startWithEngine]);
 
   useEffect(() => {
