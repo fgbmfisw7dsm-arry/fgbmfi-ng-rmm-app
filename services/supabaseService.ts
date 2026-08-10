@@ -1161,6 +1161,59 @@ export const db = {
         recordAuditLog(eventId, 'event_clear_data', 'All checkins, session calls, financials, and pledges cleared', null, 'event', eventId);
     },
 
+    deleteScrambledImportDelegates: async (eventId: string, dryRun: boolean = false): Promise<{ deleted: number; preview: string[] }> => {
+        await ensureEventActive(eventId);
+        const TITLE_VALUES = [
+          'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
+          'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
+          'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
+          'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia', 'arc', 'pst',
+          'esv', 'evang', 'dcn', 'judge', 'justice', 'dame', 'avm', 'asc',
+          'pharm', 'cmd', 'cmdr', 'amb', 'sen', 'cp', 'prof.', 'pharm.',
+          'amb.', 'barr.', 'engr.', 'ms.', 'mr.'
+        ];
+        const { data: candidates, error: fetchErr } = await supabase
+          .from('delegates')
+          .select('delegate_id, first_name, last_name, district, chapter')
+          .eq('event_id', eventId)
+          .eq('registration_source', 'import');
+        if (fetchErr) {
+          console.error('[deleteScrambledImportDelegates] fetch error:', fetchErr);
+          return { deleted: 0, preview: [] };
+        }
+        if (!candidates || candidates.length === 0) {
+          return { deleted: 0, preview: [] };
+        }
+        const scrambledIds: string[] = [];
+        const previewLines: string[] = [];
+        for (const d of candidates) {
+          const distLower = (d.district || '').trim().toLowerCase();
+          if (TITLE_VALUES.includes(distLower)) {
+            scrambledIds.push(d.delegate_id);
+            previewLines.push(`${d.first_name} ${d.last_name} | district=${d.district} | chapter=${d.chapter}`);
+          }
+        }
+        if (scrambledIds.length === 0) {
+          return { deleted: 0, preview: [] };
+        }
+        if (dryRun) {
+          return { deleted: 0, preview: previewLines };
+        }
+        await supabase.from('checkins').delete().in('delegate_id', scrambledIds);
+        await supabase.from('session_responses').delete().in('delegate_id', scrambledIds);
+        await supabase.from('badge_print_logs').delete().in('delegate_id', scrambledIds);
+        const { error: delErr } = await supabase
+          .from('delegates')
+          .delete()
+          .in('delegate_id', scrambledIds);
+        if (delErr) {
+          console.error('[deleteScrambledImportDelegates] delete error:', delErr);
+          return { deleted: 0, preview: previewLines };
+        }
+        console.log(`[deleteScrambledImportDelegates] Deleted ${scrambledIds.length} scrambled delegate(s) from event ${eventId}`);
+        return { deleted: scrambledIds.length, preview: previewLines };
+    },
+
     deleteDelegatesByDistrict: async (district: string, eventId?: string) => { 
         let q = supabase.from('delegates').delete().ilike('district', normalize(district));
         if (eventId) q = q.eq('event_id', eventId);

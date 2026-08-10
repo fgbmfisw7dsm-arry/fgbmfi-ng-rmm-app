@@ -62,6 +62,9 @@ const ImportModule = () => {
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
+    const [scrambledPreview, setScrambledPreview] = useState<string[]>([]);
+    const [scrambledDeleting, setScrambledDeleting] = useState(false);
+    const [scrambledResult, setScrambledResult] = useState<{ deleted: number } | null>(null);
 
     const KNOWN_FIELDS: Record<string, string> = {
       'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
@@ -69,9 +72,9 @@ const ImportModule = () => {
       'first_name': 'First Name', 'first name': 'First Name', 'firstname': 'First Name', 'given name': 'First Name', 'name': 'First Name',
       'last_name': 'Last Name', 'last name': 'Last Name', 'lastname': 'Last Name', 'surname': 'Last Name', 'family name': 'Last Name',
       'full_name': 'Full Name', 'full name': 'Full Name', 'fullname': 'Full Name', 'complete name': 'Full Name',
-      'district': 'District', 'zone': 'District', 'region': 'District',
+      'district': 'District', 'zone': 'District', 'region': 'District', 'chaptercode': 'District', 'chapter code': 'District',
       'chapter': 'Chapter', 'branch': 'Chapter', 'unit': 'Chapter',
-      'phone': 'Phone', 'phone number': 'Phone', 'mobile': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'cell': 'Phone', 'contact': 'Phone',
+      'phone': 'Phone', 'phone number': 'Phone', 'mobile': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'cell': 'Phone', 'contact': 'Phone', 'nphone': 'Phone', 'whatsapp': 'Phone', 'wha': 'Phone',
       'email': 'Email', 'email address': 'Email', 'e-mail': 'Email', 'mail': 'Email',
       'rank': 'Rank', 'level': 'Rank', 'grade': 'Rank',
       'office': 'Office', 'position': 'Office', 'role': 'Office', 'post': 'Office',
@@ -241,19 +244,41 @@ const ImportModule = () => {
       }
       const remaining = colIndices.every(i => i >= 0);
       if (!remaining) {
-        const regIdInHeaders = getColumnIndex(headers, 'RegId') >= 0;
-        const activeColumns = headers.filter((h, i) => columnMap[h] !== false);
-        const outputColumns = regIdInHeaders ? activeColumns : ['RegId', ...activeColumns];
-        const resultLines = [outputColumns.join(',')];
+        const selected = headers.map((h, idx) => ({ h, idx, field: KNOWN_FIELDS[normalizeKey(h)] || null }))
+          .filter(({ h }) => columnMap[h] !== false);
+        const hasRegId = selected.some(s => s.field === 'RegId');
+        const resultLines: string[] = [];
+        const KNOWN_TITLE_VALUES = new Set([
+          'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
+          'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
+          'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
+          'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia', 'arc', 'pst',
+          'esv', 'evang', 'prof.', 'dcn', 'judge', 'justice', 'dame', 'r.ady',
+          'ready', 'avm', 'asc', 'pharm.', 'pharm', 'cmd', 'cmdr', 'amb.', 'amb',
+          'sen', 'cp'
+        ]);
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-          const selected = headers.map((h, idx) => ({ h, idx })).filter(({ h }) => columnMap[h] !== false);
-          const rowData = selected.map(({ h, idx }) => {
-            const val = values[idx] || '';
-            return KNOWN_FIELDS[normalizeKey(h)] === 'District' ? cleanDistrictForImport(val) : val;
-          });
-          const row = regIdInHeaders ? rowData.join(',') : (['', ...rowData].join(','));
-          if (row.trim()) resultLines.push(row);
+          const allEmpty = values.every(v => !v);
+          if (allEmpty) continue;
+          const knownMatches = selected.filter(s => {
+            const val = (values[s.idx] || '').toLowerCase().replace(/\.$/, '').trim();
+            return val && KNOWN_FIELDS[normalizeKey(s.h)];
+          }).length;
+          if (knownMatches >= 3) continue;
+          const colValues: Record<string, string> = {};
+          for (const s of selected) {
+            const val = values[s.idx] || '';
+            if (s.field === 'District') {
+              colValues[s.field] = cleanDistrictForImport(val);
+            } else {
+              colValues[s.field || ''] = val;
+            }
+          }
+          const fieldOrder = buildFieldOrder();
+          const rowParts = fieldOrder.map(f => colValues[f] || '');
+          const row = rowParts.join(',');
+          if (row.trim().replace(/,/g, '')) resultLines.push(row);
         }
         return resultLines.join('\n');
       }
@@ -319,6 +344,32 @@ const ImportModule = () => {
         } finally {
             setLoading(false);
             setProgress(null);
+        }
+    };
+
+    const handleCleanupScrambled = async () => {
+        if (!activeEventId) return;
+        setScrambledDeleting(true);
+        setScrambledResult(null);
+        try {
+            const { preview, deleted } = await db.deleteScrambledImportDelegates(activeEventId);
+            setScrambledPreview(preview);
+            setScrambledResult({ deleted });
+        } catch (e: any) {
+            console.error('Cleanup error:', e);
+            setScrambledResult({ deleted: -1 });
+        } finally {
+            setScrambledDeleting(false);
+        }
+    };
+
+    const handleScramblePreview = async () => {
+        if (!activeEventId) return;
+        try {
+            const { preview } = await db.deleteScrambledImportDelegates(activeEventId, true);
+            setScrambledPreview(preview);
+        } catch (e: any) {
+            console.error('Preview error:', e);
         }
     };
 
@@ -419,6 +470,63 @@ const ImportModule = () => {
                         <button onClick={() => setFeedback(null)} className="text-[10px] font-black uppercase opacity-50 hover:opacity-100 px-4 py-2">Dismiss</button>
                     </div>
                 )}
+
+                {/* --- SCRAMBLED IMPORT RECOVERY --- */}
+                <div className="p-4 mb-6 rounded-2xl border-2 border-red-200 bg-red-50">
+                    <div className="flex justify-between items-center mb-2">
+                        <div>
+                            <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider">Recover Scrambled Import</h4>
+                            <p className="text-[8px] font-bold text-red-500 uppercase mt-0.5">
+                                Identifies &amp; deletes delegate records where district was filled with title values (Mr, Mrs, Dr, etc.) — a sign of misaligned column mapping during previous imports. Also removes associated checkins &amp; session responses to keep dashboard counts accurate.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={handleScramblePreview}
+                            disabled={scrambledDeleting || !activeEventId}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            Preview Affected Records
+                        </button>
+                        <button
+                            onClick={handleCleanupScrambled}
+                            disabled={scrambledDeleting || !activeEventId || scrambledPreview.length === 0}
+                            className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            {scrambledDeleting ? 'DELETING...' : 'DELETE SCRAMBLED RECORDS'}
+                        </button>
+                    </div>
+                    {scrambledPreview.length > 0 && (
+                        <div className="mt-3 max-h-40 overflow-y-auto bg-white p-2 rounded-xl border border-red-100">
+                            <p className="text-[8px] font-bold text-red-600 uppercase mb-1">
+                                {scrambledPreview.length} scrambled record(s) found:
+                            </p>
+                            {scrambledPreview.slice(0, 50).map((preview, idx) => (
+                                <div key={idx} className="text-[9px] font-mono text-red-700 py-0.5 border-b border-red-50 last:border-b-0">
+                                    {preview}
+                                </div>
+                            ))}
+                            {scrambledPreview.length > 50 && (
+                                <p className="text-[8px] text-red-400 mt-1">... and {scrambledPreview.length - 50} more</p>
+                            )}
+                        </div>
+                    )}
+                    {scrambledResult !== null && scrambledResult.deleted >= 0 && (
+                        <div className={`mt-3 p-3 rounded-xl ${scrambledResult.deleted > 0 ? 'bg-green-100 border border-green-200' : 'bg-amber-100 border border-amber-200'}`}>
+                            <p className="text-[9px] font-black uppercase">
+                                {scrambledResult.deleted > 0
+                                    ? `Successfully deleted ${scrambledResult.deleted} scrambled delegate record(s). Dashboard counts will auto-update.`
+                                    : 'No scrambled records found. Nothing to delete.'}
+                            </p>
+                        </div>
+                    )}
+                    {scrambledResult !== null && scrambledResult.deleted < 0 && (
+                        <div className="mt-3 p-3 rounded-xl bg-red-100 border border-red-200">
+                            <p className="text-[9px] font-black text-red-700 uppercase">Deletion failed. Check console for details.</p>
+                        </div>
+                    )}
+                </div>
 
                 <div className="space-y-4">
                     <div className="flex justify-between items-end px-2">
