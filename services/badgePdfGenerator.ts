@@ -279,6 +279,7 @@ function drawBadge(
       const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxWidth, nameAvail, baseNameSize, minNameSize, 1.2);
       if (!fitted.lines.length) fitted.lines = [fullName];
 
+      let textY: number;
       try {
       let nameTextY = qrY - mmToPt(6);
       for (let i = 0; i < fitted.lines.length; i++) {
@@ -287,11 +288,11 @@ function drawBadge(
         nameTextY -= fitted.fontSize * 1.05;
       }
       const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
-      let textY = nameTextY - nameToFieldGap;
+      textY = nameTextY - nameToFieldGap;
       } catch {
         const nameW = fontBold.widthOfTextAtSize(fullName, 9);
         page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: 9, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
-        let textY = qrY - mmToPt(6) - 9 * 1.6;
+        textY = qrY - mmToPt(6) - 9 * 1.6;
       }
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
@@ -376,6 +377,7 @@ function drawBadge(
     const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxWidth, nameAvail, baseNameSize, minNameSize, 1.2);
     if (!fitted.lines.length) fitted.lines = [fullName];
 
+    let textY: number;
     try {
     let nameTextY = qrY - mmToPt(6);
     for (let i = 0; i < fitted.lines.length; i++) {
@@ -384,11 +386,11 @@ function drawBadge(
       nameTextY -= fitted.fontSize * 1.05;
     }
     const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
-    let textY = nameTextY - nameToFieldGap;
+    textY = nameTextY - nameToFieldGap;
     } catch {
       const nameW = fontBold.widthOfTextAtSize(fullName, 9);
       page.drawText(fullName, { x: badgeLeft + Math.max(0, (bw - nameW) / 2), y: qrY - mmToPt(6), size: 9, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: bw - mmToPt(2) });
-      let textY = qrY - mmToPt(6) - 9 * 1.6;
+      textY = qrY - mmToPt(6) - 9 * 1.6;
     }
     const fields: [string, string][] = [
       ['District', delegate.district || 'N/A'],
