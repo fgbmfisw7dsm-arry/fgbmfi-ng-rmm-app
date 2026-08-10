@@ -884,6 +884,16 @@ export const db = {
         return data;
     },
 
+    repairExternalId: async (delegateId: string): Promise<string | null> => {
+        const { data: delegate } = await supabase.from('delegates').select('external_id').eq('delegate_id', delegateId).maybeSingle();
+        if (!delegate) return null;
+        if (delegate.external_id && delegate.external_id.startsWith('CON26')) return delegate.external_id;
+
+        const regId = generateRegId();
+        await supabase.from('delegates').update({ external_id: regId }).eq('delegate_id', delegateId);
+        return regId;
+    },
+
     importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);

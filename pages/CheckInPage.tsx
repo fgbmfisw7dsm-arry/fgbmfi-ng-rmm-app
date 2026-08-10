@@ -211,6 +211,11 @@ const CheckInPage = () => {
 
   const handleReprintBadge = useCallback(async (delegate: Delegate) => {
     try {
+      if (!delegate.external_id?.startsWith('CON26')) {
+        const repaired = await db.repairExternalId(delegate.delegate_id);
+        if (repaired) delegate = { ...delegate, external_id: repaired };
+      }
+
       const qrCanvas = document.createElement('canvas');
       await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 400, margin: 1, color: { dark: '#1e3a5f' } });
       const qrDataUrl = qrCanvas.toDataURL('image/png');
