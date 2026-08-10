@@ -283,6 +283,9 @@ const MasterListModule = () => {
                     const distDelegates = delegates.filter(d => (d.district || '').trim().toUpperCase() === groupName.toUpperCase());
 
                     if (distDelegates.length === 0) return null;
+                    const paddedDelegates = distDelegates.length < PAGE_SIZE
+                        ? [...distDelegates, ...Array.from({ length: PAGE_SIZE - distDelegates.length }, (_, i) => ({ delegate_id: `__pad_${i}`, first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', title: '', rank: '', office: '', delegate_type: '', external_id: '', event_id: '', qr_hash: '', registration_source: '', _isPad: true } as any))]
+                        : distDelegates;
                     const isOfficial = officialDistricts.some(od => od.trim().toUpperCase() === groupName.toUpperCase());
 
                     return (
@@ -297,7 +300,12 @@ const MasterListModule = () => {
                                         <tr><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {distDelegates.map(d => (
+                                        {paddedDelegates.map(d => (
+                                            d._isPad ? (
+                                                <tr key={d.delegate_id} className="bg-gray-50/50">
+                                                    <td colSpan={7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                                </tr>
+                                            ) : (
                                             <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
                                                 <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
                                                 <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
@@ -311,6 +319,7 @@ const MasterListModule = () => {
                                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                                 </td>
                                             </tr>
+                                            )
                                         ))}
                                     </tbody>
                                 </table>

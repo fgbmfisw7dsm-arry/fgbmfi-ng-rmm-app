@@ -1462,31 +1462,43 @@ export const db = {
                 console.log(`[harmonizeDistricts] Abbreviation-is-official: "${abbreviated}" → "${selfMatch}"`);
                 return selfMatch;
             }
-            console.log(`[harmonizeDistricts] UNRESOLVED: "${abbreviated}" → "${fullName}" — not found in official list. Add it in SetupModule.`);
             return null;
         };
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
-        const official = (settings.districts || []).map(d => normalize(d));
+        const official: string[] = (settings.districts || []).map(d => normalize(d));
         console.log(`[harmonizeDistricts] Official districts (${official.length}): ${official.join(', ')}`);
         let q = supabase.from('delegates').select('delegate_id, district').limit(5000);
         if (eventId) q = q.eq('event_id', eventId);
         const { data: delegates } = await q;
         let count = 0;
-        const unresolved = new Set<string>();
+        const autoRegistered = new Set<string>();
         const resolved = new Map<string, string>();
+
+        const tryResolve = (abbreviated: string): string | null => {
+            let result = resolveAbbreviation(abbreviated, official);
+            if (result) return result;
+            const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
+            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+            if (!match) return null;
+            const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+            if (!autoRegistered.has(fullName)) {
+                official.push(fullName);
+                autoRegistered.add(fullName);
+                console.log(`[harmonizeDistricts] AUTO-REGISTERED: "${fullName}" added to system_settings.districts`);
+            }
+            return fullName;
+        };
+
         for (const d of (delegates || [])) {
             const rawDistrict = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
             if (!rawDistrict) continue;
-            const abbrResolved = resolveAbbreviation(rawDistrict, official);
+            const abbrResolved = tryResolve(rawDistrict);
             if (abbrResolved && abbrResolved !== rawDistrict) {
                 await supabase.from('delegates').update({ district: abbrResolved }).eq('delegate_id', d.delegate_id);
                 count++;
                 if (!resolved.has(rawDistrict)) resolved.set(rawDistrict, abbrResolved);
                 continue;
-            }
-            if (!abbrResolved && /^(NC|NE|NW|SE|SS|SW)\d+$/i.test(rawDistrict.toUpperCase().replace(/[^A-Z0-9]/g, ''))) {
-                unresolved.add(rawDistrict);
             }
             const matched = official.find(o => o.toUpperCase() === rawDistrict.toUpperCase());
             if (matched && matched !== rawDistrict) {
@@ -1495,12 +1507,14 @@ export const db = {
                 if (!resolved.has(rawDistrict)) resolved.set(rawDistrict, matched);
             }
         }
+
+        if (autoRegistered.size > 0) {
+            await supabase.from('system_settings').update({ districts: official }).eq('id', settings.id);
+            console.log(`[harmonizeDistricts] Persisted ${autoRegistered.size} new district(s) to system_settings`);
+        }
         if (resolved.size > 0) {
             const summary = Array.from(resolved.entries()).map(([k, v]) => `"${k}" → "${v}"`).join(', ');
             console.log(`[harmonizeDistricts] Resolved: ${summary}`);
-        }
-        if (unresolved.size > 0) {
-            console.warn(`[harmonizeDistricts] Could NOT resolve: ${Array.from(unresolved).join(', ')}. Add these to system_settings.districts in SetupModule.`);
         }
         console.log(`[harmonizeDistricts] Total harmonized: ${count}`);
         return count;
