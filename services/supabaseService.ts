@@ -640,6 +640,20 @@ export const db = {
         return results;
     },
 
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string): Promise<Delegate[]> => {
+        const results: Delegate[] = [];
+        let page = 1;
+        const pageSize = 500;
+        while (true) {
+            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId);
+            if (!paginated.data || paginated.data.length === 0) break;
+            results.push(...paginated.data);
+            if (paginated.data.length < pageSize) break;
+            page++;
+        }
+        return results;
+    },
+
     getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');

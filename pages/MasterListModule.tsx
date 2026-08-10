@@ -222,8 +222,75 @@ const MasterListModule = () => {
         return list.some(item => item.replace(/\s+/g, ' ').trim().toUpperCase() === normalized);
     };
 
-    const handleExport = () => { if (listRef.current) exportToPDF(listRef.current, "Delegate_Master_List.pdf", 'landscape', 1600); };
-    const handleCSVExport = () => { exportToCSV(delegates, 'Delegate_Master_List.csv'); };
+    const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
+
+    const handleExport = async () => {
+        if (!activeEventId) return;
+        setExporting('pdf');
+        try {
+            const district = selectedDistrict || undefined;
+            const search = searchTerm || undefined;
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search);
+            const colSpan = 7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+            const headerCells = [
+                '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
+                showRank ? '<th class="p-3">Rank</th>' : '',
+                showOffice ? '<th class="p-3">Office</th>' : '',
+                showDelegateType ? '<th class="p-3">Type</th>' : '',
+                '<th class="p-3">Phone</th>',
+            ].join('');
+            const rows = all.map((d, i) => {
+                const cells = [
+                    `<td class="p-3 text-[9px] font-mono text-gray-400">${i + 1}</td>`,
+                    `<td class="p-3 font-bold text-gray-400 uppercase">${d.title}</td>`,
+                    `<td class="p-3 font-black text-gray-900 uppercase">${d.first_name} ${d.last_name}</td>`,
+                    `<td class="p-3 font-medium">${d.chapter || '-'}</td>`,
+                    `<td class="p-3 font-medium lowercase text-blue-600">${d.email || '-'}</td>`,
+                    showRank ? `<td class="p-3 font-black text-blue-800 uppercase">${d.rank}</td>` : '',
+                    showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${d.office}</td>` : '',
+                    showDelegateType ? `<td class="p-3 font-medium text-[9px]">${d.delegate_type || 'Member'}</td>` : '',
+                    `<td class="p-3 font-black text-gray-500 tracking-tighter">${d.phone}</td>`,
+                ];
+                return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
+            }).join('');
+            const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
+            const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
+            const container = document.createElement('div');
+            container.innerHTML = tableHtml;
+            container.style.position = 'absolute';
+            container.style.left = '-9999px';
+            document.body.appendChild(container);
+            await new Promise(r => requestAnimationFrame(r));
+            await new Promise(r => setTimeout(r, 300));
+            exportToPDF(container, `Delegate_Master_List_${distLabel}.pdf`, 'landscape', 1600);
+            document.body.removeChild(container);
+        } catch (err) {
+            console.error('PDF export error:', err);
+        } finally {
+            setExporting(null);
+        }
+    };
+
+    const handleCSVExport = async () => {
+        if (!activeEventId) return;
+        setExporting('csv');
+        try {
+            const district = selectedDistrict || undefined;
+            const search = searchTerm || undefined;
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search);
+            const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
+            const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
+            if (showRank) cols.push('rank');
+            if (showOffice) cols.push('office');
+            if (showDelegateType) cols.push('delegate_type');
+            cols.push('phone', 'district');
+            exportToCSV(all, `Delegate_Master_List_${distLabel}.csv`, cols);
+        } catch (err) {
+            console.error('CSV export error:', err);
+        } finally {
+            setExporting(null);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -318,8 +385,8 @@ const MasterListModule = () => {
                         {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                    <button onClick={handleExport} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest">Export PDF</button>
-                    <button onClick={handleCSVExport} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase">CSV</button>
+                    <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
+                    <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
                     <button onClick={() => loadData()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
                 </div>
             </div>
