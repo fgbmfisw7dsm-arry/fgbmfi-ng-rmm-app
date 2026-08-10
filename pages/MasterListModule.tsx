@@ -279,92 +279,71 @@ const MasterListModule = () => {
                         <div className="text-5xl opacity-20">📂</div>
                         <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No records found matching your filter.</div>
                     </div>
-                ) : !selectedDistrict ? (
-                    /* --- FLAT VIEW: All Official Districts --- */
+                ) : (
+                    /* --- UNIFIED TABLE: grouped by district with inline separators --- */
                     <div>
-                        <div className="bg-slate-900 text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest rounded-xl mb-4">
-                            <span>All Districts</span>
-                            <span className="bg-white/10 px-3 py-1 rounded-full">{totalRecords} TOTAL</span>
-                        </div>
+                        {selectedDistrict && (
+                            <div className="bg-slate-900 text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest rounded-xl mb-4">
+                                <span>{selectedDistrict} DISTRICT</span>
+                                <span className="bg-white/10 px-3 py-1 rounded-full">{totalRecords} TOTAL</span>
+                            </div>
+                        )}
                         <div className="overflow-x-auto">
                             <table className="w-full text-[10px] text-left min-w-[1000px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr><th className="p-3 w-20">District</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr><th className="p-3 w-16">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {delegates.map(d => (
-                                        <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
-                                            <td className={`p-3 font-black uppercase text-[9px] ${isValueOfficial(d.district, officialDistricts) ? 'text-slate-700' : 'text-orange-600'}`}>{d.district || '-'}</td>
-                                            <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
-                                            <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
-                                            <td className="p-3 font-medium">{d.chapter || '-'}</td>
-                                            <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
-                                            {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
-                                            {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
-                                            {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
-                                            <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                            <td className="p-3 no-print text-center">
-                                                <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
-                                        <tr key={`__allpad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={8 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
-                                        </tr>
-                                    ))}
+                                    {(() => {
+                                        let lastDistrict = '';
+                                        const colSpan = 8 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+                                        const rows: React.ReactNode[] = [];
+                                        const startNum = (page - 1) * PAGE_SIZE + 1;
+                                        delegates.forEach((d, i) => {
+                                            const distNorm = (d.district || '').trim().toUpperCase();
+                                            if (!selectedDistrict && distNorm && distNorm !== lastDistrict) {
+                                                lastDistrict = distNorm;
+                                                const isOff = isValueOfficial(d.district, officialDistricts);
+                                                rows.push(
+                                                    <tr key={`__sep_${distNorm}`} className={isOff ? 'bg-slate-800' : 'bg-orange-600'}>
+                                                        <td colSpan={colSpan} className="p-2 text-[9px] font-black text-white uppercase tracking-widest">
+                                                            {d.district} DISTRICT
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            }
+                                            rows.push(
+                                                <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
+                                                    <td className="p-3 text-[9px] font-mono text-gray-400">{startNum + i}</td>
+                                                    <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
+                                                    <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
+                                                    <td className="p-3 font-medium">{d.chapter || '-'}</td>
+                                                    <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
+                                                    {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
+                                                    {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
+                                                    {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
+                                                    <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
+                                                    <td className="p-3 no-print text-center">
+                                                        <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        });
+                                        const padCount = PAGE_SIZE - delegates.length;
+                                        for (let p = 0; p < padCount; p++) {
+                                            rows.push(
+                                                <tr key={`__pad_${p}`} className="bg-gray-50/50">
+                                                    <td colSpan={colSpan} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                                </tr>
+                                            );
+                                        }
+                                        return rows;
+                                    })()}
                                 </tbody>
                             </table>
                         </div>
                     </div>
-                ) : displayGroups.map(groupName => {
-                    const distDelegates = delegates.filter(d => (d.district || '').trim().toUpperCase() === groupName.toUpperCase());
-
-                    if (distDelegates.length === 0) return null;
-                    const paddedDelegates = distDelegates.length < PAGE_SIZE
-                        ? [...distDelegates, ...Array.from({ length: PAGE_SIZE - distDelegates.length }, (_, i) => ({ delegate_id: `__pad_${i}`, first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', title: '', rank: '', office: '', delegate_type: '', external_id: '', event_id: '', qr_hash: '', registration_source: '', _isPad: true } as any))]
-                        : distDelegates;
-                    const isOfficial = officialDistricts.some(od => od.trim().toUpperCase() === groupName.toUpperCase());
-
-                    return (
-                        <div key={groupName} className={`mb-8 border rounded-xl overflow-hidden shadow-sm break-inside-avoid ${!isOfficial ? 'border-orange-200 bg-orange-50/20' : ''}`}>
-                            <div className={`${!isOfficial ? 'bg-orange-600' : 'bg-slate-900'} text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest`}>
-                                <span>{groupName} {isOfficial ? 'DISTRICT' : ''}</span>
-                                <span className="bg-white/10 px-3 py-1 rounded-full">{distDelegates.length} RECORDS</span>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[10px] text-left min-w-[800px]">
-                                    <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                        <tr><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {paddedDelegates.map(d => (
-                                            d._isPad ? (
-                                                <tr key={d.delegate_id} className="bg-gray-50/50">
-                                                    <td colSpan={7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
-                                                </tr>
-                                            ) : (
-                                            <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
-                                                <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
-                                                <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
-                                                <td className="p-3 font-medium">{d.chapter || '-'}</td>
-                                                <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
-                                                {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
-                                                {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
-                                                {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
-                                                <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                                <td className="p-3 no-print text-center">
-                                                    <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
-                                                </td>
-                                            </tr>
-                                            )
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    );
-                })}
+                )}
                 {totalPages > 1 && (
                     <div className="no-print mt-6 flex items-center justify-center gap-3 pt-4 border-t border-gray-200">
                         <button onClick={() => loadData(1)} disabled={page <= 1} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">First</button>
