@@ -1137,7 +1137,7 @@ const BadgePrintingModule = () => {
                   </button>
                   <button
                     onClick={() => {
-                      window.open(generatedPdfUrl || pdfPreviewUrl, '_blank');
+                      if (pdfPreviewUrl) window.open(pdfPreviewUrl, '_blank');
                     }}
                     className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95 flex items-center justify-center gap-2"
                   >
