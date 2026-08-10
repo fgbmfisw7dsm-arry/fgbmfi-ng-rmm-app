@@ -1,6 +1,7 @@
 
 import React, { useState, useContext, useMemo, useRef } from 'react';
 import { db } from '../services/supabaseService';
+import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole } from '../types';
 import { exportToCSV } from '../services/utils';
@@ -62,12 +63,12 @@ const ImportModule = () => {
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
-    const [scrambledPreview, setScrambledPreview] = useState<string[]>([]);
-    const [scrambledDeleting, setScrambledDeleting] = useState(false);
-    const [scrambledLoading, setScrambledLoading] = useState(false);
-    const [scrambledSamples, setScrambledSamples] = useState<string[]>([]);
-    const [scrambledTotal, setScrambledTotal] = useState(0);
-    const [scrambledResult, setScrambledResult] = useState<{ deleted: number } | null>(null);
+    const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
+    const [scrambleSamples, setScrambleSamples] = useState<string[]>([]);
+    const [scrambleTotal, setScrambleTotal] = useState(0);
+    const [scrambleLoading, setScrambleLoading] = useState(false);
+    const [scrambleResult, setScrambleResult] = useState<{ type: 'analyzed' | 'repaired' | 'deleted' | 'error'; count: number; msg?: string } | null>(null);
+    const [scrambleShowRepairs, setScrambleShowRepairs] = useState(false);
 
     const KNOWN_FIELDS: Record<string, string> = {
       'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
@@ -350,45 +351,93 @@ const ImportModule = () => {
         }
     };
 
-    const handleCleanupScrambled = async () => {
+    const handleScrambleAnalyze = async () => {
         if (!activeEventId) return;
-        setScrambledDeleting(true);
-        setScrambledResult(null);
+        setScrambleLoading(true);
+        setScrambleResult(null);
+        setScrambleAnalyses([]);
+        setScrambleSamples([]);
+        setScrambleTotal(0);
+        setScrambleShowRepairs(false);
         try {
-            const { preview, deleted, samples, totalDelegates } = await db.deleteScrambledImportDelegates(activeEventId);
-            setScrambledPreview(preview);
-            setScrambledSamples(samples);
-            setScrambledTotal(totalDelegates);
-            setScrambledResult({ deleted });
+            const result = await db.analyzeScrambledDelegates(activeEventId);
+            setScrambleAnalyses(result.analyses);
+            setScrambleSamples(result.samples);
+            setScrambleTotal(result.totalDelegates);
+            const repairable = result.analyses.filter((a: any) => a.repairable).length;
+            if (result.analyses.length === 0) {
+                setScrambleResult({ type: 'analyzed', count: 0, msg: 'No scrambled records found.' });
+            } else if (repairable > 0) {
+                setScrambleResult({ type: 'analyzed', count: result.analyses.length, msg: `${result.analyses.length} scrambled. ${repairable} auto-repairable.` });
+                setScrambleShowRepairs(true);
+            } else {
+                setScrambleResult({ type: 'analyzed', count: result.analyses.length, msg: `${result.analyses.length} scrambled but none auto-repairable.` });
+            }
         } catch (e: any) {
-            console.error('Cleanup error:', e);
-            setScrambledResult({ deleted: -1 });
+            console.error('Analyze error:', e);
+            setScrambleResult({ type: 'error', count: 0, msg: e.message });
         } finally {
-            setScrambledDeleting(false);
+            setScrambleLoading(false);
         }
     };
 
-    const handleScramblePreview = async () => {
+    const handleScrambleRepair = async () => {
         if (!activeEventId) return;
-        setScrambledLoading(true);
-        setScrambledResult(null);
-        setScrambledPreview([]);
-        setScrambledSamples([]);
-        setScrambledTotal(0);
+        const repairable = scrambleAnalyses.filter((a: any) => a.repairable);
+        if (repairable.length === 0) return;
+        setScrambleLoading(true);
+        setScrambleResult(null);
         try {
-            const { preview, samples, totalDelegates } = await db.deleteScrambledImportDelegates(activeEventId, true);
-            setScrambledPreview(preview);
-            setScrambledSamples(samples);
-            setScrambledTotal(totalDelegates);
-            if (preview.length === 0) {
-                setScrambledResult({ deleted: 0 });
-            }
+            const repairs = repairable.map((a: any) => ({ delegate_id: a.delegate_id, updates: { ...a.proposed } }));
+            const { repaired, errors } = await db.applyScrambleRepairs(activeEventId, repairs);
+            setScrambleResult({ type: 'repaired', count: repaired, msg: `Repaired ${repaired} records in-place` + (errors > 0 ? ` (${errors} errors).` : '.') });
+            setScrambleAnalyses([]);
+            setScrambleShowRepairs(false);
         } catch (e: any) {
-            console.error('Preview error:', e);
-            setScrambledResult({ deleted: -1 });
+            console.error('Repair error:', e);
+            setScrambleResult({ type: 'error', count: 0, msg: e.message });
         } finally {
-            setScrambledLoading(false);
+            setScrambleLoading(false);
         }
+    };
+
+    const handleScrambleDelete = async () => {
+        if (!activeEventId || scrambleAnalyses.length === 0) return;
+        setScrambleLoading(true);
+        setScrambleResult(null);
+        try {
+            const ids = scrambleAnalyses.map((a: any) => a.delegate_id);
+            await supabase.from('checkins').delete().in('delegate_id', ids);
+            await supabase.from('session_responses').delete().in('delegate_id', ids);
+            await supabase.from('badge_print_logs').delete().in('delegate_id', ids);
+            const { error } = await supabase.from('delegates').delete().in('delegate_id', ids);
+            if (error) throw error;
+            setScrambleResult({ type: 'deleted', count: ids.length, msg: `Deleted ${ids.length} records. Dashboard counts auto-updated.` });
+            setScrambleAnalyses([]);
+            setScrambleShowRepairs(false);
+        } catch (e: any) {
+            console.error('Delete error:', e);
+            setScrambleResult({ type: 'error', count: 0, msg: e.message });
+        } finally {
+            setScrambleLoading(false);
+        }
+    };
+
+    const handleScrambleBackup = () => {
+        if (scrambleAnalyses.length === 0) return;
+        const backup = scrambleAnalyses.map((a: any) => ({
+            delegate_id: a.delegate_id,
+            original: { first_name: a.first_name, last_name: a.last_name, district: a.district, chapter: a.chapter, title: a.title, phone: a.phone, email: a.email },
+            proposed: a.proposed,
+            confidence: a.confidence,
+            anomalies: a.anomalies,
+        }));
+        const blob = new Blob([JSON.stringify({ eventId: activeEventId, exportedAt: new Date().toISOString(), records: backup }, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `scrambled-delegates-backup-${activeEventId?.slice(0, 8) || 'unknown'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
     };
 
     const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
@@ -493,80 +542,140 @@ const ImportModule = () => {
                 <div className="p-4 mb-6 rounded-2xl border-2 border-red-200 bg-red-50">
                     <div className="flex justify-between items-center mb-2">
                         <div>
-                            <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider">Recover Scrambled Import</h4>
+                            <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider">Scrambled Import Recovery</h4>
                             <p className="text-[8px] font-bold text-red-500 uppercase mt-0.5">
-                                Identifies delegates whose district does NOT match any official district in system settings (a sign of misaligned column mapping during import). Also removes associated checkins, session responses, and badge logs to keep dashboard counts accurate.
+                                Detects delegates with non-official districts via multi-field anomaly scoring, proposes in-place repairs, and supports backup &amp; delete.
                             </p>
                         </div>
                     </div>
-                    <div className="flex gap-2">
+
+                    {/* Action buttons */}
+                    <div className="flex flex-wrap gap-2 mb-2">
                         <button
-                            onClick={handleScramblePreview}
-                            disabled={scrambledDeleting || scrambledLoading || !activeEventId}
-                            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                            onClick={handleScrambleAnalyze}
+                            disabled={scrambleLoading || !activeEventId}
+                            className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
-                            {scrambledLoading ? 'SCANNING...' : 'Preview Affected Records'}
+                            {scrambleLoading && scrambleAnalyses.length === 0 ? 'ANALYZING...' : '1. Analyze'}
                         </button>
                         <button
-                            onClick={handleCleanupScrambled}
-                            disabled={scrambledDeleting || !activeEventId || scrambledPreview.length === 0}
+                            onClick={handleScrambleBackup}
+                            disabled={scrambleAnalyses.length === 0}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                            title="Download JSON backup before making changes"
+                        >
+                            2. Backup JSON
+                        </button>
+                        <button
+                            onClick={handleScrambleRepair}
+                            disabled={!scrambleShowRepairs || scrambleLoading}
+                            className="px-4 py-2 bg-green-700 hover:bg-green-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            {scrambleLoading && scrambleResult?.type !== 'analyzed' ? 'REPAIRING...' : '3. Repair In-Place'}
+                        </button>
+                        <button
+                            onClick={handleScrambleDelete}
+                            disabled={scrambleAnalyses.length === 0 || scrambleLoading}
                             className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
-                            {scrambledDeleting ? 'DELETING...' : 'DELETE SCRAMBLED RECORDS'}
+                            {scrambleLoading && scrambleResult?.type !== 'analyzed' ? 'DELETING...' : 'Delete All'}
                         </button>
                     </div>
-                    {scrambledPreview.length > 0 && (
-                        <div className="mt-3 max-h-40 overflow-y-auto bg-white p-2 rounded-xl border border-red-100">
-                            <p className="text-[8px] font-bold text-red-600 uppercase mb-1">
-                                {scrambledPreview.length} scrambled record(s) found:
-                            </p>
-                            {scrambledPreview.slice(0, 50).map((preview, idx) => (
-                                <div key={idx} className="text-[9px] font-mono text-red-700 py-0.5 border-b border-red-50 last:border-b-0">
-                                    {preview}
-                                </div>
-                            ))}
-                            {scrambledPreview.length > 50 && (
-                                <p className="text-[8px] text-red-400 mt-1">... and {scrambledPreview.length - 50} more</p>
-                            )}
-                        </div>
-                    )}
-                    {scrambledResult !== null && scrambledResult.deleted >= 0 && (
-                        <div className={`mt-3 p-3 rounded-xl ${scrambledResult.deleted > 0 ? 'bg-green-100 border border-green-200' : 'bg-amber-100 border border-amber-200'}`}>
+
+                    {/* Result feedback */}
+                    {scrambleResult && (
+                        <div className={`p-3 rounded-xl mb-2 ${
+                            scrambleResult.type === 'analyzed' ? (scrambleResult.count > 0 ? 'bg-amber-100 border border-amber-200' : 'bg-green-100 border border-green-200') :
+                            scrambleResult.type === 'repaired' ? 'bg-green-100 border border-green-200' :
+                            scrambleResult.type === 'deleted' ? 'bg-green-100 border border-green-200' :
+                            'bg-red-100 border border-red-200'
+                        }`}>
                             <p className="text-[9px] font-black uppercase">
-                                {scrambledResult.deleted > 0
-                                    ? `Successfully deleted ${scrambledResult.deleted} scrambled delegate record(s). Dashboard counts will auto-update.`
-                                    : 'No scrambled records found in this event.'}
+                                {scrambleResult.type === 'analyzed' && scrambleResult.count === 0 && 'No scrambled records detected. All districts match official list.'}
+                                {scrambleResult.type === 'analyzed' && scrambleResult.count > 0 && `${scrambleResult.msg} (${scrambleTotal} total delegates scanned)`}
+                                {scrambleResult.type === 'repaired' && scrambleResult.msg}
+                                {scrambleResult.type === 'deleted' && scrambleResult.msg}
+                                {scrambleResult.type === 'error' && `Error: ${scrambleResult.msg}`}
                             </p>
-                            {scrambledResult.deleted === 0 && scrambledTotal > 0 && (
+                            {scrambleResult.type === 'analyzed' && scrambleResult.count === 0 && scrambleTotal > 0 && (
                                 <div className="mt-2">
-                                    <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
-                                        Scanned {scrambledTotal} delegates. District values found in this event:
-                                    </p>
-                                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
-                                        {scrambledSamples.slice(0, 40).map((s, i) => (
-                                            <span key={i} className="px-1.5 py-0.5 bg-white rounded text-[8px] font-mono text-gray-700 border border-gray-200">
-                                                {s || '(empty)'}
-                                            </span>
+                                    <p className="text-[8px] font-bold text-green-700 uppercase mb-1">District values found:</p>
+                                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                                        {scrambleSamples.slice(0, 30).map((s, i) => (
+                                            <span key={i} className="px-1.5 py-0.5 bg-white rounded text-[8px] font-mono text-gray-700 border border-gray-200">{s || '(empty)'}</span>
                                         ))}
                                     </div>
-                                    {scrambledSamples.length > 40 && (
-                                        <p className="text-[7px] text-amber-500 mt-1">... and {scrambledSamples.length - 40} more unique values</p>
-                                    )}
-                                    <p className="text-[7px] text-amber-400 mt-2 italic">
-                                        If no district above appears to be from a misaligned import, the scrambled records may already be cleaned up or were imported into a different event.
-                                    </p>
                                 </div>
                             )}
-                            {scrambledResult.deleted === 0 && scrambledTotal === 0 && (
-                                <p className="text-[8px] text-amber-600 mt-1">
-                                    No delegates found in this event. Ensure the correct event is selected in the header dropdown.
-                                </p>
+                            {scrambleResult.type === 'analyzed' && scrambleResult.count === 0 && scrambleTotal === 0 && (
+                                <p className="text-[8px] text-green-600 mt-1">No delegates found. Check the active event selector.</p>
                             )}
                         </div>
                     )}
-                    {scrambledResult !== null && scrambledResult.deleted < 0 && (
-                        <div className="mt-3 p-3 rounded-xl bg-red-100 border border-red-200">
-                            <p className="text-[9px] font-black text-red-700 uppercase">Deletion failed. Check console for details.</p>
+
+                    {/* Comparison table for repairable records */}
+                    {scrambleShowRepairs && scrambleAnalyses.length > 0 && (
+                        <div className="mt-2 max-h-80 overflow-y-auto bg-white rounded-xl border border-red-100">
+                            <table className="w-full text-[8px]">
+                                <thead className="sticky top-0 bg-red-100 text-red-900 uppercase font-black tracking-wider">
+                                    <tr>
+                                        <th className="p-1.5 text-left w-16">#</th>
+                                        <th className="p-1.5 text-left">Field</th>
+                                        <th className="p-1.5 text-left bg-red-50 text-red-600">Scrambled</th>
+                                        <th className="p-1.5 text-left bg-green-50 text-green-700">{'→'} Repaired</th>
+                                        <th className="p-1.5 text-center w-12">Conf.</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {scrambleAnalyses.filter((a: any) => a.repairable).slice(0, 100).map((a: any, i: number) => (
+                                        <tr key={a.delegate_id} className="border-b border-gray-100 hover:bg-gray-50">
+                                            <td className="p-1.5 font-mono text-gray-400 align-top">{i + 1}</td>
+                                            <td className="p-1.5 align-top leading-relaxed">
+                                                <div className="text-[7px] text-gray-400">Name</div>
+                                                <div className="text-[7px] text-gray-400">District</div>
+                                                <div className="text-[7px] text-gray-400">Chapter</div>
+                                                <div className="text-[7px] text-gray-400">Title</div>
+                                            </td>
+                                            <td className="p-1.5 align-top bg-red-50/50 text-red-700 font-mono leading-relaxed">
+                                                <div>{a.first_name} {a.last_name}</div>
+                                                <div>{a.district || <span className="text-red-300">empty</span>}</div>
+                                                <div>{a.chapter || <span className="text-red-300">empty</span>}</div>
+                                                <div>{a.title || <span className="text-red-300">empty</span>}</div>
+                                            </td>
+                                            <td className="p-1.5 align-top bg-green-50/50 text-green-700 font-mono leading-relaxed">
+                                                <div>{a.proposed.first_name} {a.proposed.last_name}</div>
+                                                <div>{a.proposed.district || <span className="text-green-300">empty</span>}</div>
+                                                <div>{a.proposed.chapter || <span className="text-green-300 text-[7px] italic">(manual)</span>}</div>
+                                                <div>{a.proposed.title || <span className="text-green-300">empty</span>}</div>
+                                            </td>
+                                            <td className="p-1.5 text-center align-top">
+                                                <span className={`px-1.5 py-0.5 rounded-full text-[7px] font-black ${
+                                                    a.confidence >= 3 ? 'bg-red-200 text-red-800' :
+                                                    a.confidence >= 2 ? 'bg-amber-200 text-amber-800' :
+                                                    'bg-green-200 text-green-800'
+                                                }`}>{a.confidence}</span>
+                                                {a.anomalies.length > 0 && (
+                                                    <div className="mt-1 text-left">
+                                                        {a.anomalies.map((an: string, j: number) => (
+                                                            <div key={j} className="text-[6px] text-amber-600 leading-tight">{an}</div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {scrambleAnalyses.filter((a: any) => a.repairable).length > 100 && (
+                                        <tr><td colSpan={5} className="p-2 text-center text-[8px] text-gray-400">
+                                            ... and {scrambleAnalyses.filter((a: any) => a.repairable).length - 100} more
+                                        </td></tr>
+                                    )}
+                                    {scrambleAnalyses.filter((a: any) => a.repairable).length === 0 && scrambleAnalyses.length > 0 && (
+                                        <tr><td colSpan={5} className="p-3 text-center text-[8px] text-amber-600 font-bold uppercase">
+                                            {scrambleAnalyses.length} scrambled records found but none are auto-repairable. Use Delete + Re-import instead.
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     )}
                 </div>

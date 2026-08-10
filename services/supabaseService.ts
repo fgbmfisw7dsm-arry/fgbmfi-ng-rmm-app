@@ -1230,6 +1230,179 @@ export const db = {
         return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
     },
 
+    /** A–D: Multi-field anomaly detection + confidence scoring. Returns full analysis with proposed repairs. */
+    analyzeScrambledDelegates: async (eventId: string): Promise<{
+        analyses: Array<{
+            delegate_id: string;
+            first_name: string; last_name: string; district: string; chapter: string; title: string; phone: string; email: string;
+            anomalies: string[];
+            confidence: number;
+            proposed: { first_name: string; last_name: string; district: string; chapter: string; title: string; };
+            repairable: boolean;
+        }>;
+        samples: string[];
+        totalDelegates: number;
+        officialDistricts: string[];
+    }> => {
+        const { data: settings } = await supabase.from('system_settings').select('districts').limit(1).maybeSingle();
+        const officialDistricts = new Set<string>();
+        if (settings?.districts && Array.isArray(settings.districts)) {
+            for (const d of settings.districts) officialDistricts.add(normalize(d).toUpperCase());
+        }
+        const offList = Array.from(officialDistricts).sort();
+        const { data: candidates, error: fetchErr } = await supabase
+            .from('delegates')
+            .select('delegate_id, first_name, last_name, district, chapter, title, phone, email')
+            .eq('event_id', eventId)
+            .limit(10000);
+        const totalDelegates = candidates?.length || 0;
+        const districtSamples = new Set<string>();
+        if (candidates) for (const d of candidates) districtSamples.add((d.district || '').trim());
+        const sampleList = Array.from(districtSamples).filter(Boolean).sort().slice(0, 50);
+        if (fetchErr || !candidates) return { analyses: [], samples: sampleList, totalDelegates, officialDistricts: offList };
+
+        function isOfficial(dist: string): boolean {
+            const d = normalize(dist).toUpperCase();
+            if (!d) return false;
+            if (officialDistricts.has(d)) return true;
+            const abbr = d.replace(/[^A-Z0-9]/g, '');
+            if (/^(NC|NE|NW|SE|SS|SW)\d+$/.test(abbr)) return true;
+            if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
+            return false;
+        }
+
+        const districtPattern = /(?:NC|NE|NW|SE|SS|SW)\d+/i;
+        const districtFullPattern = /(?:NC|NE|NW|SE|SS|SW)\d+-\d+/i;
+
+        const analyses: Array<any> = [];
+        for (const d of candidates) {
+            const distRaw = (d.district || '').trim();
+            if (!distRaw) continue;
+            if (isOfficial(distRaw)) continue;
+
+            const anomalies: string[] = [];
+            let confidence = 0;
+
+            const fn = normalize(d.first_name);
+            const ln = normalize(d.last_name);
+            const dist = normalize(distRaw);
+            const ch = normalize(d.chapter);
+            const ti = normalize(d.title);
+
+            if (!isOfficial(distRaw)) { anomalies.push(`district "${distRaw}" not in system`); confidence++; }
+
+            const hasDistrictInFirstName = districtPattern.test(fn);
+            const hasDistrictInLastName = districtPattern.test(ln);
+            if (hasDistrictInFirstName) { anomalies.push(`first_name contains district code: "${fn}"`); confidence++; }
+            if (hasDistrictInLastName) { anomalies.push(`last_name contains district code: "${ln}"`); confidence++; }
+
+            const nameWords = fn.split(/\s+/).filter(w => w.length > 1);
+            const isChapterLike = nameWords.length >= 2 && nameWords.every(w => w === w.toUpperCase());
+            if (isChapterLike) { anomalies.push(`first_name looks like chapter (ALL CAPS multi-word)`); confidence++; }
+
+            const chWords = ch.split(/\s+/).filter(w => w.length > 1);
+            const isNameLike = chWords.length === 1 && /^[A-Z]/.test(ch) && !ch.includes(' ');
+            if (isNameLike && ch.length > 1) { anomalies.push(`chapter looks like a surname: "${ch}"`); confidence++; }
+
+            if (ti && /^\d+$/.test(ti)) { anomalies.push(`title is numeric (zone number)`); confidence++; }
+
+            const phoneAlpha = (d.phone || '').replace(/[\d\s\-\(\)\+]/g, '');
+            if (phoneAlpha.length > 2) { anomalies.push(`phone contains text: "${d.phone}"`); confidence++; }
+
+            const proposed = {
+                first_name: d.first_name,
+                last_name: d.last_name,
+                district: d.district,
+                chapter: d.chapter,
+                title: d.title,
+            };
+            let repairable = false;
+
+            if (confidence >= 1) {
+                const districtMatch = d.first_name?.match(districtFullPattern) || d.first_name?.match(districtPattern);
+                let extractedDistrict = '';
+                if (districtMatch) {
+                    const raw = districtMatch[0].toUpperCase();
+                    const dash = raw.indexOf('-');
+                    extractedDistrict = dash > 0 ? raw.substring(0, dash) : raw;
+                }
+                if (!extractedDistrict && d.last_name) {
+                    const lnMatch = d.last_name.match(districtPattern);
+                    if (lnMatch) extractedDistrict = lnMatch[0].toUpperCase();
+                }
+
+                if (distRaw && /^[A-Z][a-z]/.test(distRaw) && !isOfficial(distRaw)) {
+                    proposed.first_name = distRaw;
+                }
+                if (ch && !isChapterLike && ch.length > 1 && /^[A-Z]/.test(ch)) {
+                    proposed.last_name = ch;
+                }
+                if (extractedDistrict) {
+                    proposed.district = extractedDistrict;
+                }
+                if (ti && /^\d+$/.test(ti) && districtMatch) {
+                    const titleFromName = d.first_name?.replace(districtMatch[0], '').trim();
+                    if (titleFromName && titleFromName.length >= 2) proposed.title = titleFromName;
+                }
+                proposed.chapter = '';
+
+                const hasChanges =
+                    proposed.first_name !== d.first_name ||
+                    proposed.last_name !== d.last_name ||
+                    proposed.district !== d.district ||
+                    proposed.chapter !== d.chapter ||
+                    proposed.title !== d.title;
+                if (hasChanges && extractedDistrict) {
+                    repairable = true;
+                }
+            }
+
+            analyses.push({
+                delegate_id: d.delegate_id,
+                first_name: d.first_name,
+                last_name: d.last_name,
+                district: d.district,
+                chapter: d.chapter,
+                title: d.title,
+                phone: d.phone,
+                email: d.email,
+                anomalies,
+                confidence,
+                proposed,
+                repairable,
+            });
+        }
+        return { analyses, samples: sampleList, totalDelegates, officialDistricts: offList };
+    },
+
+    /** B: Apply in-place field remapping repairs (event must be active). */
+    applyScrambleRepairs: async (eventId: string, repairs: Array<{ delegate_id: string; updates: Record<string, string> }>): Promise<{ repaired: number; errors: number }> => {
+        await ensureEventActive(eventId);
+        let repaired = 0;
+        let errors = 0;
+        for (const r of repairs) {
+            const { error } = await supabase.from('delegates').update(r.updates).eq('delegate_id', r.delegate_id);
+            if (error) { errors++; console.error('[applyScrambleRepairs] update error:', error); }
+            else repaired++;
+        }
+        return { repaired, errors };
+    },
+
+    /** C: Backup scrambled delegates as downloadable JSON (read-only — no event-lock check needed). */
+    backupScrambledDelegates: async (eventId: string): Promise<{ backup: any[] | null; count: number }> => {
+        const { analyses, totalDelegates } = await db.analyzeScrambledDelegates(eventId);
+        if (analyses.length === 0) return { backup: null, count: 0 };
+        const backup = analyses.map(a => ({
+            delegate_id: a.delegate_id,
+            original: { first_name: a.first_name, last_name: a.last_name, district: a.district, chapter: a.chapter, title: a.title, phone: a.phone, email: a.email },
+            proposed: a.proposed,
+            confidence: a.confidence,
+            anomalies: a.anomalies,
+            repairable: a.repairable,
+        }));
+        return { backup, count: analyses.length };
+    },
+
     deleteDelegatesByDistrict: async (district: string, eventId?: string) => { 
         let q = supabase.from('delegates').delete().ilike('district', normalize(district));
         if (eventId) q = q.eq('event_id', eventId);
