@@ -165,6 +165,20 @@ const CheckInPage = () => {
           setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
+          if (res.delegate?.delegate_id) {
+            const dKey = `${res.delegate.delegate_id}_${selectedSessionId || 'arrival'}`;
+            if (res.alreadyCheckedIn) {
+              localVerifiedIds.current.delete(dKey);
+              setResults(prev => prev.map(d =>
+                d.delegate_id === res.delegate!.delegate_id ? { ...d, checkedIn: true, verifiedLocally: false } : d
+              ));
+            } else {
+              localVerifiedIds.current.add(dKey);
+              setResults(prev => prev.map(d =>
+                d.delegate_id === res.delegate!.delegate_id ? { ...d, checkedIn: true, verifiedLocally: true } : d
+              ));
+            }
+          }
           setTimeout(() => { setFeedback(null); setCode(''); }, res.alreadyCheckedIn ? 3000 : 5000);
         } else if (res.needsRegistration) {
           setFeedback(null);
@@ -543,7 +557,7 @@ const CheckInPage = () => {
       setPendingReg(null);
       setCode('');
       setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
-      setFeedback({ type: 'success', msg: res.success ? 'Registered & Verified!' : 'Registered but check-in failed.' });
+      setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.success ? (res.alreadyCheckedIn ? 'Already Verified' : 'Registered & Verified!') : 'Registered but check-in failed.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
       setFeedback({ type: 'error', msg: e.message || 'Registration failed.' });
