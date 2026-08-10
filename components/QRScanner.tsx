@@ -78,7 +78,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         height: { ideal: 720 }
       };
       if (deviceId) {
-        videoConstraints.deviceId = { exact: deviceId };
+        videoConstraints.deviceId = { ideal: deviceId };
       } else {
         videoConstraints.facingMode = 'environment';
       }
@@ -134,7 +134,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
           setError('No camera detected on this device.');
         } else {
-          log(`Camera error${deviceId ? ' for selected cam' : ''}, retrying with default...`);
+          const camLabel = deviceId ? camerasRef.current.find(c => c.deviceId === deviceId)?.label : null;
+          log(`Camera error${camLabel ? ' (' + camLabel + ')' : ''}: ${msg || 'unknown'}. Falling back to default...`);
           setError('');
           if (deviceId) {
             localStorage.removeItem('qr-camera-device-id');
@@ -279,7 +280,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         if (!mountedRef.current) return;
-        let videoDevices = devices
+        const videoDevices = devices
           .filter(d => d.kind === 'videoinput')
           .map((d, i) => ({
             deviceId: d.deviceId,
@@ -287,30 +288,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           }));
         camerasRef.current = videoDevices;
         setCameras(videoDevices);
-
-        const hasRealLabels = videoDevices.some(
-          d => d.label && !/^Camera \d+$/i.test(d.label)
-        );
-        if (!hasRealLabels && videoDevices.length > 0) {
-          try {
-            const probeStream = await navigator.mediaDevices.getUserMedia({
-              video: { width: { ideal: 320 }, height: { ideal: 240 } }
-            });
-            probeStream.getTracks().forEach(t => t.stop());
-            const refreshed = await navigator.mediaDevices.enumerateDevices();
-            if (mountedRef.current) {
-              videoDevices = refreshed
-                .filter(d => d.kind === 'videoinput')
-                .map((d, i) => ({
-                  deviceId: d.deviceId,
-                  label: d.label || `Camera ${i + 1}`
-                }));
-              camerasRef.current = videoDevices;
-              setCameras(videoDevices);
-            }
-          } catch {
-          }
-        }
 
         const saved = localStorage.getItem('qr-camera-device-id');
         const initialCamera = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
