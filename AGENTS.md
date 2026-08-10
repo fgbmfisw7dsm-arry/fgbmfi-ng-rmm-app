@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.6 (signUp-based User Creation + bcrypt Cost 10 + Session Attendance Cascade + PDF Dual-Mode Export + Scanned/Manual Validation Columns)
+- **Current Version:** 1.7 (Per-District Paginated Master List + Scrambled Import Recovery + Client-Side Sort + Full-Dataset Export + Auto-Register Harmonization)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -479,6 +479,45 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - Duplicate inserts caught via `23505` unique constraint errors — returns "Already recorded" instead of throwing.
 - **Scanned vs Manual columns:** `_count` (individual per-delegate responses) and `_summary` (aggregate manual totals) are separate validation figures, NOT additive. Tables show `_count` in the primary column; manual summaries are available in the detailed Sessions Report tab for cross-validation.
 
+### 20. Scrambled Import Recovery (v1.7)
+
+- **Problem solved:** CSV bulk imports can misalign columns, scrambling delegate fields (first_name → district, surname → chapter, etc.). The recovery module detects, previews, repairs, or deletes scrambled records.
+- **Four-tier recovery workflow in ImportModule:**
+  1. **Analyze** — multi-field anomaly detection with confidence scoring (0-3+): compares district against `system_settings.districts`, checks first_name for district-code patterns, chapter for surname-like values, title for numeric zone values, phone for alphabetic content.
+  2. **Backup JSON** — downloads a `.json` file of all scrambled records (original + proposed values) before any mutation.
+  3. **Repair In-Place** — field remapping based on detected shift pattern: `first_name ← district`, `last_name ← chapter`, `district ← extracted code from first_name`, `title ← cleaned`. After repair, auto-harmonizes district abbreviations (e.g., `NC1` → `North Central 1`).
+  4. **Delete All** — full cascade: `delegates` → `checkins` → `session_responses` → `badge_print_logs`.
+- **UI:** ImportModule now has a dedicated red-bordered "Scrambled Import Recovery" section with a comparison table showing scrambled → repaired values side-by-side.
+- **Service functions:** `analyzeScrambledDelegates(eventId)`, `applyScrambleRepairs(eventId, repairs)`, `backupScrambledDelegates(eventId)`, `deleteScrambledImportDelegates(eventId, dryRun?)`.
+
+### 21. Master List Dual-Mode Per-District Pagination (v1.7)
+
+- **All Official Districts mode:**
+  - `getDistrictsWithDelegates(eventId)` fetches the full district list with delegate counts (one light query, no data payload).
+  - Each district renders as an independent section with its own header, 25 rows via `getPaginatedDelegates(district=..., page=...)`, and its own pagination controls (First/Prev/Pg N/M/Next/Last).
+  - All district sections load independently on mount — page 1 of every district fetched in parallel.
+  - Scales to 20K delegates: each section only holds 25 rows in DOM; per-district pagination is server-side.
+- **Specific district / search mode:** Single unified table with top-level district header and shared pagination controls — legacy behavior preserved.
+- **Mode-aware loading guard:** `!selectedDistrict && !searchTerm ? districtListLoading : loading` — prevents spinner hang on initial "All Districts" load.
+- **Client-side sort guarantee:** `getPaginatedDelegates` always sorts the returned array by `last_name → first_name` (case-insensitive) after both RPC and fallback paths. Spouses with matching surnames appear consecutively regardless of database state.
+- **Service functions:** `getDistrictsWithDelegates(eventId)`, `fetchAllDelegatesForExport(eventId, district?, search?)`.
+
+### 22. Full-Dataset PDF & CSV Export (v1.7)
+
+- **Problem solved:** Both export handlers previously exported only the current page's 25 delegates (in-memory state / DOM element).
+- **PDF export:** `fetchAllDelegatesForExport` paginates through all matching delegates (500/page), builds a hidden full HTML table, renders via `html2canvas + jsPDF`, then cleans up the temp element.
+- **CSV export:** Fetches full dataset via the same loop, passes to `exportToCSV` with context-aware column set (rank/office/type per `event_config`).
+- **Filename includes district name:** `Delegate_Master_List_North-Central-1.pdf` or `All-Districts` when no district filter.
+- **Buttons show loading state:** `Exporting PDF...` / `Exporting CSV...` while fetching; disabled during export to prevent duplicate clicks.
+
+### 23. District Harmonization Auto-Registration (v1.7)
+
+- **Problem solved:** `harmonizeDistricts` previously only resolved abbreviations (e.g., `NC1`) to full names (e.g., `North Central 1`) if the full name already existed in `system_settings.districts`. Missing districts silently failed (0 records).
+- **Auto-registration:** When an abbreviation resolves to a valid full name not in the official list, the name is auto-appended to `system_settings.districts` and persisted.
+- **Fuzzy fallback:** Strips non-alphanumeric characters on both sides for comparison — catches variants like `NorthCentral 1` → `North Central 1`.
+- **Self-match:** Accepts the abbreviation itself if it appears verbatim in the official list.
+- **Diagnostic logging:** Logs every official district, every resolved mapping, and unresolved abbreviations.
+
 ## Code Conventions
 
 ### Naming
@@ -570,12 +609,9 @@ npm run build   # Production build to /dist
 | Item | Description | Priority | Target |
 |------|-------------|----------|--------|
 | QR code collisions | 4-digit hash → 10K codes for 25K delegates | CRITICAL | Phase 1 |
-| No pagination | MasterList + reports fetch ALL rows | CRITICAL | Phase 1 |
-| `getAllDataForExport()` | Fetches 4 tables entirely client-side | CRITICAL | Phase 1 |
 | No connection health UI | Officers don't know if writes failed silently | HIGH | Phase 1 |
 | Context performance | Every AppContext change re-renders entire tree | HIGH | Phase 1 |
 | Realtime subscription scope | Subscribes to entire table, not filtered by event | HIGH | Phase 1 |
-| No CSV data export | PDF-only export doesn't scale to 25K rows | MEDIUM | Phase 1 |
 | Single-row settings | `system_settings` is single-row JSONB — potential write conflicts | MEDIUM | Phase 2 |
 | No audit log | No immutable record of operations | MEDIUM | Phase 2 |
 | Client-side role enforcement | RLS is fallback, but UI gates are purely client-side | LOW | Phase 2 |
@@ -604,6 +640,14 @@ npm run build   # Production build to /dist
 | Alter call recording missing session attendance | `recordSessionResponse` now performs three-tier cascade: Arrival → Session Attendance → Response. QR path passes `selectedSessionId` to `checkInByCode` for upfront verification | RESOLVED | v1.6 |
 | bcrypt cost 6 in auth migration files | All `gen_salt('bf')` replaced with manual cost-10 salt. Recovery SQL deployed. `check_login_account` and `v_auth_integrity_check` now report `bcrypt_cost`. Preventative comments in `supabase_schema.sql` | RESOLVED | v1.6 |
 | Login HTTP 500 no diagnostics | `diagnoseLoginFailure` now runs for 500 errors; raw GoTrue error code/details/message appended to visible error. `check_login_account` returns `bcrypt_cost` with recommendation | RESOLVED | v1.6 |
+| No pagination — MasterList + reports fetch ALL rows | Dual-mode Master List: per-district independent pagination with 25-row pages, server-side paginated via RPC/fallback. Each district has its own controls | RESOLVED | v1.7 |
+| MasterList export only exports current page | `fetchAllDelegatesForExport` paginates through full dataset (500/page). PDF builds hidden full table; CSV exports full array. District name in filename | RESOLVED | v1.7 |
+| No CSV data export | Full CSV export with event_config-aware columns (rank/office/type). `fetchAllDelegatesForExport` → `exportToCSV` | RESOLVED | v1.7 |
+| District harmonization fails for missing entries | Auto-registration appends any valid abbreviation resolution to `system_settings.districts`. Fuzzy fallback catches whitespace/punctuation variants | RESOLVED | v1.7 |
+| `harmonizeDistricts` silent failures | Diagnostic logging: logs official districts, every resolved mapping, and unresolved abbreviations | RESOLVED | v1.7 |
+| Scrambled CSV import column misalignment | Comprehensive recovery module: multi-field anomaly detection (confidence scoring), in-place repair (field remapping + auto-harmonization), JSON backup, cascading delete | RESOLVED | v1.7 |
+| Delegates sorted by first_name (spouses apart) | Client-side sort in `getPaginatedDelegates`: `last_name → first_name` case-insensitive. Guarantees spouse grouping regardless of RPC server state | RESOLVED | v1.7 |
+| Master List spinner hangs on initial All Districts load | Mode-aware loading guard: `!selectedDistrict && !searchTerm ? districtListLoading : loading` | RESOLVED | v1.7 |
 
 ## v2.0 Evolution
 
