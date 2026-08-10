@@ -18,6 +18,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const [forceHtml5, setForceHtml5] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
@@ -27,6 +28,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const html5ScannerRef = useRef<any>(null);
   const attemptsRef = useRef(0);
   const camerasRef = useRef<CameraInfo[]>([]);
+  const forceHtml5Ref = useRef(false);
+  const selectedCameraRef = useRef<string | null>(null);
 
   const log = (msg: string) => {
     console.log('[QRScanner]', msg);
@@ -55,8 +58,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
       const videoConstraints: any = {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
       };
       if (deviceId) {
         videoConstraints.deviceId = { exact: deviceId };
@@ -87,7 +90,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-      log('BarcodeDetector active, hold badge closer...');
+      log('BarcodeDetector active (120ms), hold badge closer...');
 
       attemptsRef.current = 0;
       intervalRef.current = setInterval(async () => {
@@ -124,7 +127,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
-      log('Falling back to html5-qrcode...');
       const { Html5Qrcode } = await import('html5-qrcode');
 
       let cameraId: string;
@@ -146,7 +148,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         log(`Camera: ${rear?.label || camList[0].label}`);
       }
 
-      setUseHtml5Fallback(true);
       setScanning(true);
       setError('');
 
@@ -155,7 +156,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       html5ScannerRef.current = scanner;
       await scanner.start(
         cameraId,
-        { fps: 10, qrbox: 250 },
+        {
+          fps: 15,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.55;
+            return { width: size, height: size };
+          }
+        },
         (decodedText: string) => {
           setScanning(false);
           scanner.stop().catch(() => {});
@@ -164,7 +171,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         },
         () => {}
       );
-      log('html5-qrcode scanner active');
+      log('html5-qrcode active (15fps)');
     } catch (e: any) {
       if (mountedRef.current) {
         if (e.message && e.message.includes('NotFound')) {
@@ -179,7 +186,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     }
   }, [log]);
 
+  const startWithEngine = useCallback(async (deviceId: string | null) => {
+    if (forceHtml5Ref.current) {
+      setUseHtml5Fallback(true);
+      await tryHtml5Qrcode(deviceId);
+    } else {
+      setUseHtml5Fallback(false);
+      await startBarcodeDetector(deviceId);
+    }
+  }, [startBarcodeDetector, tryHtml5Qrcode]);
+
   const switchCamera = useCallback(async (deviceId: string) => {
+    selectedCameraRef.current = deviceId;
     setSelectedCameraId(deviceId);
     localStorage.setItem('qr-camera-device-id', deviceId);
     setShowCameraMenu(false);
@@ -187,12 +205,20 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     setError('');
     await stopScanner();
     if (!mountedRef.current) return;
-    if ('BarcodeDetector' in window) {
-      await startBarcodeDetector(deviceId);
-    } else {
-      await tryHtml5Qrcode(deviceId);
-    }
-  }, [stopScanner, startBarcodeDetector, tryHtml5Qrcode]);
+    await startWithEngine(deviceId);
+  }, [stopScanner, startWithEngine]);
+
+  const toggleEngine = useCallback(async () => {
+    const next = !forceHtml5Ref.current;
+    forceHtml5Ref.current = next;
+    setForceHtml5(next);
+    localStorage.setItem('qr-force-html5', String(next));
+    setScanning(false);
+    setError('');
+    await stopScanner();
+    if (!mountedRef.current) return;
+    await startWithEngine(selectedCameraRef.current);
+  }, [stopScanner, startWithEngine]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -213,24 +239,22 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
         const saved = localStorage.getItem('qr-camera-device-id');
         const initialCamera = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
+        selectedCameraRef.current = initialCamera;
         setSelectedCameraId(initialCamera);
+
+        const savedForceHtml5 = localStorage.getItem('qr-force-html5') === 'true';
+        forceHtml5Ref.current = savedForceHtml5 || !('BarcodeDetector' in window);
+        setForceHtml5(savedForceHtml5);
 
         if (started) return;
         started = true;
 
-        if ('BarcodeDetector' in window) {
-          await startBarcodeDetector(initialCamera);
-        } else {
-          await tryHtml5Qrcode(initialCamera);
-        }
+        await startWithEngine(initialCamera);
       } catch {
         if (!started) {
           started = true;
-          if ('BarcodeDetector' in window) {
-            await startBarcodeDetector(null);
-          } else {
-            await tryHtml5Qrcode(null);
-          }
+          forceHtml5Ref.current = !('BarcodeDetector' in window);
+          await startWithEngine(null);
         }
       }
     };
@@ -245,9 +269,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         html5ScannerRef.current.stop().catch(() => {});
       }
     };
-  }, []);
+  }, [startWithEngine]);
 
   const activeLabel = cameras.find(c => c.deviceId === selectedCameraId)?.label;
+  const hasBarcodeDetector = 'BarcodeDetector' in window;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col md:bg-black/80 md:items-center md:justify-center md:p-4">
@@ -344,7 +369,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           {scanning && !error && (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs font-bold text-white uppercase tracking-widest">Scanning...</span>
+              <span className="text-xs font-bold text-white uppercase tracking-widest">
+                Scanning... <span className="text-[10px] font-normal text-gray-400">{useHtml5Fallback ? 'H5' : 'BD'}</span>
+              </span>
             </div>
           )}
           {error && <span className="text-xs font-bold text-red-400 truncate">{error}</span>}
@@ -352,9 +379,24 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             <span className="text-[10px] text-gray-500 truncate">{activeLabel}</span>
           )}
         </div>
-        <button onClick={onClose} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all flex-shrink-0 ml-3">
-          Cancel
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+          {hasBarcodeDetector && (
+            <button
+              onClick={toggleEngine}
+              className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all ${
+                forceHtml5
+                  ? 'bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-300'
+                  : 'bg-blue-600/30 hover:bg-blue-600/50 text-blue-300'
+              }`}
+              title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
+            >
+              {forceHtml5 ? 'html5' : 'BD'}
+            </button>
+          )}
+          <button onClick={onClose} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all">
+            Cancel
+          </button>
+        </div>
       </div>
       </div>
     </div>
