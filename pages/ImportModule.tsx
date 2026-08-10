@@ -181,6 +181,19 @@ const ImportModule = () => {
       return -1;
     };
 
+    const cleanDistrictForImport = (raw: string): string => {
+      const trimmed = (raw || '').trim();
+      const dashIdx = trimmed.indexOf('-');
+      if (dashIdx > 0) {
+        const prefix = trimmed.substring(0, dashIdx);
+        const suffix = trimmed.substring(dashIdx + 1);
+        if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) {
+          return prefix.toUpperCase();
+        }
+      }
+      return trimmed;
+    };
+
     const mappedCsvData = React.useMemo(() => {
       if (!showMapping || detectedColumns.length === 0 || !csv.trim()) return csv;
       const lines = csv.trim().split('\n');
@@ -210,7 +223,8 @@ const ImportModule = () => {
             else if (field === 'Last Name') colValues[field] = parsed.lastName;
             else {
               const idx = getColumnIndex(headers, field);
-              colValues[field] = (idx >= 0 && columnMap[headers[idx]] !== false) ? (values[idx] || '') : '';
+              let raw = (idx >= 0 && columnMap[headers[idx]] !== false) ? (values[idx] || '') : '';
+              colValues[field] = field === 'District' ? cleanDistrictForImport(raw) : raw;
             }
           }
           const row = fieldOrder.map(f => colValues[f]).join(',');
@@ -234,7 +248,10 @@ const ImportModule = () => {
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
           const selected = headers.map((h, idx) => ({ h, idx })).filter(({ h }) => columnMap[h] !== false);
-          const rowData = selected.map(({ idx }) => values[idx] || '');
+          const rowData = selected.map(({ h, idx }) => {
+            const val = values[idx] || '';
+            return KNOWN_FIELDS[normalizeKey(h)] === 'District' ? cleanDistrictForImport(val) : val;
+          });
           const row = regIdInHeaders ? rowData.join(',') : (['', ...rowData].join(','));
           if (row.trim()) resultLines.push(row);
         }
@@ -243,7 +260,9 @@ const ImportModule = () => {
       const resultLines: string[] = [];
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-        const row = colIndices.map(idx => idx >= 0 ? (values[idx] || '') : '').join(',');
+        const rowParts = colIndices.map(idx => idx >= 0 ? (values[idx] || '') : '');
+        rowParts[fieldOrder.indexOf('District')] = cleanDistrictForImport(rowParts[fieldOrder.indexOf('District')] || '');
+        const row = rowParts.join(',');
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');

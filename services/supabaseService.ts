@@ -11,6 +11,19 @@ const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
+const cleanDistrict = (raw: string): string => {
+  const trimmed = (raw || '').trim();
+  const dashIdx = trimmed.indexOf('-');
+  if (dashIdx > 0) {
+    const prefix = trimmed.substring(0, dashIdx);
+    const suffix = trimmed.substring(dashIdx + 1);
+    if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) {
+      return prefix.toUpperCase();
+    }
+  }
+  return trimmed;
+};
+
 const resolveBadgeFileName = (batch: { batch_id: string; pdf_url?: string | null }): string => {
     if (batch.pdf_url) {
         try {
@@ -928,7 +941,7 @@ export const db = {
                 title: p[1] || '',
                 first_name: p[2],
                 last_name: p[3],
-                district: p[4],
+                district: cleanDistrict(p[4]),
                 chapter: p[5],
                 phone: p[6],
                 email: p[7],
@@ -1176,7 +1189,7 @@ export const db = {
         const { data: delegates } = await q;
         let count = 0;
         for (const d of (delegates || [])) {
-            const rawDistrict = (d.district || '').replace(/\s+/g, ' ').trim();
+            const rawDistrict = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
             if (!rawDistrict) continue;
             const abbrResolved = resolveAbbreviation(rawDistrict, official);
             if (abbrResolved && abbrResolved !== rawDistrict) {
