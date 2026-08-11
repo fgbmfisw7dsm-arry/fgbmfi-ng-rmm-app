@@ -613,11 +613,10 @@ export const db = {
         if (error) throw error;
         if (!delegates || delegates.length === 0) return [];
 
-        let cq = supabase.from('checkins').select('delegate_id').eq('event_id', eventId).in('delegate_id', delegates.map(d => d.delegate_id));
-        if (sessionId) cq = cq.eq('session_id', sessionId);
-        else cq = cq.is('session_id', null);
-        const { data: checkins } = await cq;
-        const checkedInSet = new Set(checkins?.map(c => c.delegate_id) || []);
+        const { data: allCheckins } = await supabase.from('checkins').select('delegate_id, session_id').eq('event_id', eventId).in('delegate_id', delegates.map(d => d.delegate_id));
+        const checkedInSet = new Set((allCheckins || []).filter(c =>
+            sessionId ? c.session_id === sessionId : c.session_id == null
+        ).map(c => c.delegate_id));
         return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '', code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
     },
 
@@ -757,23 +756,22 @@ export const db = {
         const safeSessionId = sessionId || null;
         const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name, district, chapter').eq('delegate_id', delegateId).maybeSingle();
 
+        const { data: existingCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', eventId).eq('delegate_id', delegateId);
+
         if (safeSessionId) {
-            const { data: arrival } = await supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId).is('session_id', null).maybeSingle();
-            if (!arrival) {
+            const hasArrival = (existingCheckins || []).some(c => c.session_id == null);
+            if (!hasArrival) {
                 const { error: arrivalErr } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: null, checked_in_by: registrar.id });
                 if (arrivalErr && !arrivalErr.message?.includes('duplicate') && arrivalErr.code !== '23505') throw arrivalErr;
             }
         }
 
-        let checkQuery = supabase.from('checkins').select('checkin_id').eq('event_id', eventId).eq('delegate_id', delegateId);
-        if (safeSessionId) {
-          checkQuery = checkQuery.eq('session_id', safeSessionId);
-        } else {
-          checkQuery = checkQuery.is('session_id', null);
-        }
-        const isNewCheckin: boolean = await checkQuery.maybeSingle().then(({ data }) => !data);
-        if (!isNewCheckin) {
+        const isDuplicate = (existingCheckins || []).some(c =>
+            safeSessionId ? c.session_id === safeSessionId : c.session_id == null
+        );
+        if (isDuplicate) {
             const code = generateCodeFromId(delegateId, eventId);
+            console.log('[checkInDelegate] duplicate detected — arrival' + (safeSessionId ? ` + session ${safeSessionId}` : '') + ` — delegate: ${del?.first_name} ${del?.last_name} (${delegateId})`);
             return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
         let actuallyInserted = true;
