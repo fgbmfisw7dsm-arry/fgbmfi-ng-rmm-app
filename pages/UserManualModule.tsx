@@ -59,7 +59,7 @@ const UserManualModule = () => {
                             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">Regional Events Management System (EMS)</p>
                             <div className="mt-6 flex justify-center gap-4">
                                 <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.7</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.8</span>
                             </div>
                         </div>
 
@@ -128,7 +128,7 @@ const UserManualModule = () => {
                                     </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">3</span>
-                                        <span>A green "Verified!" flash confirms success. The delegate's information and 4-digit backup code appear.</span>
+                                        <span>A green "Verified!" flash confirms success. The delegate's information and 4-digit backup code appear. <strong>Duplicate Protection:</strong> If the delegate has already checked in, a red <strong>"Already Checked-in"</strong> stamp appears to prevent double-counting.</span>
                                     </li>
                                 </ol>
                                 <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 2: Manual Lookup</h4>
@@ -162,6 +162,14 @@ const UserManualModule = () => {
                                         </span>
                                     </li>
                                 </ol>
+                                <div className="mt-6 bg-blue-500/10 p-4 rounded-2xl border border-blue-500/30">
+                                    <h4 className="text-xs font-black uppercase text-blue-300 mb-2">How QR Code Resolution Works (4-Pass Lookup)</h4>
+                                    <p className="text-xs text-gray-300 leading-relaxed">When a QR code is scanned, the system performs four sequential lookups: <strong>Pass 1</strong> — matches by UUID QR hash (internal badges). <strong>Pass 2</strong> — matches by external ID (imported delegates). <strong>Pass 3</strong> — matches by delegate ID. <strong>Pass 4</strong> — falls back to the 4-digit deterministic code. All passes are scoped to the active event, ensuring cross-event data isolation.</p>
+                                </div>
+                                <div className="mt-4 bg-red-500/10 p-4 rounded-2xl border border-red-500/30">
+                                    <h4 className="text-xs font-black uppercase text-red-300 mb-2">Duplicate Check-in Prevention</h4>
+                                    <p className="text-xs text-gray-300 leading-relaxed">The system enforces <strong>one arrival per delegate per event</strong>. Scanning a delegate who has already been verified produces a red <strong>"Already Checked-in"</strong> stamp. For session attendance, delegates can be checked into multiple sessions, but never twice into the same session. A unique database constraint prevents duplicates at the server level.</p>
+                                </div>
                             </div>
                         </section>
 
@@ -202,7 +210,8 @@ const UserManualModule = () => {
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>4-Digit Code:</strong> Type the delegate's backup code into the input field — it auto-submits after the 4th digit.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">4.</span> <strong>Manual Lookup:</strong> Search by name or phone, then click "Verify Entry" for the current session.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">5.</span> <strong>Auto-Arrival Cascade:</strong> If the delegate has NOT yet completed Event Arrival check-in, the system automatically records arrival first, then verifies session attendance — all in one scan.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">6.</span> For new visitors not yet in the database, the Quick Registration form provides District and Chapter dropdowns populated from the 25-district, 1,447-chapter registry.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">6.</span> <strong>Duplicate Prevention:</strong> Scanning the same delegate into the same session twice shows a red <strong>"Already Checked-in"</strong> stamp. A delegate can attend multiple sessions but is recorded only once per session.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">7.</span> For new visitors not yet in the database, the Quick Registration form provides District and Chapter dropdowns populated from the 25-district, 1,447-chapter registry.</li>
                                 </ol>
                             </div>
                         </section>
@@ -304,8 +313,8 @@ const UserManualModule = () => {
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Financial Matrix:</strong> A summary of funds collected across all sessions.</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Pledge Summary & Detail:</strong> Per-district pledge summary with pledged/redeemed/balance columns, plus detailed donor-level lists.</span></li>
                                 <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>Sessions Report:</strong> Per-session breakdown with Attendance (ATT), FT, SLV, MI, HGB, and VD totals. The <strong>Alter Call</strong> dropdown filter isolates a specific call type (e.g., show only Salvation responders). Individual records per response type list each delegate with Name, District, Chapter, Phone, Rank, and Office — exportable to CSV via the <strong>"Export CSV"</strong> button for follow-up planning.</span></li>
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>PDF Export:</strong> Switch to your desired report tab and click <strong>"Export PDF"</strong>. The system generates a landscape-oriented document with the active filter settings applied.</span></li>
-                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>CSV Export:</strong> The Delegate Master List supports CSV export for offline processing. Alter Call respondent lists in the Sessions report are individually exportable to CSV.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>PDF Export:</strong> Switch to your desired report tab and click <strong>"Export PDF"</strong>. The system generates a landscape-oriented document with the active filter settings applied. <strong>Full Dataset Export:</strong> PDF and CSV exports now fetch the complete dataset (all pages, not just the current view), ensuring reports include every delegate matching your filter.</span></li>
+                                <li className="flex gap-3"><span className="text-blue-600">•</span> <span><strong>CSV Export:</strong> The Delegate Master List supports CSV export for offline processing with event-config-aware columns (Rank/Office/Type columns included only when enabled for the event). Alter Call respondent lists in the Sessions report are individually exportable to CSV. The filename includes the district name for easy identification.</span></li>
                             </ul>
                         </section>
 
@@ -362,8 +371,39 @@ const UserManualModule = () => {
                                     For each event, Admins can toggle which delegate fields appear in forms and reports: <strong>Show Rank</strong>, <strong>Show Office</strong>, and <strong>Show Delegate Type</strong>. For example, a Convention may hide Rank and Office while a Council Meeting shows them. Changes apply instantly across Dashboard, New Delegate, Master List, Check-In, and Reports.
                                 </div>
                                 <div className="p-4 border rounded-xl bg-gray-50">
-                                    <span className="text-blue-600 block mb-1">CSV IMPORT</span>
-                                    Bulk-import delegates via 10-column CSV (Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType).
+                                    <span className="text-blue-600 block mb-1">CSV IMPORT & SCRAMBLED RECOVERY</span>
+                                    Bulk-import delegates via 10-column CSV (Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType) with fuzzy header matching and column mapping UI. <strong>Scrambled Import Recovery:</strong> If CSV columns become misaligned (e.g., district names appear in the name field), the Import Module provides a <strong>red-bordered recovery section</strong> with: <strong>Analyze</strong> (multi-field anomaly detection with confidence scoring), <strong>Backup JSON</strong> (download), <strong>Repair In-Place</strong> (field remapping + district auto-harmonization), and <strong>Delete All</strong> (cascading removal of scrambled records).
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">PLEDGE NAMES (PER-EVENT)</span>
+                                    Admins can configure <strong>pledge categories</strong> per event via a chip editor in the "Delegate Form Fields" config box. Each pledge name supports inline rename and removal. The Financials New Pledge form shows a dropdown sourced from these categories; empty selection = "General".
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">DISTRICT HARMONIZATION</span>
+                                    Auto-corrects delegate district names against the official list. Resolves abbreviations (e.g., "NC1" → "North Central 1"). If a valid abbreviation maps to a district not yet in the official list, the name is automatically appended to the system settings — no manual intervention needed.
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* Section 09A: Master List Pagination & Bulk Operations */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">9A</span>
+                                Master List: Per-District Pagination & Export
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">The <strong>Master List</strong> (<span className="font-mono bg-gray-100 px-1 rounded">#/admin/delegates</span>) now operates in dual mode for efficient handling of thousands of delegates:</p>
+                            <div className="space-y-4 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">ALL DISTRICTS MODE</span>
+                                    When no specific district is selected and no search term is entered, each official district renders as an independent section with its own 25-row page and First/Prev/Next/Last pagination controls. All districts load in parallel on mount — 20K+ delegates without slowing the page.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">SPECIFIC DISTRICT / SEARCH MODE</span>
+                                    Selecting a district or entering a search term switches to a unified table with shared pagination. Client-side sorting guarantees alphabetical surname ordering, so spouses appear together.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">FULL-DATASET PDF & CSV EXPORT</span>
+                                    Export buttons fetch the complete dataset (all pages, 500 delegates at a time) before generating the PDF or CSV file. The filename includes the district name or "All-Districts". Buttons show "Exporting..." with a loading state during the fetch.
                                 </div>
                             </div>
                         </section>
@@ -437,7 +477,17 @@ const UserManualModule = () => {
                                 </div>
 
                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 3: The "Forgotten Code" Member</h4>
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 3: The "Already Checked-in" Delegate</h4>
+                                    <p className="text-sm text-gray-600 italic">"I've already been verified but someone is scanning me again."</p>
+                                    <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
+                                        <p>1. Scan the QR code or enter the 4-digit code.</p>
+                                        <p>2. System detects the duplicate and shows a red <strong>"Already Checked-in"</strong> stamp.</p>
+                                        <p>3. No duplicate record is created — the delegate only counts once.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 4: The "Forgotten Code" Member</h4>
                                     <p className="text-sm text-gray-600 italic">"I forgot my code or lost my slip."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
                                         <p>1. Use the "Database Lookup" search bar.</p>
@@ -447,7 +497,7 @@ const UserManualModule = () => {
                                 </div>
 
                                 <div className="p-6 bg-blue-900 text-white rounded-2xl shadow-xl">
-                                    <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 4: The "New Visitor" (External)</h4>
+                                    <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 5: The "New Visitor" (External)</h4>
                                     <p className="text-sm text-gray-300 italic">"I'm from a different region/national office and not in the database."</p>
                                     <div className="mt-3 text-[11px] font-black uppercase space-y-1">
                                         <p>1. Scan the badge QR — system opens Quick Registration form.</p>
@@ -458,14 +508,15 @@ const UserManualModule = () => {
                                 </div>
 
                                 <div className="p-6 bg-green-900 text-white rounded-2xl shadow-xl mt-6">
-                                    <h4 className="text-xs font-black text-green-400 uppercase mb-2">Scenario 5: The "Altar Call Response" Recording</h4>
+                                    <h4 className="text-xs font-black text-green-400 uppercase mb-2">Scenario 6: The "Altar Call Response" Recording</h4>
                                     <p className="text-sm text-gray-300 italic">"A delegate has responded to the altar call — I need to record it."</p>
                                     <div className="mt-3 text-[11px] font-black uppercase space-y-1">
                                         <p>1. Go to <strong>"Session Details"</strong> page (sidebar).</p>
                                         <p>2. Select the active session. Choose the response type: FT/SLV/MI/HGB.</p>
                                         <p>3. Scan the delegate's QR code — the response is recorded instantly.</p>
-                                        <p>4. For open-air sessions (MPO/FTO), use <strong>"Enter Total"</strong> to record aggregate headcounts.</p>
-                                        <p>5. Enter Voice Distribution totals at the bottom of the page.</p>
+                                        <p>4. A delegate can respond to multiple different altar calls but only once per type per session.</p>
+                                        <p>5. For open-air sessions (MPO/FTO), use <strong>"Enter Total"</strong> to record aggregate headcounts.</p>
+                                        <p>6. Enter Voice Distribution totals at the bottom of the page.</p>
                                     </div>
                                 </div>
                             </div>
@@ -508,6 +559,10 @@ const UserManualModule = () => {
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure you have selected a "Session" (e.g. Banquet) for fast check-in. Master arrival uses manual lookup.</p>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: "Already Checked-in" appears in red!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: This delegate has already completed arrival verification. No action needed — the system prevents double-counting. If they need a session check-in, switch to a session from the dropdown and scan again.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: Mistake in Registration!</p>
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Only Admins can edit Master List records. Call the System Admin to fix typos in the Master List module.</p>
                                 </div>
@@ -543,7 +598,7 @@ const UserManualModule = () => {
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>© 2025 FGBMFI Nigeria EMS</span>
-                    <span>Document: EMS-USER-V2.7</span>
+                    <span>Document: EMS-USER-V2.8</span>
                     <span>System Training & Operations Reference</span>
                 </div>
             </div>
