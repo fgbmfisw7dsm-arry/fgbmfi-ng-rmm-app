@@ -557,7 +557,7 @@ const CheckInPage = () => {
       setPendingReg(null);
       setCode('');
       setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
-      setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.success ? (res.alreadyCheckedIn ? 'Already Verified' : 'Registered & Verified!') : 'Registered but check-in failed.' });
+      setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.success ? (res.alreadyCheckedIn ? 'Already Checked-in' : 'Registered & Verified!') : 'Registered but check-in failed.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
       setFeedback({ type: 'error', msg: e.message || 'Registration failed.' });
@@ -771,7 +771,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                         {d.verifiedLocally ? (
                           <span className="px-6 py-2 bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-green-100 animate-in zoom-in">Verified</span>
                         ) : (
-                          <span className="px-6 py-2 bg-red-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-red-100 animate-in zoom-in">Already Verified</span>
+                          <span className="px-6 py-2 bg-red-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-red-100 animate-in zoom-in">Already Checked-in</span>
                         )}
                         <div className="flex items-center gap-3">
                           <canvas 

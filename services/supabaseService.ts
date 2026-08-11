@@ -774,7 +774,7 @@ export const db = {
         const isNewCheckin: boolean = await checkQuery.maybeSingle().then(({ data }) => !data);
         if (!isNewCheckin) {
             const code = generateCodeFromId(delegateId, eventId);
-            return { success: true, message: 'Already Verified', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+            return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
         let actuallyInserted = true;
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
@@ -793,7 +793,7 @@ export const db = {
         }
 
         const code = generateCodeFromId(delegateId, eventId);
-        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Verified', alreadyCheckedIn: !actuallyInserted, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         });
     },
 
