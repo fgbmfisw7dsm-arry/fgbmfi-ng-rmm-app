@@ -142,6 +142,209 @@ const ReportsPage = () => {
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
+    const handleExportCSV = () => {
+        if (!reportData) return;
+        const filename = `FGBMFI_Report_${activeTab}.csv`;
+
+        if (activeTab === 'attendanceList') {
+            const cols = ['S/N', 'Name', 'District', 'Chapter'];
+            if (showOffice) cols.push('Office');
+            if (showRank) cols.push('Rank');
+            if (showDelegateType) cols.push('Type');
+            cols.push('Phone', 'Date', 'Time');
+            const unrecognizedDists: string[] = [];
+            attendedDelegates.forEach((d: any) => {
+                const dn = norm(d.district);
+                if (dn && !officialDistricts.some(od => norm(od) === dn) && !unrecognizedDists.some(u => norm(u) === dn)) unrecognizedDists.push(d.district);
+            });
+            const distOrder = [...officialDistricts, ...unrecognizedDists.sort()];
+            const rows: Record<string, any>[] = [];
+            distOrder.forEach(distName => {
+                attendedDelegates.filter((d: any) => norm(d.district) === norm(distName)).forEach((d: any, i: number) => {
+                    const dt = d.checked_in_at ? new Date(d.checked_in_at) : null;
+                    rows.push({
+                        'S/N': i + 1,
+                        Name: `${d.title || ''} ${d.first_name} ${d.last_name}`.trim(),
+                        District: d.district || '-',
+                        Chapter: d.chapter || '-',
+                        Office: d.office || '-',
+                        Rank: d.rank || '-',
+                        Type: d.delegate_type || 'Member',
+                        Phone: d.phone || '-',
+                        Date: dt ? dt.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : '-',
+                        Time: dt ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
+                    });
+                });
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'attendanceMatrix') {
+            const allDists: string[] = [...officialDistricts];
+            attendedDelegates.forEach((d: any) => {
+                const dn = norm(d.district);
+                if (dn && !allDists.some(od => norm(od) === dn)) allDists.push(d.district);
+            });
+            const matrices: { label: string; columns: string[]; getValue: (d: any) => string }[] = [];
+            if (showRank) matrices.push({ label: 'Attendance By Rank', columns: rankColumns, getValue: (d: any) => d.rank });
+            if (showOffice) matrices.push({ label: 'Attendance By Office', columns: officeColumns, getValue: (d: any) => d.office });
+            if (showDelegateType) matrices.push({ label: 'Attendance By Delegate Type', columns: delegateTypeColumns, getValue: (d: any) => d.delegate_type });
+            const unionCols = Array.from(new Set(matrices.flatMap(m => m.columns)));
+            const cols = ['Matrix', 'District', ...unionCols, 'Total'];
+            const rows: Record<string, any>[] = [];
+            matrices.forEach(m => {
+                const colTotals: Record<string, number> = {};
+                let grandTotal = 0;
+                allDists.forEach(distName => {
+                    const dels = attendedDelegates.filter((d: any) => norm(d.district) === norm(distName));
+                    if (dels.length === 0) return;
+                    grandTotal += dels.length;
+                    const row: Record<string, any> = { Matrix: m.label, District: distName, Total: dels.length };
+                    m.columns.forEach(col => {
+                        const count = dels.filter((d: any) => norm(m.getValue(d)) === norm(col)).length;
+                        colTotals[col] = (colTotals[col] || 0) + count;
+                        row[col] = count || 0;
+                    });
+                    rows.push(row);
+                });
+                const totalsRow: Record<string, any> = { Matrix: m.label, District: 'Entity Totals', Total: grandTotal };
+                m.columns.forEach(col => { totalsRow[col] = colTotals[col] || 0; });
+                rows.push(totalsRow);
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'sessionsSummary') {
+            const cols = ['Session', 'Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD', 'Offering', 'Pledge Redemption', 'Financial Total'];
+            const attOf = (sid: string) => (data?.checkins || []).filter((c: any) => c.session_id === sid).length;
+            const respOf = (sid: string, type: SessionResponseType) => (ministryData?.responses || []).filter((r: any) => r.session_id === sid && r.response_type === type).length;
+            const vdOf = (sid: string) => (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === sid).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
+            const offOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+            const redOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+            const rows: Record<string, any>[] = sessions.map(s => {
+                const offering = offOf(s.session_id);
+                const redemption = redOf(s.session_id);
+                return {
+                    Session: s.title,
+                    Attendance: attOf(s.session_id),
+                    FT: respOf(s.session_id, SessionResponseType.FT),
+                    SLV: respOf(s.session_id, SessionResponseType.SLV),
+                    MI: respOf(s.session_id, SessionResponseType.MI),
+                    HGB: respOf(s.session_id, SessionResponseType.HGB),
+                    VD: vdOf(s.session_id),
+                    Offering: offering,
+                    'Pledge Redemption': redemption,
+                    'Financial Total': offering + redemption,
+                };
+            });
+            const totals: Record<string, any> = { Session: 'Totals' };
+            (['Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD'] as const).forEach(k => totals[k] = rows.reduce((s, r) => s + Number(r[k]) || 0, 0));
+            totals['Offering'] = sessions.reduce((s, sess) => s + offOf(sess.session_id), 0);
+            totals['Pledge Redemption'] = sessions.reduce((s, sess) => s + redOf(sess.session_id), 0);
+            totals['Financial Total'] = totals['Offering'] + totals['Pledge Redemption'];
+            rows.push(totals);
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'financialMatrix') {
+            const cols = ['Category', ...sessions.map(s => s.title), 'Total'];
+            const rows: Record<string, any>[] = [FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
+                const row: Record<string, any> = { Category: type.replace('_', ' ') };
+                let total = 0;
+                sessions.forEach(s => {
+                    const amt = reportData.financials.filter((f: any) => f.type === type && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+                    total += amt;
+                    row[s.title] = amt;
+                });
+                row['Total'] = total;
+                return row;
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'pledgeSummary') {
+            const cols = ['Group', 'Name', 'Pledges', 'Pledged', 'Redeemed', 'Balance'];
+            const rows: Record<string, any>[] = [];
+            officialDistricts.forEach(dist => {
+                const ps = pledges.filter((p: any) => norm(p.district) === norm(dist));
+                const pld = ps.reduce((s: number, p: any) => s + Number(p.amount_pledged), 0);
+                const red = ps.reduce((s: number, p: any) => s + Number(p.amount_redeemed), 0);
+                if (pld === 0) return;
+                rows.push({ Group: 'District', Name: dist, Pledges: ps.length, Pledged: pld, Redeemed: red, Balance: pld - red });
+            });
+            const nameTotals = new Map<string, { count: number; pld: number; red: number }>();
+            pledges.forEach((p: any) => {
+                const key = p.pledge_name || 'General';
+                const cur = nameTotals.get(key) || { count: 0, pld: 0, red: 0 };
+                cur.count += 1;
+                cur.pld += Number(p.amount_pledged) || 0;
+                cur.red += Number(p.amount_redeemed) || 0;
+                nameTotals.set(key, cur);
+            });
+            Array.from(nameTotals.entries()).sort((a, b) => b[1].pld - a[1].pld).forEach(([name, t]) => {
+                rows.push({ Group: 'Pledge Name', Name: name, Pledges: t.count, Pledged: t.pld, Redeemed: t.red, Balance: t.pld - t.red });
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'pledgeList') {
+            const cols = ['District', 'Donor', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+            const rows: Record<string, any>[] = [];
+            officialDistricts.forEach(dist => {
+                const ps = pledges.filter((p: any) => norm(p.district) === norm(dist)).sort((a: any, b: any) => (a.donor_name || '').localeCompare(b.donor_name || ''));
+                ps.forEach(p => {
+                    rows.push({
+                        District: dist,
+                        Donor: p.donor_name,
+                        'Pledge Name': p.pledge_name || 'General',
+                        Pledged: Number(p.amount_pledged) || 0,
+                        Redeemed: Number(p.amount_redeemed) || 0,
+                        Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0),
+                    });
+                });
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+
+        if (activeTab === 'ministryReport') {
+            const cols = ['Session', 'Response Type', 'S/N', 'Name', 'District', 'Chapter', 'Phone'];
+            if (showRank) cols.push('Rank');
+            if (showOffice) cols.push('Office');
+            if (showDelegateType) cols.push('Type');
+            const types = alterCallFilter ? [alterCallFilter] : [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
+            const sessionsFiltered = sessions.filter(s => !selectedSessionId || s.session_id === selectedSessionId);
+            const rows: Record<string, any>[] = [];
+            sessionsFiltered.forEach(s => {
+                types.forEach(type => {
+                    const scanned = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === type);
+                    if (alterCallFilter && scanned.length === 0) return;
+                    scanned.forEach((r: any, i: number) => {
+                        rows.push({
+                            Session: s.title,
+                            'Response Type': RESPONSE_TYPE_LABELS[type],
+                            'S/N': i + 1,
+                            Name: r.delegate_name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+                            District: r.district || '-',
+                            Chapter: r.chapter || '-',
+                            Phone: r.phone || '-',
+                            Rank: r.rank || '-',
+                            Office: r.office || '-',
+                            Type: r.delegate_type || '-',
+                        });
+                    });
+                });
+            });
+            exportToCSV(rows, filename, cols);
+            return;
+        }
+    };
+
     const renderMinistryReport = () => {
         if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading sessions data...</div>;
         const { responses, summaries, voiceDistribution } = ministryData;
@@ -432,6 +635,7 @@ const ReportsPage = () => {
                             <option value={SessionResponseType.HGB}>{RESPONSE_TYPE_LABELS[SessionResponseType.HGB]}</option>
                         </select>
                     )}
+                    <button onClick={handleExportCSV} className="px-6 py-3 bg-green-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-700 transition-colors">Export CSV</button>
                     <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
                 </div>
             </div>
