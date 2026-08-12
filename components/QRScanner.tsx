@@ -74,8 +74,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
       const videoConstraints: any = {
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        focusMode: { ideal: 'continuous' }
       };
       if (deviceId) {
         videoConstraints.deviceId = { ideal: deviceId };
@@ -99,6 +100,21 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         const capabilities = track.getCapabilities ? track.getCapabilities() : null;
         if (capabilities) {
           log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
+          const capsMsg: string[] = [];
+          if (capabilities.focusMode) capsMsg.push(`focus=${(capabilities.focusMode as string[]).join(',')}`);
+          if (capabilities.focusDistance) capsMsg.push(`distance=${capabilities.focusDistance.min}-${capabilities.focusDistance.max}`);
+          if (capsMsg.length) log(`Capabilities: ${capsMsg.join(', ')}`);
+          if (capabilities.focusDistance) {
+            try {
+              await track.applyConstraints({ advanced: [{ focusDistance: capabilities.focusDistance.min } as any] });
+              log(`Focus set to min: ${capabilities.focusDistance.min}`);
+            } catch {}
+          }
+          if (capabilities.exposureMode) {
+            try {
+              await track.applyConstraints({ advanced: [{ exposureMode: 'continuous' } as any] });
+            } catch {}
+          }
         }
       }
 
@@ -108,11 +124,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-      log('BarcodeDetector active (120ms), hold badge closer...');
+      log('BarcodeDetector active (80ms), hold badge in focus zone...');
 
       attemptsRef.current = 0;
+      let detecting = false;
       intervalRef.current = setInterval(async () => {
-        if (!mountedRef.current || !videoRef.current) return;
+        if (detecting || !mountedRef.current || !videoRef.current) return;
+        detecting = true;
         attemptsRef.current++;
         try {
           const codes = await detector.detect(videoRef.current);
@@ -121,11 +139,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
             setScanning(false);
             onScanRef.current(codes[0].rawValue.trim());
-          } else if (attemptsRef.current % 40 === 0) {
-            log(`Scanning... ${attemptsRef.current} attempts, try moving badge closer`);
+          } else if (attemptsRef.current % 80 === 0) {
+            log(`Scanning... ${attemptsRef.current} attempts, hold badge in focus zone`);
           }
         } catch (_e) {}
-      }, 120);
+        detecting = false;
+      }, 80);
     } catch (e: any) {
       if (mountedRef.current) {
         const msg = e.message || '';
@@ -180,9 +199,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       await scanner.start(
         cameraId,
         {
-          fps: 15,
+          fps: 20,
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.55;
+            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
             return { width: size, height: size };
           }
         },
@@ -194,7 +213,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         },
         () => {}
       );
-      log('html5-qrcode active (15fps)');
+      log('html5-qrcode active (20fps)');
       html5ScannerRef.current = scanner;
       refreshCameras();
     } catch (e: any) {
@@ -332,11 +351,27 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         <div className="relative flex-1 md:h-72">
           <div id="qr-scanner-view" className="absolute inset-0" />
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-[32px]">
+              <div className="absolute top-0 left-0 w-5 h-5 border-t-[3px] border-l-[3px] border-cyan-300/80 rounded-tl" />
+              <div className="absolute top-0 right-0 w-5 h-5 border-t-[3px] border-r-[3px] border-cyan-300/80 rounded-tr" />
+              <div className="absolute bottom-0 left-0 w-5 h-5 border-b-[3px] border-l-[3px] border-cyan-300/80 rounded-bl" />
+              <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
+            </div>
+          </div>
         </div>
       ) : (
         <div className="relative flex-1 md:h-72">
           <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: 'cover' }} playsInline autoPlay muted />
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-[32px]">
+              <div className="absolute top-0 left-0 w-5 h-5 border-t-[3px] border-l-[3px] border-cyan-300/80 rounded-tl" />
+              <div className="absolute top-0 right-0 w-5 h-5 border-t-[3px] border-r-[3px] border-cyan-300/80 rounded-tr" />
+              <div className="absolute bottom-0 left-0 w-5 h-5 border-b-[3px] border-l-[3px] border-cyan-300/80 rounded-bl" />
+              <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
+            </div>
+          </div>
           <div className="absolute top-4 left-4 right-4">
             {debugInfo.length > 0 && (
               <div className="bg-black/50 rounded-lg p-1.5">
