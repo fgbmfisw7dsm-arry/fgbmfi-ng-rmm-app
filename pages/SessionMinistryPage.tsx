@@ -141,7 +141,7 @@ const SessionMinistryPage: React.FC = () => {
         setFeedback({ type: 'success', msg: 'Recorded!' });
         setTimeout(() => setFeedback(null), 2000);
       } else {
-        setFeedback({ type: 'error', msg: res.message || 'Already recorded.' });
+        setFeedback({ type: 'error', msg: res.message || 'Already Recorded' });
         setTimeout(() => setFeedback(null), 3000);
       }
     } catch (e: any) {
@@ -503,7 +503,7 @@ const SessionMinistryPage: React.FC = () => {
             const isRecorded = d.recorded;
             return (
               <div key={d.delegate_id} className={`bg-white p-6 rounded-2xl border-2 flex flex-col md:flex-row gap-4 justify-between items-center shadow-sm transition-all ${
-                isRecorded ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-500 border-gray-50'
+                isRecorded ? 'bg-red-50 border-red-200 scale-[0.98]' : 'hover:border-blue-500 border-gray-50'
               }`}>
                 <div className="flex-1 w-full text-left">
                   <div className="flex items-center flex-wrap gap-2">
@@ -514,7 +514,7 @@ const SessionMinistryPage: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-4 w-full md:w-auto justify-end">
                   {isRecorded ? (
-                    <span className="px-6 py-2 bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-green-100">Recorded</span>
+                    <span className="px-6 py-2 bg-red-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-red-100">Already Recorded</span>
                   ) : (
                     <button
                       onClick={() => handleRecord(d.delegate_id)}

@@ -1625,7 +1625,7 @@ export const db = {
                 .eq('session_id', sessionId).eq('response_type', responseType)
                 .maybeSingle();
             if (existing) {
-                return { success: false, message: 'Already recorded' };
+                return { success: false, message: 'Already Recorded' };
             }
 
             const { error } = await supabase.from('session_responses').insert({
@@ -1634,7 +1634,7 @@ export const db = {
             });
             if (error) {
                 if (error.message?.includes('duplicate') || error.code === '23505') {
-                    return { success: false, message: 'Already recorded' };
+                    return { success: false, message: 'Already Recorded' };
                 }
                 throw error;
             }
