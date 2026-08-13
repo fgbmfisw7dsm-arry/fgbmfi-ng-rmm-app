@@ -44,6 +44,9 @@ const ADMIN_AND_FINANCE: UserRole[] = [
 const ADMIN_AND_EVENT_ADMIN: UserRole[] = [
   ...ALL_ADMIN_ROLES, UserRole.EVENT_ADMIN
 ];
+const ADMIN_FINANCE_AND_EVENT_ADMIN: UserRole[] = [
+  ...ADMIN_AND_FINANCE, UserRole.EVENT_ADMIN
+];
 const ADMIN_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
   ...ADMIN_AND_REGISTRAR, UserRole.EVENT_ADMIN
 ];
@@ -222,7 +225,7 @@ const AppContent = () => {
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/admin/reports" element={<ReportsPage />} />
                     <Route path="/admin/financials" element={
-                      <ProtectedRoute allowedRoles={ADMIN_AND_FINANCE}><FinancialsPage /></ProtectedRoute>
+                      <ProtectedRoute allowedRoles={ADMIN_FINANCE_AND_EVENT_ADMIN}><FinancialsPage /></ProtectedRoute>
                     } />
                      <Route path="/checkin" element={
                        <ProtectedRoute allowedRoles={ADMIN_REGISTRAR_AND_EVENT_ADMIN}><CheckInPage /></ProtectedRoute>

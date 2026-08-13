@@ -49,7 +49,7 @@ const getRoleLabel = () => {
    const registrarRole = isRegistrarRole(role);
    const eventAdminRole = isEventAdminRole(role);
    const showAdminTools = adminRole;
-   const showFinanceModule = adminRole || role === UserRole.FINANCE;
+   const showFinanceModule = adminRole || role === UserRole.FINANCE || eventAdminRole;
    const showCheckInModule = adminRole || registrarRole || eventAdminRole;
    const showBadgeModule = adminRole || eventAdminRole;
 
