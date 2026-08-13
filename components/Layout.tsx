@@ -109,6 +109,9 @@ const getRoleLabel = () => {
                <Link to="/admin/delegates" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/delegates')}`}>
                  Master List
                </Link>
+               <Link to="/admin/import" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/import')}`}>
+                 Import Data
+               </Link>
             </MenuSection>
           )}
 

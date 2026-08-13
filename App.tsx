@@ -243,7 +243,7 @@ const AppContent = () => {
                       <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><UsersModule /></ProtectedRoute>
                     } />
                     <Route path="/admin/import" element={
-                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><ImportModule /></ProtectedRoute>
+                      <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><ImportModule /></ProtectedRoute>
                     } />
                     <Route path="/admin/setup" element={
                       <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><SetupModule /></ProtectedRoute>

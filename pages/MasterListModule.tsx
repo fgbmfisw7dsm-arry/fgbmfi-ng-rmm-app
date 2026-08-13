@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { Delegate, SystemSettings, Chapter, isAdminRole } from '../types';
+import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole } from '../types';
 import { exportToPDF, exportToCSV } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -11,7 +11,7 @@ const PAGE_SIZE = 25;
 
 const MasterListModule = () => {
     const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
-    const isAdmin = isAdminRole((user?.role || '').toLowerCase());
+    const isAdmin = isAdminRole((user?.role || '').toLowerCase()) || isEventAdminRole((user?.role || '').toLowerCase());
 
     useEffect(() => {
         if (!activeEventId && Array.isArray(events)) {

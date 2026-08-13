@@ -3,7 +3,7 @@ import React, { useState, useContext, useMemo, useRef } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
-import { isAdminRole } from '../types';
+import { isAdminRole, isEventAdminRole } from '../types';
 import { exportToCSV } from '../services/utils';
 
 const KNOWN_TITLES = new Set([
@@ -39,9 +39,11 @@ function parseFullName(fullName: string): { title: string; firstName: string; la
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
-    const isAdmin = isAdminRole((user?.role || '').toLowerCase());
+    const role = (user?.role || '').toLowerCase();
+    const isAdmin = isAdminRole(role);
+    const canAccess = isAdmin || isEventAdminRole(role);
 
-    if (!isAdmin) {
+    if (!canAccess) {
         return (
             <div className="min-h-screen bg-gray-100 flex items-center justify-center p-8">
                 <div className="bg-white p-10 rounded-2xl shadow-xl border border-red-100 max-w-md w-full text-center space-y-4">
@@ -542,7 +544,8 @@ const ImportModule = () => {
                     </div>
                 )}
 
-                {/* --- SCRAMBLED IMPORT RECOVERY --- */}
+                {/* --- SCRAMBLED IMPORT RECOVERY (admin-only) --- */}
+                {isAdmin && (
                 <div className="p-4 mb-6 rounded-2xl border-2 border-red-200 bg-red-50">
                     <div className="flex justify-between items-center mb-2">
                         <div>
@@ -683,6 +686,7 @@ const ImportModule = () => {
                         </div>
                     )}
                 </div>
+                )}
 
                 <div className="space-y-4">
                     <div className="flex justify-between items-end px-2">
