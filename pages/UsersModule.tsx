@@ -277,6 +277,7 @@ const UsersModule = () => {
                             <option value={UserRole.DISTRICT_REGISTRAR}>District Registrar</option>
                             <option value={UserRole.REGISTRAR}>Registrar (Legacy)</option>
                             <option value={UserRole.FINANCE}>Finance Admin</option>
+                            <option value={UserRole.EVENT_ADMIN}>Event Admin</option>
                         </select>
                     </div>
 
@@ -405,8 +406,8 @@ const UsersModule = () => {
                                 <div className="min-w-0 flex-1 w-full">
                                     <div className="flex items-center gap-3 mb-1 flex-wrap">
                                         <span className={`font-black uppercase text-lg tracking-tight truncate max-w-[320px] ${isInactive ? 'text-gray-400 line-through' : 'text-blue-900'}`} title={u.email}>{u.email}</span>
-                                        <span className={`px-2.5 py-1 rounded-lg font-black uppercase text-[8px] tracking-widest shadow-sm ${u.role === UserRole.NATIONAL_ADMIN ? 'bg-blue-900 text-white' : u.role === UserRole.REGIONAL_ADMIN ? 'bg-blue-700 text-white' : u.role === UserRole.DISTRICT_ADMIN ? 'bg-blue-500 text-white' : u.role === 'admin' ? 'bg-blue-900 text-white' : u.role === 'finance' ? 'bg-purple-600 text-white' : 'bg-slate-500 text-white'}`}>
-                                            {u.role === UserRole.NATIONAL_ADMIN ? 'Nat. Admin' : u.role === UserRole.REGIONAL_ADMIN ? 'Reg. Admin' : u.role === UserRole.DISTRICT_ADMIN ? 'Dist. Admin' : u.role === UserRole.NATIONAL_REGISTRAR ? 'Nat. Reg' : u.role === UserRole.REGIONAL_REGISTRAR ? 'Reg. Reg' : u.role === UserRole.DISTRICT_REGISTRAR ? 'Dist. Reg' : u.role === UserRole.ADMIN ? 'Sys Admin' : u.role === UserRole.REGISTRAR ? 'Registrar' : u.role.toUpperCase()}
+                                        <span className={`px-2.5 py-1 rounded-lg font-black uppercase text-[8px] tracking-widest shadow-sm ${u.role === UserRole.NATIONAL_ADMIN ? 'bg-blue-900 text-white' : u.role === UserRole.REGIONAL_ADMIN ? 'bg-blue-700 text-white' : u.role === UserRole.DISTRICT_ADMIN ? 'bg-blue-500 text-white' : u.role === 'admin' ? 'bg-blue-900 text-white' : u.role === 'finance' ? 'bg-purple-600 text-white' : u.role === UserRole.EVENT_ADMIN ? 'bg-emerald-600 text-white' : 'bg-slate-500 text-white'}`}>
+                                            {u.role === UserRole.NATIONAL_ADMIN ? 'Nat. Admin' : u.role === UserRole.REGIONAL_ADMIN ? 'Reg. Admin' : u.role === UserRole.DISTRICT_ADMIN ? 'Dist. Admin' : u.role === UserRole.NATIONAL_REGISTRAR ? 'Nat. Reg' : u.role === UserRole.REGIONAL_REGISTRAR ? 'Reg. Reg' : u.role === UserRole.DISTRICT_REGISTRAR ? 'Dist. Reg' : u.role === UserRole.ADMIN ? 'Sys Admin' : u.role === UserRole.REGISTRAR ? 'Registrar' : u.role === UserRole.EVENT_ADMIN ? 'Event Admin' : u.role.toUpperCase()}
                                         </span>
                                         {isInactive && (
                                             <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded-md font-black uppercase text-[7px] tracking-wider">Deactivated</span>

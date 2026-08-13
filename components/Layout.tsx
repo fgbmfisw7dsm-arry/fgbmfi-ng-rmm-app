@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { User, UserRole, isAdminRole, isRegistrarRole, isNationalRole, isRegionalRole, isDistrictRole } from '../types';
+import { User, UserRole, isAdminRole, isRegistrarRole, isEventAdminRole, isNationalRole, isRegionalRole, isDistrictRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import ConnectionStatus from './ConnectionStatus';
@@ -36,9 +36,10 @@ const getRoleLabel = () => {
            case UserRole.NATIONAL_REGISTRAR: return 'National Registrar';
            case UserRole.REGIONAL_REGISTRAR: return 'Regional Registrar';
            case UserRole.DISTRICT_REGISTRAR: return 'District Registrar';
-           case UserRole.ADMIN: return 'System Admin';
+            case UserRole.ADMIN: return 'System Admin';
             case UserRole.REGISTRAR: return 'Registrar';
            case UserRole.FINANCE: return 'Finance Admin';
+           case UserRole.EVENT_ADMIN: return 'Event Admin';
            default: return 'User';
        }
    };
@@ -46,9 +47,11 @@ const getRoleLabel = () => {
    const role = (user.role || '').toLowerCase();
    const adminRole = isAdminRole(role);
    const registrarRole = isRegistrarRole(role);
+   const eventAdminRole = isEventAdminRole(role);
    const showAdminTools = adminRole;
    const showFinanceModule = adminRole || role === UserRole.FINANCE;
-   const showCheckInModule = adminRole || registrarRole;
+   const showCheckInModule = adminRole || registrarRole || eventAdminRole;
+   const showBadgeModule = adminRole || eventAdminRole;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">
@@ -84,13 +87,15 @@ const getRoleLabel = () => {
                   <Link to="/ministry" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/ministry')}`}>
                     Session Details
                   </Link>
-                  <Link to="/admin/badges" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/badges')}`}>
-                    Badge Printing
-                  </Link>
                   <Link to="/register-new" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/register-new')}`}>
                     New Delegate
                   </Link>
                 </>
+             )}
+             {showBadgeModule && (
+                <Link to="/admin/badges" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/badges')}`}>
+                  Badge Printing
+                </Link>
              )}
              {showFinanceModule && (
                 <Link to="/admin/financials" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/financials')}`}>
@@ -98,6 +103,14 @@ const getRoleLabel = () => {
                 </Link>
              )}
           </MenuSection>
+
+          {eventAdminRole && !adminRole && (
+            <MenuSection title="Delegates">
+               <Link to="/admin/delegates" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/delegates')}`}>
+                 Master List
+               </Link>
+            </MenuSection>
+          )}
 
           {showAdminTools && (
             <MenuSection title="Administration">

@@ -19,6 +19,7 @@ const getRoleLabel = (role: string): string => {
     case UserRole.ADMIN: return 'System Admin';
     case UserRole.REGISTRAR: return 'Registrar';
     case UserRole.FINANCE: return 'Finance Admin';
+    case UserRole.EVENT_ADMIN: return 'Event Admin';
     default: return 'User';
   }
 };

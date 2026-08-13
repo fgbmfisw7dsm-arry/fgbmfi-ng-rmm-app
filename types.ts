@@ -35,7 +35,8 @@ export enum UserRole {
   DISTRICT_REGISTRAR = 'district_registrar',
   ADMIN = 'admin',
   REGISTRAR = 'registrar',
-  FINANCE = 'finance'
+  FINANCE = 'finance',
+  EVENT_ADMIN = 'event_admin'
 }
 
 export const isAdminRole = (role: string): boolean =>
@@ -43,6 +44,9 @@ export const isAdminRole = (role: string): boolean =>
 
 export const isRegistrarRole = (role: string): boolean =>
   role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR;
+
+export const isEventAdminRole = (role: string): boolean =>
+  role === UserRole.EVENT_ADMIN;
 
 export const isNationalRole = (role: string): boolean =>
   role === UserRole.NATIONAL_ADMIN || role === UserRole.NATIONAL_REGISTRAR;
@@ -56,7 +60,7 @@ export const isDistrictRole = (role: string): boolean =>
 export const getScopeFilter = (user: { role?: string; district?: string; region?: string } | null): { district?: string; region?: string } => {
   if (!user) return {};
   const role = (user.role || '').toLowerCase();
-  if (isAdminRole(role) || role === UserRole.FINANCE) return {};
+  if (isAdminRole(role) || isEventAdminRole(role) || role === UserRole.FINANCE) return {};
   if (isNationalRole(role)) return {};
   if (isRegionalRole(role)) return user.region ? { region: user.region } : {};
   return user.district ? { district: user.district } : {};

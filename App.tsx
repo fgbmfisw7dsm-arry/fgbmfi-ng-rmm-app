@@ -41,6 +41,12 @@ const ADMIN_AND_REGISTRAR: UserRole[] = [
 const ADMIN_AND_FINANCE: UserRole[] = [
   ...ALL_ADMIN_ROLES, UserRole.FINANCE
 ];
+const ADMIN_AND_EVENT_ADMIN: UserRole[] = [
+  ...ALL_ADMIN_ROLES, UserRole.EVENT_ADMIN
+];
+const ADMIN_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
+  ...ADMIN_AND_REGISTRAR, UserRole.EVENT_ADMIN
+];
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -219,16 +225,16 @@ const AppContent = () => {
                       <ProtectedRoute allowedRoles={ADMIN_AND_FINANCE}><FinancialsPage /></ProtectedRoute>
                     } />
                      <Route path="/checkin" element={
-                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><CheckInPage /></ProtectedRoute>
+                       <ProtectedRoute allowedRoles={ADMIN_REGISTRAR_AND_EVENT_ADMIN}><CheckInPage /></ProtectedRoute>
                      } />
                      <Route path="/ministry" element={
-                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><SessionMinistryPage /></ProtectedRoute>
+                       <ProtectedRoute allowedRoles={ADMIN_REGISTRAR_AND_EVENT_ADMIN}><SessionMinistryPage /></ProtectedRoute>
                      } />
                      <Route path="/register-new" element={
-                      <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><NewDelegatePage /></ProtectedRoute>
+                       <ProtectedRoute allowedRoles={ADMIN_REGISTRAR_AND_EVENT_ADMIN}><NewDelegatePage /></ProtectedRoute>
                     } />
                     <Route path="/admin/delegates" element={
-                      <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><MasterListModule /></ProtectedRoute>
+                      <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><MasterListModule /></ProtectedRoute>
                     } />
                     <Route path="/admin/events" element={
                       <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><EventsModule /></ProtectedRoute>
@@ -252,7 +258,7 @@ const AppContent = () => {
                        <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><AuditLogPage /></ProtectedRoute>
                      } />
                      <Route path="/admin/badges" element={
-                       <ProtectedRoute allowedRoles={ADMIN_AND_REGISTRAR}><BadgePrintingModule /></ProtectedRoute>
+                       <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><BadgePrintingModule /></ProtectedRoute>
                      } />
                      <Route path="/help" element={<UserManualModule />} />
                     <Route path="/" element={<Navigate to="/admin" replace />} />

@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, RESPONSE_TYPE_LABELS } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
 import { generateCodeFromId, generateQrHash, generateRegId } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
@@ -505,6 +505,32 @@ export const db = {
 
     getUsers: async (): Promise<User[]> => 
         handleSupabaseError(await supabase.from('app_users').select('*')),
+
+    getAuditLogs: async (params: { eventId?: string; systemOnly?: boolean; actionFilter?: string }, page: number = 1, pageSize: number = 25): Promise<{ rows: AuditLog[]; count: number }> => {
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+        let q = supabase.from('audit_log').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+        if (params.systemOnly) {
+            q = q.is('event_id', null);
+        } else if (params.eventId) {
+            q = q.eq('event_id', params.eventId);
+        }
+        if (params.actionFilter) {
+            q = q.eq('action_type', params.actionFilter);
+        }
+        const { data, count, error } = await q.range(from, to);
+        if (error) throw error;
+        return { rows: (data as AuditLog[]) || [], count: count ?? 0 };
+    },
+
+    clearAuditLogs: async (fromIso: string, toIso: string): Promise<number> => {
+        const { count, error } = await supabase.from('audit_log').delete({ count: 'exact' }).gte('created_at', fromIso).lte('created_at', toIso);
+        if (error) throw error;
+        const deleted = count ?? 0;
+        recordAuditLog('', 'audit_clear', `Audit logs cleared for period ${fromIso} to ${toIso} (${deleted} rows)`, null, 'audit_log', `${fromIso}|${toIso}`, { deleted });
+        return deleted;
+    },
+
 
     createUser: async (user: Omit<User, 'id'>, password: string) => {
         const email = normalizeEmail(user.email);

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { supabase } from '../services/supabaseClient';
+import { db } from '../services/supabaseService';
 import { AuditLog } from '../types';
 import { AppContext } from '../context/AppContext';
+
+const PAGE_SIZE = 25;
 
 const AuditLogPage = () => {
     const { activeEventId } = useContext(AppContext);
@@ -10,33 +12,38 @@ const AuditLogPage = () => {
     const [actionFilter, setActionFilter] = useState('');
     const [systemOnly, setSystemOnly] = useState(false);
     const [error, setError] = useState('');
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+    const [clearing, setClearing] = useState(false);
+    const [clearMsg, setClearMsg] = useState('');
+
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     const fetchLogs = async () => {
         setLoading(true);
         setError('');
         try {
-            let q = supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(500);
-            if (!systemOnly && activeEventId) {
-                q = q.eq('event_id', activeEventId);
-            }
-            if (systemOnly) {
-                q = q.is('event_id', null);
-            }
-            if (actionFilter) {
-                q = q.eq('action_type', actionFilter);
-            }
-            const { data, error: fetchErr } = await q;
-            if (fetchErr) throw fetchErr;
-            setLogs(data || []);
+            const { rows, count } = await db.getAuditLogs(
+                { eventId: activeEventId, systemOnly, actionFilter },
+                page,
+                PAGE_SIZE
+            );
+            setLogs(rows);
+            setTotal(count);
+            if (page > 1 && rows.length === 0 && count > 0) setPage(1);
         } catch (e: any) {
             setError(e.message || 'Failed to load audit log.');
             setLogs([]);
+            setTotal(0);
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => { fetchLogs(); }, [activeEventId, systemOnly, actionFilter]);
+    useEffect(() => { setPage(1); }, [activeEventId]);
+    useEffect(() => { fetchLogs(); }, [page, activeEventId, systemOnly, actionFilter]);
 
     const distinctActions = ['', 'checkin_arrival', 'checkin_session', 'session_call_ft', 'session_call_slv', 'session_call_mi', 'session_call_hgb', 'session_summary_ft', 'session_summary_slv', 'session_summary_mi', 'session_summary_hgb', 'voice_distribution', 'financial_offering', 'financial_pledge_redemption', 'pledge_create', 'delegate_update', 'event_create', 'event_update', 'event_delete', 'event_clear_data', 'user_create', 'user_update', 'user_delete'];
 
@@ -52,6 +59,32 @@ const AuditLogPage = () => {
         return `${Math.floor(hrs / 24)}d ago`;
     };
 
+    const handleClearLogs = async () => {
+        setClearMsg('');
+        if (!fromDate || !toDate) {
+            setClearMsg('Select both start and end dates.');
+            return;
+        }
+        if (fromDate > toDate) {
+            setClearMsg('Start date must be on or before the end date.');
+            return;
+        }
+        if (!window.confirm(`Delete ALL audit log entries from ${fromDate} to ${toDate}? This cannot be undone.`)) return;
+        setClearing(true);
+        try {
+            const fromIso = new Date(`${fromDate}T00:00:00`).toISOString();
+            const toIso = new Date(`${toDate}T23:59:59.999`).toISOString();
+            const deleted = await db.clearAuditLogs(fromIso, toIso);
+            setClearMsg(`Deleted ${deleted} audit ${deleted === 1 ? 'entry' : 'entries'}.`);
+            setPage(1);
+            await fetchLogs();
+        } catch (e: any) {
+            setClearMsg('Clear failed: ' + (e.message || 'Access denied.'));
+        } finally {
+            setClearing(false);
+        }
+    };
+
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-32">
             <div className="bg-white p-8 rounded-3xl shadow-sm border flex flex-col md:flex-row justify-between items-center gap-6">
@@ -65,7 +98,7 @@ const AuditLogPage = () => {
                     <select
                         className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50"
                         value={actionFilter}
-                        onChange={e => setActionFilter(e.target.value)}
+                        onChange={e => { setActionFilter(e.target.value); setPage(1); }}
                     >
                         <option value="">All Actions</option>
                         {distinctActions.filter(Boolean).map(a => (
@@ -73,13 +106,37 @@ const AuditLogPage = () => {
                         ))}
                     </select>
                     <label className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase cursor-pointer" title="User create/update/delete — these are not scoped to a specific event">
-                        <input type="checkbox" checked={systemOnly} onChange={e => setSystemOnly(e.target.checked)} className="rounded" />
+                        <input type="checkbox" checked={systemOnly} onChange={e => { setSystemOnly(e.target.checked); setPage(1); }} className="rounded" />
                         User &amp; System Events
                     </label>
                     <button onClick={fetchLogs} disabled={loading} className="px-4 py-2 bg-blue-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all">
                         {loading ? 'Loading...' : 'Refresh'}
                     </button>
                 </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border shadow-sm p-6 space-y-4">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                    <h3 className="font-black text-blue-900 uppercase text-xs tracking-widest">Clear Logs By Period (Admin)</h3>
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <label className="flex items-center gap-2 text-[10px] font-bold text-gray-500 uppercase">
+                            From
+                            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50" />
+                        </label>
+                        <label className="flex items-center gap-2 text-[10px] font-bold text-gray-500 uppercase">
+                            To
+                            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50" />
+                        </label>
+                        <button
+                            onClick={handleClearLogs}
+                            disabled={clearing}
+                            className="px-4 py-2.5 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50"
+                        >
+                            {clearing ? 'Clearing...' : 'Clear Logs'}
+                        </button>
+                    </div>
+                </div>
+                {clearMsg && <div className={`p-3 rounded-xl text-[10px] font-black uppercase ${clearMsg.startsWith('Deleted') || clearMsg.startsWith('Select') || clearMsg.startsWith('Start') ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{clearMsg}</div>}
             </div>
 
             {error && <div className="bg-red-50 text-red-700 p-4 rounded-xl font-bold text-xs uppercase">{error}</div>}
@@ -117,6 +174,41 @@ const AuditLogPage = () => {
                             )}
                         </tbody>
                     </table>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 p-4 border-t bg-slate-50">
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{total} entries</p>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setPage(1)}
+                            disabled={page <= 1 || loading}
+                            className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-[10px] font-black uppercase text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-all"
+                        >
+                            First
+                        </button>
+                        <button
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            disabled={page <= 1 || loading}
+                            className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-[10px] font-black uppercase text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-all"
+                        >
+                            Prev
+                        </button>
+                        <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest px-2">Page {page} of {totalPages}</span>
+                        <button
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages || loading}
+                            className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-[10px] font-black uppercase text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-all"
+                        >
+                            Next
+                        </button>
+                        <button
+                            onClick={() => setPage(totalPages)}
+                            disabled={page >= totalPages || loading}
+                            className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-[10px] font-black uppercase text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-all"
+                        >
+                            Last
+                        </button>
+                    </div>
                 </div>
             </div>
 
