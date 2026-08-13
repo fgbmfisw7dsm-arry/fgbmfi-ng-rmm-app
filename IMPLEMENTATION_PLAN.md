@@ -1,8 +1,61 @@
 # FGBMFI Nigeria EMS — Implementation Plan
 
 **Project:** FGBMFI Nigeria Events Management System
-**Version:** 1.3 (Phase 1) → 2.0 (Target)
-**Last Updated:** August 3, 2026 (Badge UI Overhaul + Import CSV Upload + Dashboard Auto-Load + PDF Naming Convention)
+**Version:** 1.8 (Phase 1) → 2.0 (Target)
+**Last Updated:** August 14, 2026 (Event Admin Role + Audit Log Pagination & Clear + Role/Module Access Refactor)
+
+---
+
+## Session Summary (August 14, 2026) — Event Admin Role + Audit Log Pagination & Clear
+
+### What Was Delivered
+
+| # | Item | Type | Commit(s) |
+|---|------|------|-----------|
+| 1 | New global `event_admin` role: registrar modules + Badge Printing + Master List + Import Data (bulk) + Financials | Role | `4a5df43`, `2ec0b35`, `f13a773` |
+| 2 | `EVENT_ADMIN` enum + `isEventAdminRole()` helper + unscoped `getScopeFilter` | Types | `4a5df43` |
+| 3 | Route guards: `/admin/badges`, `/admin/delegates`, `/admin/import`, `/admin/financials`, `/checkin`, `/ministry`, `/register-new` | Routes | `4a5df43`, `2ec0b35`, `f13a773` |
+| 4 | Badge Printing removed from registrar (now admin + event admin only) | Access | `4a5df43` |
+| 5 | Audit Log pagination (25/page) with First/Prev/Next/Last + count | Page | `4a5df43` |
+| 6 | Admin "Clear Logs By Period" (date pickers + confirm) via `db.clearAuditLogs` | Page + Service | `4a5df43` |
+| 7 | Master List internal guard fixed for event_admin | Fix | `2ec0b35` |
+| 8 | Scrambled Import Recovery gated admin-only (bulk import exposed to event admin) | Access | `2ec0b35` |
+| 9 | Financials RLS extended to event_admin (insert/update; delete admin-only) | Migration | `f13a773` |
+| 10 | DB migrations: `app_users_role_check` + `is_event_admin_user()` + audit_log SELECT/DELETE policies + `idx_audit_created_at` | Migration | `4a5df43`, `f13a773` |
+
+### Database Migration Results
+
+| Migration | Content | Status |
+|-----------|---------|--------|
+| `supabase_migration_v1.8_event_admin.sql` | Extends `app_users_role_check`; adds `is_event_admin_user()`; grants event_admin write RLS on delegates/checkins/session ministry/badge tables | To run by user |
+| `supabase_migration_v1.8_audit_log.sql` | Fixes audit_log SELECT → `is_admin_user()`; adds DELETE policy; `idx_audit_created_at` index | To run by user |
+| `supabase_migration_v1.8_event_admin_financials.sql` | Extends pledges/financial_entries insert+update RLS to `is_event_admin_user()` | To run by user |
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Event Admin is global/unscoped (not district-scoped) | Event Admin is an ops bridge role — registrar modules + badge/master-list/import/financials across all districts; a district field would constrain badge/master-list operations |
+| Event Admin NOT added to `is_admin_user()`/`isAdminRole()` | Keeps admin-only modules (Events, Users, Setup, Data, Storage, Audit, Scrambled Recovery) locked; avoids privilege escalation |
+| Event Admin NOT added to `isRegistrarRole()` | Prevents accidental district scoping — `getScopeFilter` returns `{}` explicitly |
+| Scrambled Import Recovery stays admin-only | "Delete All" cascades deletes across delegates/checkins/responses — destructive, beyond bulk import; avoids granting event_admin DELETE RLS |
+| Badge Printing moved off registrar | Registrar previously saw Badge Printing but couldn't generate (`badge_batches` INSERT omitted district/plain registrar); consolidating to admin + event admin resolves the latent inconsistency |
+| Audit clear deletes all logs in period | User confirmed: delete every `audit_log` row within the selected range (not event-scoped), admin-only |
+
+### Key Files Changed
+
+| File | Changes |
+|------|---------|
+| `types.ts` | Added `EVENT_ADMIN` enum, `isEventAdminRole()`, event_admin in `getScopeFilter` no-scope branch |
+| `App.tsx` | Added `ADMIN_AND_EVENT_ADMIN`, `ADMIN_REGISTRAR_AND_EVENT_ADMIN`, `ADMIN_FINANCE_AND_EVENT_ADMIN`; updated route guards |
+| `components/Layout.tsx` | `showBadgeModule`/`showFinanceModule` + event-admin "Delegates" section (Master List + Import Data); role label |
+| `components/ProtectedRoute.tsx` | "Event Admin" role label |
+| `pages/UsersModule.tsx` | "Event Admin" role option + badge label |
+| `pages/MasterListModule.tsx` | Internal guard accepts `isEventAdminRole` |
+| `pages/ImportModule.tsx` | Top guard accepts event admin; Scrambled Recovery wrapped in `isAdmin` |
+| `pages/AuditLogPage.tsx` | 25/page pagination + clear-by-period UI |
+| `services/supabaseService.ts` | `getAuditLogs` (count + range), `clearAuditLogs` (date-range delete + audit_clear entry) |
+| `supabase_migration_v1.8_*.sql` | 3 new migration files |
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.7 (Per-District Paginated Master List + Scrambled Import Recovery + Client-Side Sort + Full-Dataset Export + Auto-Register Harmonization)
+- **Current Version:** 1.8 (Event Admin Role + Audit Log Pagination & Clear + Role/Module Access Refactor)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -188,17 +188,26 @@ CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_res
 3. **Session persistence:** Supabase handles token refresh; localStorage fallback for `active_event_id`
 4. **Logout:** `supabase.auth.signOut()` + `localStorage.clear()`
 
-### Roles (Current — 3)
+### Roles (Current — 10)
 | Role | Access Scope | Pages |
 |------|-------------|-------|
-| `admin` | Full access, event management, user management | All |
-| `registrar` | District-scoped (data filtered by `user.district`), check-in ops | Dashboard, CheckIn, Financials, MasterList, Reports |
+| `national_admin` / `regional_admin` / `district_admin` / `admin` (legacy) | Full access, event management, user management | All |
+| `national_registrar` / `regional_registrar` / `district_registrar` / `registrar` (legacy) | District-scoped (data filtered by `user.district`), check-in ops | Dashboard, CheckIn, Session Details, New Delegate, Reports |
 | `finance` | Financial operations | Dashboard, Financials, Reports |
+| `event_admin` | **Global (unscoped)** — registrar modules + Badge Printing + Master List + Import Data (bulk only) + Financials | Dashboard, CheckIn, Session Details, New Delegate, Reports, Badge Printing, Master List, Import Data, Financials |
+
+**Event Admin (v1.8) — access model:**
+- **Inherits all registrar modules** (Dashboard, Check-In, Session Details, New Delegate, Reports) but is **global/unscoped** (no district/region field; `getScopeFilter` returns `{}`).
+- **Plus:** Badge Printing, Master List, Import Data (Bulk Delegate Import), Financials.
+- **Excluded (admin-only):** Events & Config, User Management, System Setup, Data Management, Storage, Audit Log, and Import Data's *Scrambled Import Recovery* (destructive delete).
+- **Badge Printing removed from registrar** — now `admin + event_admin` only.
+- Not added to `is_admin_user()` (DB) or `isAdminRole()` (client) — keeps admin-only modules locked; not added to `isRegistrarRole()` (avoids district scoping).
+- RLS write grants (via `is_event_admin_user()`): delegates insert/update, checkins insert, session ministry inserts, badge_batches insert/update, badge_print_logs insert, pledges/financial_entries insert/update. Delete is admin-only.
 
 ### Role Enforcement
 - **Server-side:** RLS policies on Supabase tables (in `supabase_schema.sql`)
 - **Client-side:** `user.role` checks in pages (e.g., admin-only buttons for event CRUD)
-- **Data scoping:** `user.district` filters delegate/checkin queries for REGISTRAR role
+- **Data scoping:** `user.district` filters delegate/checkin queries for REGISTRAR role; `event_admin` is unscoped
 - **Write guard:** `ensureEventActive()` prevents writes on locked events regardless of role
 
 ### Auth Priority (Current)
@@ -213,18 +222,19 @@ CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_res
 #/login                              — LoginPage (unauthenticated)
 #/admin                              — AdminDashboard (default)
 #/admin/reports                      — ReportsPage (including Sessions tab)
-#/admin/financials                   — FinancialsPage
-#/admin/delegates                    — MasterListModule
+#/admin/financials                   — FinancialsPage (admin + finance + event_admin)
+#/admin/delegates                    — MasterListModule (admin + event_admin)
 #/admin/events                       — EventsModule (admin only)
 #/admin/users                        — UsersModule (admin only)
-#/admin/import                       — ImportModule
-#/admin/setup                        — SetupModule
-#/admin/data                         — DataModule
-#/admin/badges                       — BadgePrintingModule (admin + registrar)
+#/admin/import                       — ImportModule (admin + event_admin — bulk import; Scrambled Recovery admin only)
+#/admin/setup                        — SetupModule (admin only)
+#/admin/data                         — DataModule (admin only)
+#/admin/badges                       — BadgePrintingModule (admin + event_admin)
 #/admin/storage                      — StorageModule (admin only)
-#/checkin                            — CheckInPage (includes badge reprint modal)
-#/ministry                           — SessionMinistryPage (admin + registrar)
-#/register-new                       — NewDelegatePage
+#/admin/audit                        — AuditLogPage (admin only)
+#/checkin                            — CheckInPage (admin + registrar + event_admin; includes badge reprint modal)
+#/ministry                           — SessionMinistryPage (admin + registrar + event_admin)
+#/register-new                       — NewDelegatePage (admin + registrar + event_admin)
 #/help                               — UserManualModule
 #/*                                  — Redirects to /login or /admin based on auth
 ```
@@ -518,6 +528,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Self-match:** Accepts the abbreviation itself if it appears verbatim in the official list.
 - **Diagnostic logging:** Logs every official district, every resolved mapping, and unresolved abbreviations.
 
+### 24. Audit Log Pagination & Clear (v1.8)
+- **Pagination:** `AuditLogPage` renders 25 rows/page via `db.getAuditLogs({ eventId, systemOnly, actionFilter }, page, pageSize)`. Count is fetched with `.select('*', { count: 'exact' })`; rows via `.range(from, to)`. Page resets to 1 on filter/event change.
+- **Clear-by-period (admin-only):** `db.clearAuditLogs(fromIso, toIso)` deletes all `audit_log` rows where `created_at` is within the selected date range (date pickers + confirm dialog). Records its own `audit_clear` entry afterward.
+- **RLS fix (v1.8):** `audit_log` SELECT was `role = 'admin'` only (blocking national/regional/district admins) — now `is_admin_user()`; a DELETE policy for `is_admin_user()` was added, plus `idx_audit_created_at ON audit_log(created_at DESC)` for efficient range deletes.
+
+### 25. Event Admin Role (v1.8)
+- **New global role** `event_admin` (`UserRole.EVENT_ADMIN = 'event_admin'`) — see Roles table above for the full access model.
+- **Client helpers:** `isEventAdminRole(role)` in `types.ts`; `getScopeFilter` returns `{}` (unscoped) for event admin.
+- **Route guards (`App.tsx`):** `ADMIN_AND_EVENT_ADMIN`, `ADMIN_REGISTRAR_AND_EVENT_ADMIN`, `ADMIN_FINANCE_AND_EVENT_ADMIN` role lists.
+- **DB migration (`supabase_migration_v1.8_event_admin.sql` + `_financials.sql`):** extends `app_users_role_check`, adds `is_event_admin_user()`, and adds `OR is_event_admin_user()` to registrar/finance write policies (delegates, checkins, session ministry, badge batches/logs, pledges, financial_entries). Delete policies remain admin-only.
+
 ## Code Conventions
 
 ### Naming
@@ -533,7 +554,7 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 
 ### Types (types.ts)
 ```typescript
-enum UserRole { ADMIN = 'admin', REGISTRAR = 'registrar', FINANCE = 'finance' }
+enum UserRole { NATIONAL_ADMIN, REGIONAL_ADMIN, DISTRICT_ADMIN, ADMIN, NATIONAL_REGISTRAR, REGIONAL_REGISTRAR, DISTRICT_REGISTRAR, REGISTRAR, FINANCE, EVENT_ADMIN }
 enum FinancialType { OFFERING = 'OFFERING', PLEDGE_REDEMPTION = 'PLEDGE_REDEMPTION' }
 // Key interfaces: Event, Delegate, User, Session, CheckIn, Pledge, FinancialEntry, 
 //                 DashboardStats, CheckInResult, SystemSettings
@@ -598,7 +619,7 @@ npm run build   # Production build to /dist
 
 ### Known Vulnerabilities
 1. **4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots
-2. **No audit logging** — no tracking of who did what after the fact
+2. **Audit log has no retention policy** — fire-and-forget inserts with admin-only manual clear-by-period; no automated retention/rotation
 3. **`getAllDelegates()` + `getAllDataForExport()`** — fetch entire table into memory, will fail at 25K
 4. **Context re-render storms** — all context consumers re-render on any state change
 5. **No rate limiting** — 50 concurrent officers could exhaust Supabase connection pool
@@ -613,7 +634,8 @@ npm run build   # Production build to /dist
 | Context performance | Every AppContext change re-renders entire tree | HIGH | Phase 1 |
 | Realtime subscription scope | Subscribes to entire table, not filtered by event | HIGH | Phase 1 |
 | Single-row settings | `system_settings` is single-row JSONB — potential write conflicts | MEDIUM | Phase 2 |
-| No audit log | No immutable record of operations | MEDIUM | Phase 2 |
+| No audit log | No immutable record of operations | RESOLVED | v1.6/v1.8 |
+| Audit log retention | No automated retention/rotation; manual admin clear-by-period only | MEDIUM | Phase 2 |
 | Client-side role enforcement | RLS is fallback, but UI gates are purely client-side | LOW | Phase 2 |
 | No TypeScript strict mode | `any` used in several service functions | LOW | Phase 3 |
 | Gemini API key in env | Referenced in README but no AI feature implemented | LOW | Phase 4 |
@@ -648,6 +670,10 @@ npm run build   # Production build to /dist
 | Scrambled CSV import column misalignment | Comprehensive recovery module: multi-field anomaly detection (confidence scoring), in-place repair (field remapping + auto-harmonization), JSON backup, cascading delete | RESOLVED | v1.7 |
 | Delegates sorted by first_name (spouses apart) | Client-side sort in `getPaginatedDelegates`: `last_name → first_name` case-insensitive. Guarantees spouse grouping regardless of RPC server state | RESOLVED | v1.7 |
 | Master List spinner hangs on initial All Districts load | Mode-aware loading guard: `!selectedDistrict && !searchTerm ? districtListLoading : loading` | RESOLVED | v1.7 |
+| Audit log unbounded + no pagination | AuditLogPage paginated 25/page (count + range) with First/Prev/Next/Last; admin clear-by-date-range via date pickers | RESOLVED | v1.8 |
+| Audit log SELECT blocked non-`admin` admins | Policy rewritten to `is_admin_user()`; DELETE policy added; `idx_audit_created_at` index for range deletes | RESOLVED | v1.8 |
+| Badge Printing exposed to registrars | Removed from registrar role; now `admin + event_admin` only | RESOLVED | v1.8 |
+| No Event Admin tier | New global `event_admin` role: registrar modules + Badge Printing + Master List + Import (bulk) + Financials; `is_event_admin_user()` RLS | RESOLVED | v1.8 |
 
 ## v2.0 Evolution
 

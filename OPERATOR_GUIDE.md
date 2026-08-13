@@ -1,6 +1,6 @@
 # FGBMFI EMS — Operator Quick Reference Guide
 
-**For:** Check-in Officers, Registrars, and Financial Admins  
+**For:** Check-in Officers, Registrars, Event Admins, and Financial Admins  
 **Event System:** FGBMFI Nigeria Event Management System (EMS)  
 **Version:** 2.0-ready
 
@@ -101,12 +101,12 @@
 - **Attendance Matrix** — Cross-tabulation by rank and office per district
 - **Financial Matrix** — Session-by-session financial breakdown
 - **Pledge Summary** — Pledged vs redeemed per donor
-- **Master List** — Full delegate database (paginated, 50/page)
+- **Master List** — Full delegate database (paginated, 25/page)
 
 ### Exporting
 - **PDF** — Formatted report (use Print to PDF in browser for best results)
 - **CSV** — Raw data export for Excel/Google Sheets analysis
-- **50 records per page** — Use pagination controls (First/Prev/Next/Last) at the bottom
+- **25 records per page** — Use pagination controls (First/Prev/Next/Last) at the bottom
 
 ---
 
