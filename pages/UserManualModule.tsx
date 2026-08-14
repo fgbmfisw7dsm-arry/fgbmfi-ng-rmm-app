@@ -128,7 +128,7 @@ const UserManualModule = () => {
                                     </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">3</span>
-                                        <span>A green "Verified!" flash confirms success. The delegate's information and 4-digit backup code appear. <strong>Duplicate Protection:</strong> If the delegate has already checked in, a red <strong>"Already Checked-in"</strong> stamp appears to prevent double-counting.</span>
+                                        <span>A green "Verified!" flash confirms success. The delegate's information and badge QR appear. <strong>Duplicate Protection:</strong> If the delegate has already checked in, a red <strong>"Already Checked-in"</strong> stamp appears to prevent double-counting.</span>
                                     </li>
                                 </ol>
                                 <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 2: Manual Lookup</h4>
@@ -146,25 +146,25 @@ const UserManualModule = () => {
                                         <span>Find the matching record and click <strong>"Verify Entry"</strong>.</span>
                                     </li>
                                 </ol>
-                                <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 3: 4-Digit Code Entry</h4>
+                                <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 3: Delegate ID Entry</h4>
                                 <ol className="space-y-4">
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">1</span>
-                                        <span>Type the delegate's <strong>4-Digit Backup Code</strong> into the large input field or scan it via QR.</span>
+                                        <span>Type or paste the delegate's <strong>Delegate ID</strong> (or external ID) into the large input field. The system auto-submits once the full ID is entered.</span>
                                     </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-white/10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/20">2</span>
-                                        <span>The system auto-verifies the code and records the check-in instantly.</span>
+                                        <span>The system auto-verifies the ID and records the check-in instantly.</span>
                                     </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-green-500/20 text-green-400 p-4 rounded-xl border border-green-500/30 font-black">
-                                            Step 3: The 4-Digit Code appears on the verified delegate's card. Give this code to the delegate for all future session check-ins. <strong>Badge Reprint:</strong> Tap "Reprint Badge" to print, download as PDF/image, or share the e-badge via WhatsApp.
+                                            Step 3: The delegate's record appears on the verified card. <strong>Badge Reprint:</strong> Tap "Reprint Badge" to print, download as PDF/image, or share the e-badge via WhatsApp.
                                         </span>
                                     </li>
                                 </ol>
                                 <div className="mt-6 bg-blue-500/10 p-4 rounded-2xl border border-blue-500/30">
-                                    <h4 className="text-xs font-black uppercase text-blue-300 mb-2">How QR Code Resolution Works (4-Pass Lookup)</h4>
-                                    <p className="text-xs text-gray-300 leading-relaxed">When a QR code is scanned, the system performs four sequential lookups: <strong>Pass 1</strong> — matches by UUID QR hash (internal badges). <strong>Pass 2</strong> — matches by external ID (imported delegates). <strong>Pass 3</strong> — matches by delegate ID. <strong>Pass 4</strong> — falls back to the 4-digit deterministic code. All passes are scoped to the active event, ensuring cross-event data isolation.</p>
+                                    <h4 className="text-xs font-black uppercase text-blue-300 mb-2">How QR Code Resolution Works (3-Pass Lookup)</h4>
+                                    <p className="text-xs text-gray-300 leading-relaxed">When a QR code or ID is scanned, the system performs three sequential lookups: <strong>Pass 1</strong> — matches by UUID QR hash (badge QR). <strong>Pass 2</strong> — matches by external ID (imported delegates). <strong>Pass 3</strong> — matches by delegate ID. All passes are scoped to the active event, ensuring cross-event data isolation.</p>
                                 </div>
                                 <div className="mt-4 bg-red-500/10 p-4 rounded-2xl border border-red-500/30">
                                     <h4 className="text-xs font-black uppercase text-red-300 mb-2">Duplicate Check-in Prevention</h4>
@@ -191,7 +191,7 @@ const UserManualModule = () => {
                                 </div>
                                 <div className="border-l-4 border-green-600 pl-6 py-2">
                                     <h4 className="text-xs font-black uppercase text-green-700 mb-1">Step 3: Register & Verify</h4>
-                                    <p className="text-sm text-gray-600 font-bold">Click <strong>"Complete Registration & Verify Arrival"</strong>. The system adds them to the master list and records their event arrival simultaneously. A 4-digit code is generated for the delegate.</p>
+                                    <p className="text-sm text-gray-600 font-bold">Click <strong>"Complete Registration & Verify Arrival"</strong>. The system adds them to the master list and records their event arrival simultaneously. Their unique QR badge can then be printed or shared digitally.</p>
                                 </div>
                             </div>
                         </section>
@@ -200,14 +200,14 @@ const UserManualModule = () => {
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">06</span>
-                                Active Session Verification (QR & Code)
+                                Active Session Verification (QR & Delegate ID)
                             </h2>
-                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.). QR scanning and 4-digit codes are both supported.</p>
+                            <p className="mb-4 text-sm text-gray-600">Used for checking into specific sessions (Business Session, Banquet, etc.). QR scanning and delegate ID are both supported.</p>
                             <div className="bg-blue-900 p-8 rounded-2xl text-white shadow-xl">
                                 <ol className="space-y-3 text-sm">
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">1.</span> Go to <strong>"Check-In"</strong> and select the current session from the dropdown. Sessions match the event program schedule.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">2.</span> <strong>QR Scan:</strong> Tap "SCAN QR" and point the camera at the delegate's badge. The system auto-decodes, auto-verifies arrival (if needed), and marks session attendance.</li>
-                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>4-Digit Code:</strong> Type the delegate's backup code into the input field — it auto-submits after the 4th digit.</li>
+                                    <li className="flex gap-4"><span className="text-blue-300 font-black">3.</span> <strong>Delegate ID:</strong> Type or paste the delegate's ID (or external ID) into the input field — it auto-submits when complete.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">4.</span> <strong>Manual Lookup:</strong> Search by name or phone, then click "Verify Entry" for the current session.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">5.</span> <strong>Auto-Arrival Cascade:</strong> If the delegate has NOT yet completed Event Arrival check-in, the system automatically records arrival first, then verifies session attendance — all in one scan.</li>
                                     <li className="flex gap-4"><span className="text-blue-300 font-black">6.</span> <strong>Duplicate Prevention:</strong> Scanning the same delegate into the same session twice shows a red <strong>"Already Checked-in"</strong> stamp. A delegate can attend multiple sessions but is recorded only once per session.</li>
@@ -247,9 +247,9 @@ const UserManualModule = () => {
                                         </ol>
                                     </div>
                                     <div>
-                                        <h5 className="text-[10px] font-black text-green-400 uppercase mb-2">Method 2: 4-Digit Code or Manual Lookup</h5>
+                                        <h5 className="text-[10px] font-black text-green-400 uppercase mb-2">Method 2: Delegate ID or Manual Lookup</h5>
                                         <ol className="space-y-2 text-sm">
-                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">1.</span> Type the delegate's 4-digit code or search by name/phone in the <strong>"Database Lookup & Manual Record"</strong> section.</li>
+                                            <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">1.</span> Type or paste the delegate's ID or search by name/phone in the <strong>"Database Lookup & Manual Record"</strong> section.</li>
                                             <li className="flex gap-3"><span className="text-blue-300 font-black shrink-0">2.</span> Click <strong>"Record as FT/SLV/MI/HGB"</strong> for each delegate. The system prevents double-recording the same call type per session.</li>
                                         </ol>
                                     </div>
@@ -287,15 +287,19 @@ const UserManualModule = () => {
                             <div className="space-y-6">
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Recording Offerings</h4>
-                                    <p className="text-xs text-gray-600">Navigate to <strong>"Financials"</strong>. Select the session, enter the amount, and click "Record Offering". This records bulk collections.</p>
+                                    <p className="text-xs text-gray-600">Navigate to <strong>"Financials"</strong>. Select the session, choose the <strong>Payment Mode</strong> (Cash, POS, Bank Transfer, or Cheque — optional), enter the amount, and click "Record Offering". Offerings are grouped by session with a highlighted subtotal per session and a Grand Total. Records are paginated (25 per page) so the ledger stays fast at any scale.</p>
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">New Pledges</h4>
-                                    <p className="text-xs text-gray-600">In the "New Pledge" tab, search for the donor by name. Enter the total promised amount and save. This creates an active debt record.</p>
+                                    <p className="text-xs text-gray-600">In the "New Pledge" tab, search for the donor by name, select a <strong>Pledge Name</strong> (configured per event), enter the total promised amount, and save. This creates an active debt record.</p>
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Redemption (Payments)</h4>
-                                    <p className="text-xs text-gray-600">Search for the donor in the "Redemption" tab. Select their active pledge, enter the payment amount, and save. The system calculates the remaining balance automatically.</p>
+                                    <p className="text-xs text-gray-600">Search for the donor in the "Redemption" tab. Select their active pledge, enter the payment amount, choose the <strong>Payment Mode</strong>, and save. The system calculates the remaining balance automatically.</p>
+                                </div>
+                                <div className="p-5 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Financial Export</h4>
+                                    <p className="text-xs text-gray-600">Each tab (Offerings, Redemptions, New Pledges) has <strong>PDF</strong> and <strong>CSV</strong> export buttons. The PDF shows the event name as the title with per-session subtotals and a Grand Total; CSV includes the same breakdown for offline reconciliation.</p>
                                 </div>
                             </div>
                         </section>
@@ -328,7 +332,7 @@ const UserManualModule = () => {
                             <div className="space-y-4">
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Badge Reprint</h4>
-                                    <p className="text-xs text-gray-600">In the Check-In search results, a verified delegate shows a <strong>"Reprint Badge"</strong> button. Tap it to open the badge preview modal showing the FGBMFI Nigeria header, delegate name, district, chapter, rank, 28mm QR code, and 4-digit backup code.</p>
+                                    <p className="text-xs text-gray-600">In the Check-In search results, a verified delegate shows a <strong>"Reprint Badge"</strong> button. Tap it to open the badge preview modal showing the FGBMFI Nigeria header, delegate name, district, chapter, rank, and 28mm QR code.</p>
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Four Export Options</h4>
@@ -341,11 +345,11 @@ const UserManualModule = () => {
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">E-Badge for Delegates</h4>
-                                    <p className="text-xs text-gray-600">Delegates receive the badge image via WhatsApp or Telegram, save it to their phone gallery, and display it full-screen at check-in points. The 28mm QR code renders clearly on mobile screens (approx. 300-400px on standard devices) for reliable scanning at arm's length. The badge includes the delegate's name, district, and backup code for verification.</p>
+                                    <p className="text-xs text-gray-600">Delegates receive the badge image via WhatsApp or Telegram, save it to their phone gallery, and display it full-screen at check-in points. The 28mm QR code renders clearly on mobile screens (approx. 300-400px on standard devices) for reliable scanning at arm's length. The badge includes the delegate's name, district, and unique QR code for verification.</p>
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Lost Badge Recovery</h4>
-                                    <p className="text-xs text-gray-600">If a delegate loses their physical badge, tap the <strong>"Lost Badge"</strong> button. This generates a new QR code (invalidating the old one) and reprints the badge. The 4-digit backup code remains unchanged.</p>
+                                    <p className="text-xs text-gray-600">If a delegate loses their physical badge, tap the <strong>"Lost Badge"</strong> button. This generates a new QR code (invalidating the old one) and reprints the badge. The delegate's record and ID remain unchanged.</p>
                                 </div>
                             </div>
                         </section>
@@ -466,12 +470,12 @@ const UserManualModule = () => {
                                 </div>
 
                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 2: The "I Have My Code" Member</h4>
-                                    <p className="text-sm text-gray-600 italic">"I have my 4-digit code from the last session."</p>
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 2: The "I Have My Badge" Member</h4>
+                                    <p className="text-sm text-gray-600 italic">"I have my badge from the last session."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
                                         <p>1. Open Check-In Tab.</p>
                                         <p>2. Select active session (e.g. Banquet).</p>
-                                        <p>3. Type the 4 digits on the keypad — auto-submits on 4th digit.</p>
+                                        <p>3. Scan the badge QR or type the delegate ID — auto-submits.</p>
                                         <p>4. System auto-verifies arrival if not already done. Done.</p>
                                     </div>
                                 </div>
@@ -480,19 +484,19 @@ const UserManualModule = () => {
                                     <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 3: The "Already Checked-in" Delegate</h4>
                                     <p className="text-sm text-gray-600 italic">"I've already been verified but someone is scanning me again."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
-                                        <p>1. Scan the QR code or enter the 4-digit code.</p>
+                                        <p>1. Scan the QR code or enter the delegate ID.</p>
                                         <p>2. System detects the duplicate and shows a red <strong>"Already Checked-in"</strong> stamp.</p>
                                         <p>3. No duplicate record is created — the delegate only counts once.</p>
                                     </div>
                                 </div>
 
                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 4: The "Forgotten Code" Member</h4>
-                                    <p className="text-sm text-gray-600 italic">"I forgot my code or lost my slip."</p>
+                                    <h4 className="text-xs font-black text-blue-700 uppercase mb-2">Scenario 4: The "Forgotten Badge" Member</h4>
+                                    <p className="text-sm text-gray-600 italic">"I forgot my badge or lost it."</p>
                                     <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
                                         <p>1. Use the "Database Lookup" search bar.</p>
                                         <p>2. Search by Name or Phone.</p>
-                                        <p>3. Verify arrival. Code appears on screen — issue it again.</p>
+                                        <p>3. Verify arrival. Reprint the badge QR on screen.</p>
                                     </div>
                                 </div>
 
@@ -532,12 +536,12 @@ const UserManualModule = () => {
                             <div className="space-y-4">
                                 <div className="border-l-4 border-green-600 pl-6">
                                     <h4 className="text-sm font-black uppercase mb-1">Workflow: Session Collection</h4>
-                                    <p className="text-xs text-gray-600">Immediately after a session offering is counted: Navigate to <strong>Financials &gt; Offerings</strong>. Select the session, enter the bulk total, and record.</p>
+                                    <p className="text-xs text-gray-600">Immediately after a session offering is counted: Navigate to <strong>Financials &gt; Offerings</strong>. Select the session, choose the Payment Mode (Cash/POS/Bank Transfer/Cheque), enter the bulk total, and record.</p>
                                 </div>
                                 <div className="border-l-4 border-green-600 pl-6">
                                     <h4 className="text-sm font-black uppercase mb-1">Workflow: Handling Redemptions</h4>
                                     <p className="text-xs text-gray-600 italic mb-2">"I want to pay towards my pledge from last year."</p>
-                                    <p className="text-xs text-gray-600">Go to <strong>Financials &gt; Redemption</strong>. Search for the donor. Enter the payment amount. The system will auto-calculate the remaining debt.</p>
+                                    <p className="text-xs text-gray-600">Go to <strong>Financials &gt; Redemption</strong>. Search for the donor. Enter the payment amount and choose the Payment Mode. The system will auto-calculate the remaining debt.</p>
                                 </div>
                             </div>
                         </section>
@@ -555,8 +559,8 @@ const UserManualModule = () => {
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Check the "Event Context" in the top header. You must select an active event first.</p>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
-                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: Code is rejected!</p>
-                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure you have selected a "Session" (e.g. Banquet) for fast check-in. Master arrival uses manual lookup.</p>
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: QR / ID is rejected!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure the delegate is registered for the active event and you have selected a "Session" (e.g. Banquet) for fast check-in. Master arrival uses manual lookup.</p>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: "Already Checked-in" appears in red!</p>
