@@ -1219,7 +1219,8 @@ export const db = {
         if (entry.event_id) await ensureEventActive(entry.event_id);
         const result = handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single());
         const typeLabel = entry.type === FinancialType.OFFERING ? 'Offering' : 'Pledge Redemption';
-        recordAuditLog(result.event_id, `financial_${entry.type?.toLowerCase() || 'entry'}`, `${typeLabel}: ${result.payer_name || 'N/A'} — ₦${Number(result.amount).toLocaleString()}`, null, 'financial', result.id);
+        const labelName = entry.type === FinancialType.OFFERING ? (result.payment_mode || 'N/A') : (result.payer_name || 'N/A');
+        recordAuditLog(result.event_id, `financial_${entry.type?.toLowerCase() || 'entry'}`, `${typeLabel}: ${labelName} — ₦${Number(result.amount).toLocaleString()}`, null, 'financial', result.id);
         return result;
     },
 

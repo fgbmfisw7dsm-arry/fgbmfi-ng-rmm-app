@@ -1,9 +1,74 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo, Fragment } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { FinancialEntry, Pledge, Delegate, FinancialType, Session, UserRole, isRegistrarRole, getScopeFilter } from '../types';
+import { FinancialEntry, Pledge, Delegate, FinancialType, Session, UserRole, isRegistrarRole, getScopeFilter, PAYMENT_MODES } from '../types';
 import { AppContext } from '../context/AppContext';
-import { formatCurrency } from '../services/utils';
+import { formatCurrency, exportToCSV, exportToPDF } from '../services/utils';
+
+type PdfRow = { cells: string[]; background?: string; color?: string; bold?: boolean };
+
+const buildPdfTable = (heading: string, subheading: string, headers: string[], rows: PdfRow[], numericCols: number[]): HTMLElement => {
+    const root = document.createElement('div');
+    root.className = 'print-mode';
+    root.style.background = '#ffffff';
+    root.style.padding = '24px';
+    root.style.fontFamily = 'Helvetica, Arial, sans-serif';
+
+    const h = document.createElement('div');
+    h.textContent = heading;
+    h.style.fontSize = '20px';
+    h.style.fontWeight = 'bold';
+    h.style.color = '#1e3a8a';
+    root.appendChild(h);
+
+    const sub = document.createElement('div');
+    sub.textContent = subheading;
+    sub.style.fontSize = '12px';
+    sub.style.color = '#64748b';
+    sub.style.marginBottom = '14px';
+    root.appendChild(sub);
+
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    headers.forEach(hh => {
+        const th = document.createElement('th');
+        th.textContent = hh;
+        th.style.textAlign = 'left';
+        th.style.padding = '8px';
+        th.style.borderBottom = '2px solid #1e3a8a';
+        th.style.fontSize = '10px';
+        th.style.textTransform = 'uppercase';
+        th.style.color = '#1e3a8a';
+        hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        r.cells.forEach((c, ci) => {
+            const td = document.createElement('td');
+            td.textContent = c;
+            td.style.padding = '6px 8px';
+            td.style.borderBottom = '1px solid #e2e8f0';
+            td.style.fontSize = '11px';
+            if (r.background) td.style.background = r.background;
+            if (r.color) td.style.color = r.color;
+            if (r.bold) td.style.fontWeight = 'bold';
+            if (numericCols.includes(ci)) { td.style.textAlign = 'right'; td.style.fontWeight = '700'; }
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    root.appendChild(table);
+    return root;
+};
 
 const FinancialsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -15,16 +80,16 @@ const FinancialsPage = () => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [activeTab, setActiveTab] = useState<'transactions' | 'redemptions' | 'pledges'>('transactions');
     const [loading, setLoading] = useState(false);
-    
+
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<Delegate[]>([]);
     const [redemptionSearch, setRedemptionSearch] = useState('');
     const [redemptionResults, setRedemptionResults] = useState<Pledge[]>([]);
-    
+
     const [selectedPledge, setSelectedPledge] = useState<Pledge | null>(null);
-    const [tForm, setTForm] = useState<Partial<FinancialEntry>>({ amount: 0, type: FinancialType.OFFERING, session_id: '', payer_name: '', remarks: '' });
+    const [tForm, setTForm] = useState<Partial<FinancialEntry>>({ amount: 0, type: FinancialType.OFFERING, session_id: '', payment_mode: '', remarks: '' });
     const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
-    const [rForm, setRForm] = useState({ amount: 0, remarks: 'Pledge Redemption' });
+    const [rForm, setRForm] = useState({ amount: 0, payment_mode: '', remarks: 'Pledge Redemption' });
 
     const loadData = () => {
         if(activeEventId) {
@@ -85,7 +150,7 @@ const FinancialsPage = () => {
 
     const handleSelectPledge = (p: Pledge) => {
         setSelectedPledge(p);
-        setRForm({ amount: p.amount_pledged - p.amount_redeemed, remarks: 'Pledge Redemption' });
+        setRForm({ amount: p.amount_pledged - p.amount_redeemed, payment_mode: '', remarks: 'Pledge Redemption' });
         setRedemptionSearch('');
         setRedemptionResults([]);
     };
@@ -100,7 +165,7 @@ const FinancialsPage = () => {
             await db.addFinancialEntry({ ...tForm, event_id: activeEventId }); 
             alert("Offering Recorded!"); 
             loadData(); 
-            setTForm({ amount: 0, type: FinancialType.OFFERING, session_id: '', payer_name: '', remarks: '' }); 
+            setTForm({ amount: 0, type: FinancialType.OFFERING, session_id: '', payment_mode: '', remarks: '' }); 
         } catch(err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
 
@@ -130,12 +195,97 @@ const FinancialsPage = () => {
                 amount: rForm.amount, 
                 pledge_id: selectedPledge.id, 
                 payer_name: selectedPledge.donor_name, 
+                payment_mode: rForm.payment_mode || undefined, 
                 remarks: rForm.remarks
             });
             alert("Redemption Recorded!"); 
             setSelectedPledge(null);
             loadData();
         } catch(err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
+    };
+
+    const offeringEntries = useMemo(() => entries.filter(e => e.type === FinancialType.OFFERING), [entries]);
+    const redemptionEntries = useMemo(() => entries.filter(e => e.type === FinancialType.PLEDGE_REDEMPTION), [entries]);
+
+    const offeringGroups = useMemo(() => {
+        const bySession = new Map<string, FinancialEntry[]>();
+        const master: FinancialEntry[] = [];
+        offeringEntries.forEach(e => {
+            const sid = e.session_id || '';
+            if (sid && sessions.some(s => s.session_id === sid)) {
+                const arr = bySession.get(sid) || [];
+                arr.push(e); bySession.set(sid, arr);
+            } else {
+                master.push(e);
+            }
+        });
+        const groups = sessions
+            .filter(s => bySession.has(s.session_id))
+            .map(s => ({ sessionId: s.session_id, title: s.title, entries: (bySession.get(s.session_id) || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')) }));
+        if (master.length) groups.push({ sessionId: '', title: 'Full Event (Master)', entries: master.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')) });
+        return groups;
+    }, [offeringEntries, sessions]);
+
+    const offeringTotal = useMemo(() => offeringEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0), [offeringEntries]);
+    const redemptionTotal = useMemo(() => redemptionEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0), [redemptionEntries]);
+    const pledgeTotalPledged = useMemo(() => pledges.reduce((s, p) => s + (Number(p.amount_pledged) || 0), 0), [pledges]);
+    const pledgeTotalRedeemed = useMemo(() => pledges.reduce((s, p) => s + (Number(p.amount_redeemed) || 0), 0), [pledges]);
+    const pledgeTotalBalance = pledgeTotalPledged - pledgeTotalRedeemed;
+
+    const safeEventName = (activeEvent?.name || 'Event').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const dateStr = (d?: string) => d ? new Date(d).toLocaleDateString() : '';
+    const eventHeading = `FGBMFI — ${activeEvent?.name || 'Event'}`;
+    const eventSubheading = `${activeEvent?.start_date ? new Date(activeEvent.start_date).toLocaleDateString() : ''} — ${activeEvent?.end_date ? new Date(activeEvent.end_date).toLocaleDateString() : ''}`;
+
+    const exportOfferingsCSV = () => {
+        const cols = ['Session', 'Payment Mode', 'Amount', 'Remarks', 'Date'];
+        const rows: Record<string, any>[] = [];
+        offeringGroups.forEach(g => {
+            g.entries.forEach(e => rows.push({ Session: g.title, 'Payment Mode': e.payment_mode || '-', Amount: Number(e.amount) || 0, Remarks: e.remarks || '', Date: dateStr(e.created_at) }));
+            const sub = g.entries.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+            rows.push({ Session: `${g.title} — SUBTOTAL`, 'Payment Mode': '', Amount: sub, Remarks: '', Date: '' });
+        });
+        rows.push({ Session: 'GRAND TOTAL', 'Payment Mode': '', Amount: offeringTotal, Remarks: '', Date: '' });
+        exportToCSV(rows, `FGBMFI_Offerings_${safeEventName}_${dateStamp}.csv`, cols);
+    };
+
+    const exportOfferingsPDF = () => {
+        const rows: PdfRow[] = [];
+        offeringGroups.forEach(g => {
+            rows.push({ cells: [g.title, '', '', ''], background: '#1e3a8a', color: '#ffffff', bold: true });
+            g.entries.forEach(e => rows.push({ cells: [e.payment_mode || '-', formatCurrency(e.amount), e.remarks || '-', dateStr(e.created_at)] }));
+            const sub = g.entries.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+            rows.push({ cells: ['Subtotal', '', formatCurrency(sub), ''], background: '#fbbf24', color: '#1e3a8a', bold: true });
+        });
+        rows.push({ cells: ['Grand Total', '', formatCurrency(offeringTotal), ''], background: '#1e3a8a', color: '#ffffff', bold: true });
+        exportToPDF(buildPdfTable(`${eventHeading} — Offerings`, eventSubheading, ['Payment Mode', 'Amount', 'Remarks', 'Date'], rows, [1]), `FGBMFI_Offerings_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
+    };
+
+    const exportRedemptionsCSV = () => {
+        const cols = ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'];
+        const rows: Record<string, any>[] = redemptionEntries.map(e => ({ 'Donor Name': e.payer_name || '-', 'Payment Mode': e.payment_mode || '-', Amount: Number(e.amount) || 0, Date: dateStr(e.created_at), Remarks: e.remarks || '' }));
+        rows.push({ 'Donor Name': 'GRAND TOTAL', 'Payment Mode': '', Amount: redemptionTotal, Date: '', Remarks: '' });
+        exportToCSV(rows, `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.csv`, cols);
+    };
+
+    const exportRedemptionsPDF = () => {
+        const rows: PdfRow[] = redemptionEntries.map(e => ({ cells: [e.payer_name || '-', e.payment_mode || '-', formatCurrency(e.amount), dateStr(e.created_at), e.remarks || '-'] }));
+        rows.push({ cells: ['Grand Total', '', formatCurrency(redemptionTotal), '', ''], background: '#1e3a8a', color: '#ffffff', bold: true });
+        exportToPDF(buildPdfTable(`${eventHeading} — Pledge Redemptions`, eventSubheading, ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'], rows, [2]), `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
+    };
+
+    const exportPledgesCSV = () => {
+        const cols = ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+        const rows: Record<string, any>[] = pledges.map(p => ({ 'Donor Name': p.donor_name, District: p.district, 'Pledge Name': p.pledge_name || 'General', Pledged: Number(p.amount_pledged) || 0, Redeemed: Number(p.amount_redeemed) || 0, Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0) }));
+        rows.push({ 'Donor Name': 'GRAND TOTAL', District: '', 'Pledge Name': '', Pledged: pledgeTotalPledged, Redeemed: pledgeTotalRedeemed, Balance: pledgeTotalBalance });
+        exportToCSV(rows, `FGBMFI_Pledges_${safeEventName}_${dateStamp}.csv`, cols);
+    };
+
+    const exportPledgesPDF = () => {
+        const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(p.amount_redeemed), formatCurrency((Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0))] }));
+        rows.push({ cells: ['Grand Total', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], background: '#1e3a8a', color: '#ffffff', bold: true });
+        exportToPDF(buildPdfTable(`${eventHeading} — Pledges`, eventSubheading, ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [3, 4, 5]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
     };
 
     if(!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Active Event</div>;
@@ -168,8 +318,11 @@ const FinancialsPage = () => {
                                 </select>
                             </div>
                             <div className="space-y-1">
-                                <label className="text-[10px] font-black text-gray-400 uppercase">Payer Name (Optional)</label>
-                                <input className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-blue-500 font-medium" placeholder="e.g. Bro John" value={tForm.payer_name} onChange={e => setTForm({...tForm, payer_name: e.target.value})} />
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Payment Mode (Optional)</label>
+                                <select className="w-full p-3 border rounded-xl bg-gray-50 font-bold" value={tForm.payment_mode || ''} onChange={e => setTForm({...tForm, payment_mode: e.target.value})}>
+                                    <option value="">Select Payment Mode</option>
+                                    {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
                             </div>
                             <div className="space-y-1">
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Amount (NGN)</label>
@@ -181,22 +334,52 @@ const FinancialsPage = () => {
                         </form>
                     </div>
                     <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border overflow-x-auto">
-                         <h3 className="font-black mb-6 uppercase text-[10px] text-gray-400 tracking-widest border-b pb-2">Latest Records</h3>
+                         <div className="flex items-center justify-between mb-6 border-b pb-2">
+                             <h3 className="font-black uppercase text-[10px] text-gray-400 tracking-widest">Offerings by Session</h3>
+                             <div className="flex gap-2 no-print">
+                                 <button onClick={exportOfferingsPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-blue-900 text-white hover:bg-blue-800">PDF</button>
+                                 <button onClick={exportOfferingsCSV} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-green-700 text-white hover:bg-green-800">CSV</button>
+                             </div>
+                         </div>
                          <table className="w-full text-xs text-left min-w-[500px]">
-                            <thead><tr className="bg-gray-50 border-b text-[10px] uppercase text-gray-400 font-black"><th className="p-4">Session</th><th className="p-4">Name</th><th className="p-4 text-right">Amount</th><th className="p-4">Remarks</th></tr></thead>
+                            <thead><tr className="bg-gray-50 border-b text-[10px] uppercase text-gray-400 font-black"><th className="p-4">Payment Mode</th><th className="p-4 text-right">Amount</th><th className="p-4">Remarks</th><th className="p-4">Date</th></tr></thead>
                             <tbody className="divide-y">
-                                {entries.filter(e => e.type === FinancialType.OFFERING).slice(-15).reverse().map((p, i) => {
-                                    const s = sessions.find(sn => sn.session_id === p.session_id);
+                                {offeringGroups.length === 0 && (
+                                    <tr><td colSpan={4} className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">No offerings recorded</td></tr>
+                                )}
+                                {offeringGroups.map(g => {
+                                    const sub = g.entries.reduce((s, e) => s + (Number(e.amount) || 0), 0);
                                     return (
-                                        <tr key={i} className="hover:bg-gray-50">
-                                            <td className="p-4 text-[10px] font-black text-gray-400 uppercase">{s?.title || 'Full Event'}</td>
-                                            <td className="p-4 font-bold text-gray-800">{p.payer_name}</td>
-                                            <td className="p-4 font-black text-blue-700 text-right">{formatCurrency(p.amount)}</td>
-                                            <td className="p-4 text-gray-500 italic font-medium">{p.remarks || '-'}</td>
-                                        </tr>
+                                        <Fragment key={g.sessionId || 'master'}>
+                                            <tr className="bg-blue-900 text-white">
+                                                <td colSpan={4} className="p-3 font-black uppercase text-[11px]">{g.title}</td>
+                                            </tr>
+                                            {g.entries.map((e, i) => (
+                                                <tr key={i} className="hover:bg-gray-50">
+                                                    <td className="p-4 font-bold text-gray-800">{e.payment_mode || '-'}</td>
+                                                    <td className="p-4 font-black text-blue-700 text-right">{formatCurrency(e.amount)}</td>
+                                                    <td className="p-4 text-gray-500 italic font-medium">{e.remarks || '-'}</td>
+                                                    <td className="p-4 text-gray-400 font-bold uppercase text-[9px]">{dateStr(e.created_at)}</td>
+                                                </tr>
+                                            ))}
+                                            <tr className="bg-blue-50 font-black">
+                                                <td colSpan={2} className="p-3 uppercase text-[10px] text-blue-900">Subtotal</td>
+                                                <td className="p-3 text-right text-blue-900">{formatCurrency(sub)}</td>
+                                                <td></td>
+                                            </tr>
+                                        </Fragment>
                                     );
                                 })}
                             </tbody>
+                            {offeringGroups.length > 0 && (
+                                <tfoot>
+                                    <tr className="bg-blue-900 text-white font-black">
+                                        <td colSpan={2} className="p-4 uppercase">Grand Total</td>
+                                        <td className="p-4 text-right">{formatCurrency(offeringTotal)}</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            )}
                          </table>
                     </div>
                 </div>
@@ -240,6 +423,13 @@ const FinancialsPage = () => {
                                     <input type="number" className="w-full p-4 border rounded-xl font-black text-2xl text-green-700 bg-green-50/30" value={rForm.amount} onChange={e => setRForm({...rForm, amount: parseFloat(e.target.value)})} />
                                     <div className="text-[10px] text-red-600 font-black text-right mt-1">Bal: {formatCurrency(selectedPledge.amount_pledged - selectedPledge.amount_redeemed)}</div>
                                 </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Payment Mode (Optional)</label>
+                                    <select className="w-full p-3 border rounded-xl bg-gray-50 font-bold" value={rForm.payment_mode} onChange={e => setRForm({...rForm, payment_mode: e.target.value})}>
+                                        <option value="">Select Payment Mode</option>
+                                        {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
                                 <button type="submit" disabled={loading || isLocked} className="w-full py-5 bg-blue-600 text-white font-black rounded-xl shadow-xl disabled:opacity-50 uppercase tracking-widest text-xs">
                                     {isLocked ? 'LOCKED' : (loading ? 'PROCESSING...' : 'RECORD REDEMPTION')}
                                 </button>
@@ -247,19 +437,38 @@ const FinancialsPage = () => {
                         )}
                     </div>
                     <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border overflow-x-auto">
-                         <h3 className="font-black mb-6 uppercase text-[10px] text-gray-400 tracking-widest border-b pb-2">Recent Redemptions</h3>
+                         <div className="flex items-center justify-between mb-6 border-b pb-2">
+                             <h3 className="font-black uppercase text-[10px] text-gray-400 tracking-widest">Recent Redemptions</h3>
+                             <div className="flex gap-2 no-print">
+                                 <button onClick={exportRedemptionsPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-blue-900 text-white hover:bg-blue-800">PDF</button>
+                                 <button onClick={exportRedemptionsCSV} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-green-700 text-white hover:bg-green-800">CSV</button>
+                             </div>
+                         </div>
                          <table className="w-full text-xs text-left min-w-[500px]">
-                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4 text-right">Amount</th><th className="p-4">Date</th><th className="p-4">Remarks</th></tr></thead>
+                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">Payment Mode</th><th className="p-4 text-right">Amount</th><th className="p-4">Date</th><th className="p-4">Remarks</th></tr></thead>
                             <tbody className="divide-y">
-                                {entries.filter(e => e.type === FinancialType.PLEDGE_REDEMPTION).slice(-15).reverse().map((p, i) => (
+                                {redemptionEntries.length === 0 && (
+                                    <tr><td colSpan={5} className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">No redemptions recorded</td></tr>
+                                )}
+                                {redemptionEntries.slice(-15).reverse().map((p, i) => (
                                     <tr key={i} className="hover:bg-gray-50">
                                         <td className="p-4 font-black text-gray-800 uppercase text-[11px]">{p.payer_name}</td>
+                                        <td className="p-4 font-bold text-gray-800">{p.payment_mode || '-'}</td>
                                         <td className="p-4 font-black text-green-700 text-right">{formatCurrency(p.amount)}</td>
-                                        <td className="p-4 text-gray-400 font-bold uppercase text-[9px]">{new Date(p.created_at).toLocaleDateString()}</td>
+                                        <td className="p-4 text-gray-400 font-bold uppercase text-[9px]">{dateStr(p.created_at)}</td>
                                         <td className="p-4 text-gray-500 italic font-medium">{p.remarks}</td>
                                     </tr>
                                 ))}
                             </tbody>
+                            {redemptionEntries.length > 0 && (
+                                <tfoot>
+                                    <tr className="bg-blue-900 text-white font-black">
+                                        <td colSpan={2} className="p-4 uppercase">Grand Total</td>
+                                        <td className="p-4 text-right">{formatCurrency(redemptionTotal)}</td>
+                                        <td colSpan={2}></td>
+                                    </tr>
+                                </tfoot>
+                            )}
                          </table>
                     </div>
                 </div>
@@ -310,10 +519,19 @@ const FinancialsPage = () => {
                         </form>
                     </div>
                     <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border overflow-x-auto">
-                        <h3 className="font-black mb-6 uppercase text-[10px] text-gray-400 tracking-widest border-b pb-2">Active Pledges</h3>
+                         <div className="flex items-center justify-between mb-6 border-b pb-2">
+                             <h3 className="font-black uppercase text-[10px] text-gray-400 tracking-widest">Active Pledges</h3>
+                             <div className="flex gap-2 no-print">
+                                 <button onClick={exportPledgesPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-blue-900 text-white hover:bg-blue-800">PDF</button>
+                                 <button onClick={exportPledgesCSV} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-green-700 text-white hover:bg-green-800">CSV</button>
+                             </div>
+                         </div>
                         <table className="w-full text-xs text-left min-w-[500px]">
                             <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">District</th><th className="p-4">Pledge Name</th><th className="p-4 text-right">Pledged</th><th className="p-4 text-right">Redeemed</th><th className="p-4 text-right">Balance</th></tr></thead>
                             <tbody className="divide-y">
+                                {pledges.length === 0 && (
+                                    <tr><td colSpan={6} className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">No pledges recorded</td></tr>
+                                )}
                                 {pledges.map(p => (
                                     <tr key={p.id} className="hover:bg-gray-50">
                                         <td className="p-4 font-black text-gray-800 uppercase text-[11px]">{p.donor_name}</td>
@@ -325,6 +543,16 @@ const FinancialsPage = () => {
                                     </tr>
                                 ))}
                             </tbody>
+                            {pledges.length > 0 && (
+                                <tfoot>
+                                    <tr className="bg-blue-900 text-white font-black">
+                                        <td colSpan={3} className="p-4 uppercase">Grand Total</td>
+                                        <td className="p-4 text-right">{formatCurrency(pledgeTotalPledged)}</td>
+                                        <td className="p-4 text-right">{formatCurrency(pledgeTotalRedeemed)}</td>
+                                        <td className="p-4 text-right">{formatCurrency(pledgeTotalBalance)}</td>
+                                    </tr>
+                                </tfoot>
+                            )}
                         </table>
                     </div>
                 </div>

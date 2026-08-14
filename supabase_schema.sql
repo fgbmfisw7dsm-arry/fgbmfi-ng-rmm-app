@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS financial_entries (
     amount DECIMAL(15,2) NOT NULL,
     type TEXT NOT NULL,
     payer_name TEXT,
+    payment_mode TEXT,
     remarks TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

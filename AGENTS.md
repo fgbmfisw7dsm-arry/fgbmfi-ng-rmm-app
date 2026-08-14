@@ -539,6 +539,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Route guards (`App.tsx`):** `ADMIN_AND_EVENT_ADMIN`, `ADMIN_REGISTRAR_AND_EVENT_ADMIN`, `ADMIN_FINANCE_AND_EVENT_ADMIN` role lists.
 - **DB migration (`supabase_migration_v1.8_event_admin.sql` + `_financials.sql`):** extends `app_users_role_check`, adds `is_event_admin_user()`, and adds `OR is_event_admin_user()` to registrar/finance write policies (delegates, checkins, session ministry, badge batches/logs, pledges, financial_entries). Delete policies remain admin-only.
 
+### 26. Financial Payment Mode + Session Grouping + Export (v1.9)
+- **Payment Mode:** new nullable `financial_entries.payment_mode TEXT` column (`supabase_migration_sprint17_financial_payment_mode.sql`). Offerings and Pledge Redemptions record a mode from `PAYMENT_MODES = ['Cash', 'POS', 'Bank Transfer', 'Cheque']` (in `types.ts`). `payer_name` is retained for Redemptions only (auto-filled donor name); Offerings no longer populate it.
+- **Offerings grouped by session:** FinancialsPage "Offerings" tab groups entries by `session_id` (sessions in order, then "Full Event (Master)" for null/unknown session), rendering a title header row + highlighted subtotal per session and a Grand Total row in `<tfoot>`. Redemptions/Pledges remain flat lists but each gained a Grand Total row (Redemptions also gained a Payment Mode column).
+- **Export:** PDF/CSV buttons on all three tabs. PDF builds a hidden print table via `buildPdfTable` and reuses `exportToPDF(..., 'report')`; CSV uses `exportToCSV`. Filenames: `FGBMFI_{Offerings|Redemptions|Pledges}_{Event}_{date}.{pdf|csv}`.
+- **types.ts exception:** `FinancialEntry.payment_mode?: string` and `PAYMENT_MODES` / `PaymentMode` were added — additive, documented (mirrors the `pledge_name` precedent).
+- **Audit log:** `addFinancialEntry` audit summary now reports `payment_mode` for Offerings and `payer_name` for Redemptions.
+
 ## Code Conventions
 
 ### Naming

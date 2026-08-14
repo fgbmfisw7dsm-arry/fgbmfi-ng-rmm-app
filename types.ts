@@ -26,6 +26,9 @@ export enum FinancialType {
   PLEDGE_REDEMPTION = 'pledge_redemption'
 }
 
+export const PAYMENT_MODES = ['Cash', 'POS', 'Bank Transfer', 'Cheque'] as const;
+export type PaymentMode = typeof PAYMENT_MODES[number];
+
 export enum UserRole {
   NATIONAL_ADMIN = 'national_admin',
   REGIONAL_ADMIN = 'regional_admin',
@@ -172,6 +175,7 @@ export interface FinancialEntry {
   amount: number;
   type: FinancialType;
   payer_name?: string;
+  payment_mode?: string;
   remarks: string;
   created_at: string;
 }
