@@ -5,84 +5,44 @@ import { FinancialEntry, Pledge, Delegate, FinancialType, Session, getScopeFilte
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToCSV, exportToPDF } from '../services/utils';
 
-type PdfRow = { cells: string[]; background?: string; color?: string; bold?: boolean; colSpan?: boolean };
+type PdfRow = { cells: string[]; kind?: 'header' | 'subtotal' | 'grand' | 'row' };
 
-const buildPdfTable = (heading: string, subheading: string, headers: string[], rows: PdfRow[], numericCols: number[]): HTMLElement => {
-    const root = document.createElement('div');
-    root.className = 'print-mode';
-    root.style.background = '#ffffff';
-    root.style.padding = '24px';
-    root.style.fontFamily = 'Helvetica, Arial, sans-serif';
+const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    const h = document.createElement('div');
-    h.textContent = heading;
-    h.style.fontSize = '22px';
-    h.style.fontWeight = 'bold';
-    h.style.color = '#1e3a8a';
-    h.style.marginBottom = '2px';
-    root.appendChild(h);
-
-    const sub = document.createElement('div');
-    sub.textContent = subheading;
-    sub.style.fontSize = '12px';
-    sub.style.color = '#64748b';
-    sub.style.fontWeight = 'bold';
-    sub.style.textTransform = 'uppercase';
-    sub.style.marginBottom = '14px';
-    root.appendChild(sub);
-
-    const table = document.createElement('table');
-    table.style.width = '100%';
-    table.style.borderCollapse = 'collapse';
-
-    const thead = document.createElement('thead');
-    const hr = document.createElement('tr');
-    headers.forEach(hh => {
-        const th = document.createElement('th');
-        th.textContent = hh;
-        th.style.textAlign = 'left';
-        th.style.padding = '8px';
-        th.style.borderBottom = '2px solid #1e3a8a';
-        th.style.fontSize = '10px';
-        th.style.textTransform = 'uppercase';
-        th.style.color = '#1e3a8a';
-        hr.appendChild(th);
-    });
-    thead.appendChild(hr);
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    rows.forEach(r => {
-        const tr = document.createElement('tr');
-        if (r.colSpan) {
-            const td = document.createElement('td');
-            td.textContent = r.cells[0] || '';
-            td.colSpan = headers.length;
-            td.style.padding = '6px 8px';
-            td.style.fontSize = '11px';
-            td.style.fontWeight = 'bold';
-            if (r.background) td.style.background = r.background;
-            if (r.color) td.style.color = r.color;
-            tr.appendChild(td);
-        } else {
-            r.cells.forEach((c, ci) => {
-                const td = document.createElement('td');
-                td.textContent = c;
-                td.style.padding = '6px 8px';
-                td.style.borderBottom = '1px solid #e2e8f0';
-                td.style.fontSize = '11px';
-                if (r.background) td.style.background = r.background;
-                if (r.color) td.style.color = r.color;
-                if (r.bold) td.style.fontWeight = 'bold';
-                if (numericCols.includes(ci)) { td.style.textAlign = 'right'; td.style.fontWeight = '700'; }
-                tr.appendChild(td);
-            });
+const buildPdfHtml = (heading: string, subheading: string, headers: string[], rows: PdfRow[], numericCols: number[]): string => {
+    const th = headers.map(h => `<th class="p-3 border text-left text-[9px] font-black uppercase text-gray-500 bg-gray-50">${esc(h)}</th>`).join('');
+    const body = rows.map(r => {
+        if (r.kind === 'header') {
+            return `<tr><td colspan="${headers.length}" class="p-3 bg-blue-900 text-white font-black uppercase text-[11px]">${esc(r.cells[0])}</td></tr>`;
         }
-        tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    root.appendChild(table);
-    return root;
+        const rowClass = r.kind === 'subtotal' ? 'print-gold font-black' : r.kind === 'grand' ? 'bg-blue-900 text-white font-black' : '';
+        const cells = r.cells.map((c, ci) => {
+            const align = numericCols.includes(ci) ? 'text-right' : 'text-left';
+            return `<td class="p-3 border ${align} ${rowClass}">${esc(c)}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<div class="print-mode bg-white p-8" style="font-family: Helvetica, Arial, sans-serif;">
+        <div class="text-2xl font-black text-blue-900">${esc(heading)}</div>
+        <div class="text-xs font-black uppercase text-gray-500 mb-4">${esc(subheading)}</div>
+        <table class="w-full min-w-[1000px] text-[10px] text-left border-collapse">
+            <thead><tr class="border">${th}</tr></thead>
+            <tbody>${body}</tbody>
+        </table>
+    </div>`;
+};
+
+const exportTablePdf = async (html: string, filename: string) => {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    container.style.position = 'absolute';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    document.body.appendChild(container);
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => setTimeout(r, 300));
+    exportToPDF(container, filename, 'landscape', 1600);
+    document.body.removeChild(container);
 };
 
 const Pager = ({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) => {
@@ -308,7 +268,7 @@ const FinancialsPage = () => {
         const rows: Record<string, any>[] = [];
         offeringFlat.forEach((e, i) => {
             const key = e.session_id || '';
-            rows.push({ Session: sessionTitle(e.session_id), 'Payment Mode': e.payment_mode || '-', Amount: Number(e.amount) || 0, Remarks: e.remarks || '', Date: dateStr(e.created_at) });
+            rows.push({ Session: sessionTitle(e.session_id), 'Payment Mode': e.payment_mode || 'Unspecified', Amount: Number(e.amount) || 0, Remarks: e.remarks || '', Date: dateStr(e.created_at) });
             if (lastIndexOfSession.get(key) === i) {
                 rows.push({ Session: `${sessionTitle(e.session_id)} — SUBTOTAL`, 'Payment Mode': '', Amount: offeringTotalsBySession.get(key) || 0, Remarks: '', Date: '' });
             }
@@ -323,29 +283,29 @@ const FinancialsPage = () => {
         offeringFlat.forEach((e, i) => {
             const key = e.session_id || '';
             if (key !== currentKey) {
-                rows.push({ cells: [sessionTitle(e.session_id)], colSpan: true, background: '#1e3a8a', color: '#ffffff', bold: true });
+                rows.push({ cells: [sessionTitle(e.session_id)], kind: 'header' });
                 currentKey = key;
             }
-            rows.push({ cells: [e.payment_mode || '-', formatCurrency(e.amount), e.remarks || '-', dateStr(e.created_at)] });
+            rows.push({ cells: [e.payment_mode || 'Unspecified', formatCurrency(e.amount), e.remarks || '-', dateStr(e.created_at)] });
             if (lastIndexOfSession.get(key) === i) {
-                rows.push({ cells: ['Subtotal', '', formatCurrency(offeringTotalsBySession.get(key) || 0), ''], background: '#fbbf24', color: '#1e3a8a', bold: true });
+                rows.push({ cells: ['Subtotal', '', formatCurrency(offeringTotalsBySession.get(key) || 0), ''], kind: 'subtotal' });
             }
         });
-        rows.push({ cells: ['Grand Total', '', formatCurrency(offeringTotal), ''], background: '#1e3a8a', color: '#ffffff', bold: true });
-        exportToPDF(buildPdfTable(eventTitle, `Offerings · ${dateRange}`, ['Payment Mode', 'Amount', 'Remarks', 'Date'], rows, [1]), `FGBMFI_Offerings_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
+        rows.push({ cells: ['Grand Total', '', formatCurrency(offeringTotal), ''], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Offerings · ${dateRange}`, ['Payment Mode', 'Amount', 'Remarks', 'Date'], rows, [1]), `FGBMFI_Offerings_${safeEventName}_${dateStamp}.pdf`);
     };
 
     const exportRedemptionsCSV = () => {
         const cols = ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'];
-        const rows: Record<string, any>[] = redemptionEntries.map(e => ({ 'Donor Name': e.payer_name || '-', 'Payment Mode': e.payment_mode || '-', Amount: Number(e.amount) || 0, Date: dateStr(e.created_at), Remarks: e.remarks || '' }));
+        const rows: Record<string, any>[] = redemptionEntries.map(e => ({ 'Donor Name': e.payer_name || '-', 'Payment Mode': e.payment_mode || 'Unspecified', Amount: Number(e.amount) || 0, Date: dateStr(e.created_at), Remarks: e.remarks || '' }));
         rows.push({ 'Donor Name': 'GRAND TOTAL', 'Payment Mode': '', Amount: redemptionTotal, Date: '', Remarks: '' });
         exportToCSV(rows, `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.csv`, cols);
     };
 
     const exportRedemptionsPDF = () => {
-        const rows: PdfRow[] = redemptionEntries.map(e => ({ cells: [e.payer_name || '-', e.payment_mode || '-', formatCurrency(e.amount), dateStr(e.created_at), e.remarks || '-'] }));
-        rows.push({ cells: ['Grand Total', '', formatCurrency(redemptionTotal), '', ''], background: '#1e3a8a', color: '#ffffff', bold: true });
-        exportToPDF(buildPdfTable(eventTitle, `Pledge Redemptions · ${dateRange}`, ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'], rows, [2]), `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
+        const rows: PdfRow[] = redemptionEntries.map(e => ({ cells: [e.payer_name || '-', e.payment_mode || 'Unspecified', formatCurrency(e.amount), dateStr(e.created_at), e.remarks || '-'] }));
+        rows.push({ cells: ['Grand Total', '', formatCurrency(redemptionTotal), '', ''], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Pledge Redemptions · ${dateRange}`, ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'], rows, [2]), `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.pdf`);
     };
 
     const exportPledgesCSV = () => {
@@ -357,8 +317,8 @@ const FinancialsPage = () => {
 
     const exportPledgesPDF = () => {
         const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(p.amount_redeemed), formatCurrency((Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0))] }));
-        rows.push({ cells: ['Grand Total', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], background: '#1e3a8a', color: '#ffffff', bold: true });
-        exportToPDF(buildPdfTable(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [3, 4, 5]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`, 'portrait', undefined, 'report');
+        rows.push({ cells: ['Grand Total', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [3, 4, 5]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`);
     };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Active Event</div>;
@@ -451,7 +411,7 @@ const FinancialsPage = () => {
                                         const e = t.e!;
                                         return (
                                             <tr key={i} className="hover:bg-gray-50">
-                                                <td className="p-4 font-bold text-gray-800">{e.payment_mode || '-'}</td>
+                                                <td className="p-4 font-bold text-gray-800">{e.payment_mode || 'Unspecified'}</td>
                                                 <td className="p-4 font-black text-blue-700 text-right">{formatCurrency(e.amount)}</td>
                                                 <td className="p-4 text-gray-500 italic font-medium">{e.remarks || '-'}</td>
                                                 <td className="p-4 text-gray-400 font-bold uppercase text-[9px]">{dateStr(e.created_at)}</td>
@@ -544,7 +504,7 @@ const FinancialsPage = () => {
                                 {redemptionPage.rows.map((p, i) => (
                                     <tr key={i} className="hover:bg-gray-50">
                                         <td className="p-4 font-black text-gray-800 uppercase text-[11px]">{p.payer_name}</td>
-                                        <td className="p-4 font-bold text-gray-800">{p.payment_mode || '-'}</td>
+                                        <td className="p-4 font-bold text-gray-800">{p.payment_mode || 'Unspecified'}</td>
                                         <td className="p-4 font-black text-green-700 text-right">{formatCurrency(p.amount)}</td>
                                         <td className="p-4 text-gray-400 font-bold uppercase text-[9px]">{dateStr(p.created_at)}</td>
                                         <td className="p-4 text-gray-500 italic font-medium">{p.remarks}</td>
