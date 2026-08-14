@@ -546,6 +546,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **types.ts exception:** `FinancialEntry.payment_mode?: string` and `PAYMENT_MODES` / `PaymentMode` were added — additive, documented (mirrors the `pledge_name` precedent).
 - **Audit log:** `addFinancialEntry` audit summary now reports `payment_mode` for Offerings and `payer_name` for Redemptions.
 
+### 27. Scale Remediation for 25K Delegates (Sprint 18)
+- **Check-in Pass 4 (4-digit legacy fallback):** paginated (1000/page, `order('delegate_id')`) instead of `.limit(5000)` — stays correct past 5K delegates (`checkInByCode` in `supabaseService.ts`). Passes 1–3 remain the indexed fast path.
+- **Realtime event scoping:** `FinancialsPage` realtime subscriptions now filter `event_id=eq.{activeEventId}` (already the case in `AdminDashboard` and `MasterListModule`).
+- **`getStats` fallback bounded:** the client fallback no longer full-scans `checkins`; it uses indexed counts (`totalDelegates`, `totalArrivals`, `totalSessionAttendance`), `recentActivity` (latest 200 filtered → 10), and `financials` sum. Rank/district breakdown charts are omitted in the rare fallback mode (RPC `get_event_dashboard_stats` is the primary path).
+- **Reports refactor:** `ReportsPage` no longer loads the full delegates+checkins tables via `getAllDataForExport`. New `get_report_aggregates(p_event_id, p_session_id)` RPC (`supabase_migration_sprint18_report_aggregates.sql`) returns `attendedDelegates` (arrival-or-session join), `sessionAttendance`, `financials`, `pledges` server-side. `db.getReportAggregates` wraps it with a bounded fallback. Attendance/summary tabs consume the new shape; identity dedup is preserved in `reportData`.
+- **Silent `.limit(5000/10000)` truncation removed:** `harmonizeDistricts`, `deduplicateDelegates`, `deleteScrambledImportDelegates`, and `analyzeScrambledDelegates` now paginate their candidate fetches (1000/page).
+- **FinancialsPage `paginate<T>`** is a module-level helper invoked with explicit type params (`paginate<FinancialEntry>` / `paginate<Pledge>`); generic inference from `useMemo`-derived arrays was unreliable under `tsc`.
+
 ## Code Conventions
 
 ### Naming

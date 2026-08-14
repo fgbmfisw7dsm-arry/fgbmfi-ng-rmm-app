@@ -909,11 +909,17 @@ export const db = {
             if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
         }
         
-        // Pass 4: 4-digit deterministic code fallback (legacy)
+        // Pass 4: 4-digit deterministic code fallback (legacy) — paginated to stay correct at scale
         if (code.length <= 10) {
-            const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').eq('event_id', eventId).limit(5000);
-            const match = delegates?.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
-            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+            let from = 0;
+            while (true) {
+                const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').eq('event_id', eventId).order('delegate_id').range(from, from + 999);
+                if (!delegates || delegates.length === 0) break;
+                const match = delegates.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
+                if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+                if (delegates.length < 1000) break;
+                from += 1000;
+            }
         }
         
         // Not found — return parsed data for confirmation form
@@ -1113,61 +1119,48 @@ export const db = {
             }
         } catch {}
 
-        console.log('[getStats] RPC failed or missing fields, using client fallback. eventId:', eventId);
+        console.log('[getStats] RPC failed or missing fields, using bounded client fallback. eventId:', eventId);
 
         const regionPrefix = region ? `${normalize(region).toUpperCase()}%` : null;
-        const filter = region ? null : (district ? normalize(district).toUpperCase() : null);
-        let delegatesQuery = supabase.from('delegates').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
+        const districtFilter = region ? null : (district ? normalize(district).toUpperCase() : null);
+
+        let delegatesQuery = supabase.from('delegates').select('delegate_id', { count: 'exact', head: true }).eq('event_id', eventId);
         if (regionPrefix) delegatesQuery = delegatesQuery.ilike('district', regionPrefix);
-        else if (filter) delegatesQuery = delegatesQuery.ilike('district', filter);
+        else if (districtFilter) delegatesQuery = delegatesQuery.ilike('district', districtFilter);
         const { count: totalDelegatesCount } = await delegatesQuery;
 
-        const rankCounts: Record<string, number> = {};
-        const districtCounts: Record<string, number> = {};
-        const seenIdentities = new Set<string>();
-        const arrivalIdentities = new Set<string>();
-        let totalSessionAttendance = 0;
-        const recentActivity: CheckIn[] = [];
-        let from = 0;
+        const { count: totalArrivals } = await supabase.from('checkins').select('delegate_id', { count: 'exact', head: true }).eq('event_id', eventId).is('session_id', null);
+        const { count: totalSessionAttendance } = await supabase.from('checkins').select('delegate_id', { count: 'exact', head: true }).eq('event_id', eventId).not('session_id', 'is', null);
 
-        while (true) {
-            const { data, error } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).range(from, from + 999);
-            if (error || !data || data.length === 0) break;
-            data.forEach(c => {
-                if (!c.delegates) return;
-                const d = c.delegates;
-                const districtNorm = normalize(d.district).toUpperCase();
-                if (regionPrefix) {
-                    if (!districtNorm.startsWith(regionPrefix.replace('%', ''))) return;
-                } else if (filter && districtNorm !== filter) return;
-                const identityKey = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.district)}|${normalize(d.rank)}`.toUpperCase();
-                if (!seenIdentities.has(identityKey)) {
-                    seenIdentities.add(identityKey);
-                    rankCounts[d.rank || 'OTHER'] = (rankCounts[d.rank || 'OTHER'] || 0) + 1;
-                    districtCounts[d.district || 'UNKNOWN'] = (districtCounts[d.district || 'UNKNOWN'] || 0) + 1;
-                    if (recentActivity.length < 10) {
-                        recentActivity.push({
-                            checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
-                            delegate_name: `${d.first_name} ${d.last_name}`, district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
-                        });
-                    }
-                }
-                if (!c.session_id && !arrivalIdentities.has(identityKey)) {
-                    arrivalIdentities.add(identityKey);
-                }
-                if (c.session_id) {
-                    totalSessionAttendance++;
-                }
+        const recentActivity: CheckIn[] = [];
+        const { data: recentRows } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).limit(200);
+        for (const c of (recentRows || [])) {
+            const d = c.delegates;
+            if (!d) continue;
+            const dnorm = normalize(d.district).toUpperCase();
+            if (regionPrefix && !dnorm.startsWith(regionPrefix.replace('%', ''))) continue;
+            if (districtFilter && dnorm !== districtFilter) continue;
+            recentActivity.push({
+                checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
+                delegate_name: `${d.first_name} ${d.last_name}`, district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
             });
-            if (data.length < 1000) break;
-            from += 1000;
+            if (recentActivity.length >= 10) break;
         }
 
         let financialsSum = 0;
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
 
-        const stats: DashboardStats = { totalDelegates: totalDelegatesCount || 0, totalCheckIns: seenIdentities.size, totalArrivals: arrivalIdentities.size, totalSessionAttendance, totalFinancials: financialsSum, checkInsByRank: rankCounts, checkInsByDistrict: districtCounts, recentActivity: recentActivity };
+        const stats: DashboardStats = {
+            totalDelegates: totalDelegatesCount || 0,
+            totalCheckIns: totalArrivals || 0,
+            totalArrivals: totalArrivals || 0,
+            totalSessionAttendance: totalSessionAttendance || 0,
+            totalFinancials: financialsSum,
+            checkInsByRank: {},
+            checkInsByDistrict: {},
+            recentActivity
+        };
 
         if (stats.totalArrivals > stats.totalDelegates) {
             console.warn('[getStats] DIAGNOSTIC (fallback): arrivals exceed delegates — data-integrity gap detected. totalArrivals:', stats.totalArrivals, 'totalDelegates:', stats.totalDelegates, 'eventId:', eventId);
@@ -1201,6 +1194,21 @@ export const db = {
         };
         const [d, c, f, p] = await Promise.all([ fetchAll('delegates', eventId), fetchAll('checkins', eventId), fetchAll('financial_entries', eventId), fetchAll('pledges', eventId) ]);
         return { delegates: d, checkins: c, financials: f, pledges: p };
+    },
+
+    getReportAggregates: async (eventId: string, sessionId?: string): Promise<{ attendedDelegates: any[]; sessionAttendance: { session_id: string; attendance: number }[]; financials: FinancialEntry[]; pledges: Pledge[] }> => {
+        const { data, error } = await supabase.rpc('get_report_aggregates', { p_event_id: eventId, p_session_id: sessionId || null });
+        if (error || !data) {
+            console.log('[getReportAggregates] RPC failed, using fallback. eventId:', eventId, 'error:', (error as any)?.message);
+            const [financials, pledges] = await Promise.all([db.getFinancialEntriesForEvent(eventId), db.getPledgesForEvent(eventId)]);
+            return { attendedDelegates: [], sessionAttendance: [], financials, pledges };
+        }
+        return {
+            attendedDelegates: (data as any).attendedDelegates || [],
+            sessionAttendance: (data as any).sessionAttendance || [],
+            financials: (data as any).financials || [],
+            pledges: (data as any).pledges || []
+        };
     },
 
     searchPledges: async (query: string, eventId: string, district?: string, region?: string): Promise<Pledge[]> => {
@@ -1277,24 +1285,31 @@ export const db = {
             officialDistricts.add(normalize(d).toUpperCase());
           }
         }
-        const { data: candidates, error: fetchErr } = await supabase
-          .from('delegates')
-          .select('delegate_id, first_name, last_name, district, chapter')
-          .eq('event_id', eventId)
-          .limit(10000);
-        const totalDelegates = candidates?.length || 0;
+        const candidates: any[] = [];
         const districtSamples = new Set<string>();
-        if (candidates) {
-          for (const d of candidates) {
-            districtSamples.add((d.district || '').trim());
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from('delegates')
+            .select('delegate_id, first_name, last_name, district, chapter')
+            .eq('event_id', eventId)
+            .order('delegate_id')
+            .range(from, from + 999);
+          if (error) {
+            console.error('[deleteScrambledImportDelegates] fetch error:', error);
+            break;
           }
+          if (!data || data.length === 0) break;
+          candidates.push(...data);
+          if (data.length < 1000) break;
+          from += 1000;
+        }
+        const totalDelegates = candidates.length;
+        for (const d of candidates) {
+          districtSamples.add((d.district || '').trim());
         }
         const sampleList = Array.from(districtSamples).filter(Boolean).sort().slice(0, 50);
-        if (fetchErr) {
-          console.error('[deleteScrambledImportDelegates] fetch error:', fetchErr);
-          return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
-        }
-        if (!candidates || candidates.length === 0) {
+        if (candidates.length === 0) {
           return { deleted: 0, preview: [], samples: sampleList, totalDelegates };
         }
         function isOfficialDistrict(dist: string): boolean {
@@ -1357,16 +1372,29 @@ export const db = {
             for (const d of settings.districts) officialDistricts.add(normalize(d).toUpperCase());
         }
         const offList = Array.from(officialDistricts).sort();
-        const { data: candidates, error: fetchErr } = await supabase
+        const candidates: any[] = [];
+        const districtSamples = new Set<string>();
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
             .from('delegates')
             .select('delegate_id, first_name, last_name, district, chapter, title, phone, email')
             .eq('event_id', eventId)
-            .limit(10000);
-        const totalDelegates = candidates?.length || 0;
-        const districtSamples = new Set<string>();
-        if (candidates) for (const d of candidates) districtSamples.add((d.district || '').trim());
+            .order('delegate_id')
+            .range(from, from + 999);
+          if (error) {
+            console.error('[analyzeScrambledDelegates] fetch error:', error);
+            break;
+          }
+          if (!data || data.length === 0) break;
+          candidates.push(...data);
+          if (data.length < 1000) break;
+          from += 1000;
+        }
+        const totalDelegates = candidates.length;
+        for (const d of candidates) districtSamples.add((d.district || '').trim());
         const sampleList = Array.from(districtSamples).filter(Boolean).sort().slice(0, 50);
-        if (fetchErr || !candidates) return { analyses: [], samples: sampleList, totalDelegates, officialDistricts: offList };
+        if (candidates.length === 0) return { analyses: [], samples: sampleList, totalDelegates, officialDistricts: offList };
 
         function isOfficial(dist: string): boolean {
             const d = normalize(dist).toUpperCase();
@@ -1575,9 +1603,17 @@ export const db = {
         if (!settings) return 0;
         const official: string[] = (settings.districts || []).map(d => normalize(d));
         console.log(`[harmonizeDistricts] Official districts (${official.length}): ${official.join(', ')}`);
-        let q = supabase.from('delegates').select('delegate_id, district').limit(5000);
-        if (eventId) q = q.eq('event_id', eventId);
-        const { data: delegates } = await q;
+        const delegates: { delegate_id: string; district: string }[] = [];
+        let from = 0;
+        while (true) {
+            let q = supabase.from('delegates').select('delegate_id, district').order('delegate_id').range(from, from + 999);
+            if (eventId) q = q.eq('event_id', eventId);
+            const { data } = await q;
+            if (!data || data.length === 0) break;
+            delegates.push(...(data as { delegate_id: string; district: string }[]));
+            if (data.length < 1000) break;
+            from += 1000;
+        }
         let count = 0;
         const autoRegistered = new Set<string>();
         const resolved = new Map<string, string>();
@@ -1597,7 +1633,7 @@ export const db = {
             return fullName;
         };
 
-        for (const d of (delegates || [])) {
+        for (const d of delegates) {
             const rawDistrict = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
             if (!rawDistrict) continue;
             const abbrResolved = tryResolve(rawDistrict);
@@ -1628,13 +1664,21 @@ export const db = {
     },
     
     deduplicateDelegates: async (eventId?: string) => {
-        let q = supabase.from('delegates').select('*').limit(5000);
-        if (eventId) q = q.eq('event_id', eventId);
-        const { data } = await q;
-        if (!data) return 0;
+        const all: any[] = [];
+        let from = 0;
+        while (true) {
+            let q = supabase.from('delegates').select('*').order('delegate_id').range(from, from + 999);
+            if (eventId) q = q.eq('event_id', eventId);
+            const { data } = await q;
+            if (!data || data.length === 0) break;
+            all.push(...data);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        if (all.length === 0) return 0;
         const seen = new Set();
         const dups = [];
-        for (const d of data) {
+        for (const d of all) {
             const key = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
             if (seen.has(key)) dups.push(d.delegate_id); else seen.add(key);
         }

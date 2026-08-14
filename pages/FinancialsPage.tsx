@@ -60,6 +60,19 @@ const Pager = ({ page, totalPages, onPage }: { page: number; totalPages: number;
     );
 };
 
+function paginate<T>(arr: T[], pg: number, pageSize: number): { rows: T[]; totalPages: number; page: number; from: number; to: number; total: number } {
+    const totalPages = Math.max(1, Math.ceil(arr.length / pageSize));
+    const safePage = Math.min(pg, totalPages);
+    return {
+        rows: arr.slice((safePage - 1) * pageSize, safePage * pageSize),
+        totalPages,
+        page: safePage,
+        from: arr.length === 0 ? 0 : (safePage - 1) * pageSize + 1,
+        to: Math.min(safePage * pageSize, arr.length),
+        total: arr.length
+    };
+}
+
 const FinancialsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const isLocked = activeEvent?.is_active === false;
@@ -92,9 +105,9 @@ const FinancialsPage = () => {
 
     useEffect(() => {
         loadData();
-        const financialSub = supabase.channel('financial_realtime')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_entries' }, () => loadData())
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'pledges' }, () => loadData())
+        const financialSub = supabase.channel(`financial_realtime_${activeEventId}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_entries', filter: `event_id=eq.${activeEventId}` }, () => loadData())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'pledges', filter: `event_id=eq.${activeEventId}` }, () => loadData())
           .subscribe();
         return () => { financialSub.unsubscribe(); };
     }, [activeEventId]);
@@ -240,22 +253,10 @@ const FinancialsPage = () => {
     }, [offeringFlat]);
 
     const PAGE_SIZE = 25;
-    const paginate = <T,>(arr: T[], pg: number): { rows: T[]; totalPages: number; page: number; from: number; to: number; total: number } => {
-        const totalPages = Math.max(1, Math.ceil(arr.length / PAGE_SIZE));
-        const safePage = Math.min(pg, totalPages);
-        return {
-            rows: arr.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-            totalPages,
-            page: safePage,
-            from: arr.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1,
-            to: Math.min(safePage * PAGE_SIZE, arr.length),
-            total: arr.length
-        };
-    };
 
-    const offeringPage = paginate(offeringFlat, page);
-    const redemptionPage = paginate(redemptionEntries, page);
-    const pledgePage = paginate(pledges, page);
+    const offeringPage = paginate<FinancialEntry>(offeringFlat, page, PAGE_SIZE);
+    const redemptionPage = paginate<FinancialEntry>(redemptionEntries, page, PAGE_SIZE);
+    const pledgePage = paginate<Pledge>(pledges, page, PAGE_SIZE);
 
     const safeEventName = (activeEvent?.name || 'Event').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const dateStamp = new Date().toISOString().slice(0, 10);

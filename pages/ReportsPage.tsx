@@ -32,7 +32,7 @@ const ReportsPage = () => {
         const fetchData = async () => {
             try {
                 const [exportData, sessionData, eventList, sysSettings, ministry] = await Promise.all([
-                    db.getAllDataForExport(activeEventId), 
+                    db.getReportAggregates(activeEventId, selectedSessionId || undefined), 
                     db.getSessions(activeEventId), 
                     db.getEvents(),
                     db.getSettings(),
@@ -44,21 +44,17 @@ const ReportsPage = () => {
                 const scope = getScopeFilter(user);
                 if (scope.region) {
                     const regionPrefix = norm(scope.region);
-                    exportData.delegates = (exportData.delegates || []).filter((d: any) => 
+                    exportData.attendedDelegates = (exportData.attendedDelegates || []).filter((d: any) => 
                         norm(d.district).startsWith(regionPrefix)
                     );
-                    const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
-                    exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
                     exportData.pledges = (exportData.pledges || []).filter((p: any) => 
                         norm(p.district).startsWith(regionPrefix)
                     );
                 } else if (scope.district) {
                     const userDistrictNorm = norm(scope.district);
-                    exportData.delegates = (exportData.delegates || []).filter((d: any) => 
+                    exportData.attendedDelegates = (exportData.attendedDelegates || []).filter((d: any) => 
                         norm(d.district) === userDistrictNorm
                     );
-                    const myDelegateIds = new Set(exportData.delegates.map((d: any) => d.delegate_id));
-                    exportData.checkins = (exportData.checkins || []).filter((c: any) => myDelegateIds.has(c.delegate_id));
                     exportData.pledges = (exportData.pledges || []).filter((p: any) => 
                         norm(p.district) === userDistrictNorm
                     );
@@ -79,7 +75,7 @@ const ReportsPage = () => {
 
         fetchData();
         return () => { mounted = false; };
-    }, [activeEventId, user?.id]);
+    }, [activeEventId, user?.id, selectedSessionId]);
 
     useEffect(() => {
         if (!activeEventId || activeTab !== 'ministryReport') return;
@@ -92,7 +88,8 @@ const ReportsPage = () => {
 
     const reportData = useMemo(() => {
         if (!data || !settings) return null;
-        const { delegates = [], checkins = [], financials = [], pledges = [] } = data;
+        const { attendedDelegates = [], financials = [], pledges = [] } = data;
+        const sessionAttendance: { session_id: string; attendance: number }[] = data.sessionAttendance || [];
         
         const calculatedPledges = pledges.map((p: Pledge) => {
             const redemptionsForThisPledge = financials.filter((f: FinancialEntry) => 
@@ -102,34 +99,15 @@ const ReportsPage = () => {
             return { ...p, amount_redeemed: totalRedeemed };
         });
 
-        let filteredCheckIns = [];
-        if (selectedSessionId) {
-            filteredCheckIns = checkins.filter((c: any) => c.session_id === selectedSessionId);
-        } else {
-            const masterMap = new Map();
-            checkins.forEach((c: any) => {
-                if (!masterMap.has(c.delegate_id)) {
-                    masterMap.set(c.delegate_id, c);
-                } else {
-                    const existing = masterMap.get(c.delegate_id);
-                    if (!existing.session_id && c.session_id) return; 
-                    if (existing.session_id && !c.session_id) masterMap.set(c.delegate_id, c); 
-                }
-            });
-            filteredCheckIns = Array.from(masterMap.values());
-        }
-
         const identityMap = new Map();
-        filteredCheckIns.forEach((c: any) => {
-            const d = delegates.find((del: any) => del.delegate_id === c.delegate_id);
-            if (!d) return;
+        attendedDelegates.forEach((d: any) => {
             const identityKey = `${norm(d.first_name)}|${norm(d.last_name)}|${norm(d.district)}|${norm(d.chapter)}`;
             if (!identityMap.has(identityKey)) {
-                identityMap.set(identityKey, { ...d, checked_in_at: c.checked_in_at });
+                identityMap.set(identityKey, d);
             }
         });
+        const dedupedAttended = Array.from(identityMap.values());
 
-        const attendedDelegates = Array.from(identityMap.values());
         const officialDistricts = (settings.districts || []).map(d => d.trim()).sort((a, b) => 
             a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
         );
@@ -137,8 +115,8 @@ const ReportsPage = () => {
         const officeColumns = (settings.offices || []).sort();
         const delegateTypeColumns = (settings.delegate_types || []).sort();
 
-        return { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges };
-    }, [data, selectedSessionId, settings]);
+        return { attendedDelegates: dedupedAttended, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges, sessionAttendance };
+    }, [data, settings]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
@@ -218,7 +196,7 @@ const ReportsPage = () => {
 
         if (activeTab === 'sessionsSummary') {
             const cols = ['Session', 'Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD', 'Offering', 'Pledge Redemption', 'Financial Total'];
-            const attOf = (sid: string) => (data?.checkins || []).filter((c: any) => c.session_id === sid).length;
+            const attOf = (sid: string) => reportData.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0;
             const respOf = (sid: string, type: SessionResponseType) => (ministryData?.responses || []).filter((r: any) => r.session_id === sid && r.response_type === type).length;
             const vdOf = (sid: string) => (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === sid).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
             const offOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
@@ -679,7 +657,7 @@ const ReportsPage = () => {
                                 </thead>
                                 <tbody className="divide-y">
                                     {sessions.map(s => {
-                                        const att = (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length;
+                                        const att = reportData.sessionAttendance.find((a: any) => a.session_id === s.session_id)?.attendance || 0;
                                         const ft = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length;
                                         const slv = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length;
                                         const mi = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length;
@@ -707,7 +685,7 @@ const ReportsPage = () => {
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (data?.checkins || []).filter((c: any) => c.session_id === s.session_id).length, 0)}</td>
+                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (reportData.sessionAttendance.find((a: any) => a.session_id === s.session_id)?.attendance || 0), 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length, 0)}</td>
