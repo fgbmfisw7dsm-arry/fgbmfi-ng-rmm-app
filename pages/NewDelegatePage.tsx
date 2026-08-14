@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, isRegionalRole, isDistrictRole, getScopeFilter, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
-import { generateCodeFromId } from '../services/utils';
+
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
@@ -37,7 +37,6 @@ const NewDelegatePage = () => {
   const [successData, setSuccessData] = useState<{
     id: string;
     name: string;
-    code: string;
     district: string;
     checkInStatus: string;
     checkInOk: boolean;
@@ -97,7 +96,6 @@ const NewDelegatePage = () => {
 
         const actualId = newDelegate.delegate_id;
         const delDistrict = newDelegate.district || payload.district || 'General';
-        const displayCode = generateCodeFromId(actualId, activeEventId);
         
         let initialCheckInOk = false;
         let initialStatus = "Recorded in Master List";
@@ -116,7 +114,6 @@ const NewDelegatePage = () => {
         setSuccessData({
             id: actualId,
             name: `${newDelegate.first_name} ${newDelegate.last_name}`,
-            code: displayCode,
             district: delDistrict,
             checkInOk: initialCheckInOk,
             checkInStatus: initialStatus
@@ -178,14 +175,6 @@ const NewDelegatePage = () => {
           </div>
           
           <div className="p-10 text-center space-y-10">
-             <div className="space-y-4">
-                <label className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em]">Personal Security Code</label>
-                <div className="text-8xl font-black text-blue-900 tracking-widest bg-gray-50 py-10 rounded-[2.5rem] border-2 border-gray-100 font-mono shadow-inner leading-none select-all">
-                  {successData.code}
-                </div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.1em] leading-relaxed">Required for fast session verification.</p>
-             </div>
-
              <div className={`p-4 rounded-xl border-2 font-black uppercase text-[10px] tracking-widest leading-relaxed shadow-sm transition-all ${successData.checkInOk ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-orange-50 text-orange-600 border-orange-200 animate-pulse'}`}>
                 {successData.checkInStatus}
              </div>

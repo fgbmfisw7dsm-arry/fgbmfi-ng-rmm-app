@@ -13,12 +13,6 @@ export const generateQrHash = (): string => {
     return crypto.randomUUID();
 };
 
-/**
- * Generates a deterministic 4-digit code from a Delegate ID and Event ID.
- * This is a backward-compatible offline fallback for environments
- * where QR scanning is not available. 10K code slots — not suitable
- * as primary identifier above 10K delegates.
- */
 export const generateRegId = (): string => {
     const now = new Date();
     const ts = [
@@ -34,19 +28,6 @@ export const generateRegId = (): string => {
         .map(b => hexChars[b & 0x0f]).join('');
 
     return `CON26${ts}${suffix}`;
-};
-
-export const generateCodeFromId = (delegateId: string, eventId: string): string => {
-    if (!delegateId || !eventId) return "0000";
-    const salt = delegateId + eventId;
-    let hash = 0;
-    for (let i = 0; i < salt.length; i++) {
-        const char = salt.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-    }
-    const code = (Math.abs(hash) % 9999) + 1;
-    return code.toString().padStart(4, '0');
 };
 
 export const downloadJSON = (data: any, filename: string) => {

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
+import React, { useState, useContext, useRef, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/supabaseService';
 import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, FinancialEntry, isRegistrarRole, getScopeFilter, SessionResponseType, RESPONSE_TYPE_LABELS, MinistryExportData } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -11,85 +12,53 @@ const ReportsPage = () => {
     const showRank = eventConfig.show_rank !== false;
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
-    const [data, setData] = useState<any>(null);
-    const [ministryData, setMinistryData] = useState<MinistryExportData | null>(null);
-    const [sessions, setSessions] = useState<Session[]>([]);
-    const [events, setEvents] = useState<Event[]>([]);
-    const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'sessionsSummary' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
     const [alterCallFilter, setAlterCallFilter] = useState<'' | SessionResponseType>('');
-    const [loading, setLoading] = useState(false);
     const reportRef = useRef<HTMLDivElement>(null);
 
     const norm = (v?: string) => (v || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
-    useEffect(() => {
-        if (!activeEventId) return;
-        let mounted = true;
-        setLoading(true);
-
-        const fetchData = async () => {
-            try {
-                const [exportData, sessionData, eventList, sysSettings, ministry] = await Promise.all([
-                    db.getReportAggregates(activeEventId, selectedSessionId || undefined), 
-                    db.getSessions(activeEventId), 
-                    db.getEvents(),
-                    db.getSettings(),
-                    db.getMinistryDataForExport(activeEventId)
-                ]);
-
-                if (!mounted) return;
-
-                const scope = getScopeFilter(user);
-                if (scope.region) {
-                    const regionPrefix = norm(scope.region);
-                    exportData.attendedDelegates = (exportData.attendedDelegates || []).filter((d: any) => 
-                        norm(d.district).startsWith(regionPrefix)
-                    );
-                    exportData.pledges = (exportData.pledges || []).filter((p: any) => 
-                        norm(p.district).startsWith(regionPrefix)
-                    );
-                } else if (scope.district) {
-                    const userDistrictNorm = norm(scope.district);
-                    exportData.attendedDelegates = (exportData.attendedDelegates || []).filter((d: any) => 
-                        norm(d.district) === userDistrictNorm
-                    );
-                    exportData.pledges = (exportData.pledges || []).filter((p: any) => 
-                        norm(p.district) === userDistrictNorm
-                    );
-                }
-
-                setData(exportData);
-                setSessions(sessionData);
-                setEvents(eventList);
-                setSettings(sysSettings);
-                setMinistryData(ministry);
-            } catch (err) {
-                console.error("Reports aggregation failure:", err);
-                if (mounted) setData({});
-            } finally {
-                if (mounted) setLoading(false);
-            }
-        };
-
-        fetchData();
-        return () => { mounted = false; };
-    }, [activeEventId, user?.id, selectedSessionId]);
-
-    useEffect(() => {
-        if (!activeEventId || activeTab !== 'ministryReport') return;
-        let mounted = true;
-        db.getMinistryDataForExport(activeEventId).then(d => {
-            if (mounted) setMinistryData(d);
-        }).catch(() => {});
-        return () => { mounted = false; };
-    }, [activeEventId, activeTab]);
+    const { data: aggregateData } = useQuery({
+        queryKey: ['report-aggregates', activeEventId, selectedSessionId],
+        queryFn: () => db.getReportAggregates(activeEventId, selectedSessionId || undefined),
+        enabled: !!activeEventId,
+    });
+    const { data: sessions = [] } = useQuery({
+        queryKey: ['sessions', activeEventId],
+        queryFn: () => db.getSessions(activeEventId),
+        enabled: !!activeEventId,
+    });
+    const { data: events = [] } = useQuery({
+        queryKey: ['events'],
+        queryFn: () => db.getEvents(),
+    });
+    const { data: settings } = useQuery({
+        queryKey: ['settings'],
+        queryFn: () => db.getSettings(),
+    });
+    const { data: ministryData } = useQuery({
+        queryKey: ['ministry-export', activeEventId],
+        queryFn: () => db.getMinistryDataForExport(activeEventId),
+        enabled: !!activeEventId,
+    });
 
     const reportData = useMemo(() => {
-        if (!data || !settings) return null;
-        const { attendedDelegates = [], financials = [], pledges = [] } = data;
-        const sessionAttendance: { session_id: string; attendance: number }[] = data.sessionAttendance || [];
+        if (!aggregateData || !settings) return null;
+        const scope = getScopeFilter(user);
+        let attendedDelegates: any[] = aggregateData.attendedDelegates || [];
+        let pledges: any[] = aggregateData.pledges || [];
+        if (scope.region) {
+            const regionPrefix = norm(scope.region);
+            attendedDelegates = attendedDelegates.filter((d: any) => norm(d.district).startsWith(regionPrefix));
+            pledges = pledges.filter((p: any) => norm(p.district).startsWith(regionPrefix));
+        } else if (scope.district) {
+            const userDistrictNorm = norm(scope.district);
+            attendedDelegates = attendedDelegates.filter((d: any) => norm(d.district) === userDistrictNorm);
+            pledges = pledges.filter((p: any) => norm(p.district) === userDistrictNorm);
+        }
+        const financials: FinancialEntry[] = aggregateData.financials || [];
+        const sessionAttendance: { session_id: string; attendance: number }[] = aggregateData.sessionAttendance || [];
         
         const calculatedPledges = pledges.map((p: Pledge) => {
             const redemptionsForThisPledge = financials.filter((f: FinancialEntry) => 
@@ -116,7 +85,7 @@ const ReportsPage = () => {
         const delegateTypeColumns = (settings.delegate_types || []).sort();
 
         return { attendedDelegates: dedupedAttended, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges, sessionAttendance };
-    }, [data, settings]);
+    }, [aggregateData, settings, user]);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
@@ -474,7 +443,7 @@ const ReportsPage = () => {
     };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Context Event</div>;
-    if (loading || !reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Data...</div>;
+    if (!reportData) return <div className="p-20 text-center text-gray-400 font-bold animate-pulse uppercase tracking-widest">Analyzing Data...</div>;
 
     const { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges } = reportData;
 

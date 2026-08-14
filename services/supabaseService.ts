@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateCodeFromId, generateQrHash, generateRegId } from './utils';
+import { generateQrHash, generateRegId } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -626,7 +626,7 @@ export const db = {
     bulkDeactivateEventUsers: async () => 
         handleRpcResponse(await supabase.rpc('deactivate_all_event_users'), 'deactivate_all_event_users'),
 
-    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean, code?: string })[]> => {
+    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean })[]> => {
         if (!eventId) return [];
         let q = supabase.from('delegates').select('*').eq('event_id', eventId);
         if (region) {
@@ -643,7 +643,7 @@ export const db = {
         const checkedInSet = new Set((allCheckins || []).filter(c =>
             sessionId ? c.session_id === sessionId : c.session_id == null
         ).map(c => c.delegate_id));
-        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '', code: d.code || generateCodeFromId(d.delegate_id, eventId) }));
+        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '' }));
     },
 
     getAllDelegates: async (eventId?: string): Promise<Delegate[]> => {
@@ -796,9 +796,8 @@ export const db = {
             safeSessionId ? c.session_id === safeSessionId : c.session_id == null
         );
         if (isDuplicate) {
-            const code = generateCodeFromId(delegateId, eventId);
             console.log('[checkInDelegate] duplicate detected — arrival' + (safeSessionId ? ` + session ${safeSessionId}` : '') + ` — delegate: ${del?.first_name} ${del?.last_name} (${delegateId})`);
-            return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+            return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         }
         let actuallyInserted = true;
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
@@ -816,8 +815,7 @@ export const db = {
             recordAuditLog(eventId, safeSessionId ? 'checkin_session' : 'checkin_arrival', `${label}: ${detail}`, registrar, 'checkin', delegateId, { session_id: safeSessionId });
         }
 
-        const code = generateCodeFromId(delegateId, eventId);
-        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, code, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
         });
     },
 
@@ -907,19 +905,6 @@ export const db = {
         if (lookupId.length > 4 && lookupId !== code) {
             const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('delegate_id', lookupId).maybeSingle();
             if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
-        }
-        
-        // Pass 4: 4-digit deterministic code fallback (legacy) — paginated to stay correct at scale
-        if (code.length <= 10) {
-            let from = 0;
-            while (true) {
-                const { data: delegates } = await supabase.from('delegates').select('delegate_id, district').eq('event_id', eventId).order('delegate_id').range(from, from + 999);
-                if (!delegates || delegates.length === 0) break;
-                const match = delegates.find(d => generateCodeFromId(d.delegate_id, eventId) === code);
-                if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
-                if (delegates.length < 1000) break;
-                from += 1000;
-            }
         }
         
         // Not found — return parsed data for confirmation form

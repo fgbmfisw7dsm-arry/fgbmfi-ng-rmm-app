@@ -282,17 +282,10 @@ TanStack Query (React Query) will be added in Phase 1 to:
 - Guard: `ensureEventActive()` called in every write operation in supabaseService.ts
 - Pattern extends to sessions: all write operations check parent event status
 
-### 2. Check-In Codes (4-digit deterministic)
-```typescript
-const generateCodeFromId = (delegateId: string, eventId: string): string => {
-  const salt = delegateId + eventId;
-  let hash = 0;
-  for (const char of salt) hash = ((hash << 5) - hash) + char.charCodeAt(0);
-  return (Math.abs(hash) % 9999 + 1).toString().padStart(4, '0');
-};
-```
-- **Known limitation:** 10,000 possible codes — collisions at scale > 10K delegates
-- **v2 fix:** UUID-based QR stored in DB as `delegates.qr_hash`
+### 2. Check-In Codes (UUID-only since v1.10)
+- The deterministic 4-digit `generateCodeFromId` code was **removed** (Sprint 19) — it had only 10K slots and collided at scale.
+- Delegates are identified by `delegates.qr_hash` (UUID, `crypto.randomUUID()`), `external_id` (`CON26...`), or `delegate_id` (UUID). Badges encode `qr_hash`.
+- `CheckInResult.code` / the `code` field on search results are gone; `checkInByCode` now performs **3 passes** (see §11).
 
 ### 3. District Scoping (Tenant Isolation)
 - `user.role === REGISTRAR && user.district` → all queries filtered by `district`
@@ -379,15 +372,15 @@ supabase.channel('dashboard_sync')
 - **Never use `dangerouslySetInnerHTML` with SVG for QR** — html2canvas cannot render it
 - **Never use `position:absolute` children with percentage heights for capture** — DOM clone collapses
 
-### 11. QR Code Resolution (4-pass checkInByCode)
+### 11. QR Code Resolution (3-pass checkInByCode)
 ```typescript
 // Pass order in checkInByCode():
 1. UUID qr_hash lookup (> 10 chars, scoped to active event via event_id)
 2. external_id lookup (> 4 chars, scoped to active event via event_id)
 3. delegate_id lookup (> 4 chars, only when lookupId !== code, scoped to active event)
-4. 4-digit deterministic code fallback (≤ 10 chars, scans up to 5000 delegates, event-scoped)
 ```
-- All 4 passes now scoped to active event: `.eq('event_id', eventId)` added to each lookup
+- All 3 passes scoped to active event: `.eq('event_id', eventId)` added to each lookup
+- The 4th pass (4-digit deterministic code) was **removed** in v1.10 — UUID-only.
 - `checkInDelegate` and `recordSessionResponse` both reject immediately if `delegateId` is falsy
 - Duplicate inserts (23505) caught gracefully — returns "Already recorded" instead of throwing
 
@@ -547,12 +540,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Audit log:** `addFinancialEntry` audit summary now reports `payment_mode` for Offerings and `payer_name` for Redemptions.
 
 ### 27. Scale Remediation for 25K Delegates (Sprint 18)
-- **Check-in Pass 4 (4-digit legacy fallback):** paginated (1000/page, `order('delegate_id')`) instead of `.limit(5000)` — stays correct past 5K delegates (`checkInByCode` in `supabaseService.ts`). Passes 1–3 remain the indexed fast path.
+- **Check-in Pass 4 (4-digit legacy fallback):** removed entirely in v1.10 (Sprint 19) — `checkInByCode` is now 3-pass (UUID `qr_hash` → `external_id` → `delegate_id`). See §2/§11.
 - **Realtime event scoping:** `FinancialsPage` realtime subscriptions now filter `event_id=eq.{activeEventId}` (already the case in `AdminDashboard` and `MasterListModule`).
 - **`getStats` fallback bounded:** the client fallback no longer full-scans `checkins`; it uses indexed counts (`totalDelegates`, `totalArrivals`, `totalSessionAttendance`), `recentActivity` (latest 200 filtered → 10), and `financials` sum. Rank/district breakdown charts are omitted in the rare fallback mode (RPC `get_event_dashboard_stats` is the primary path).
 - **Reports refactor:** `ReportsPage` no longer loads the full delegates+checkins tables via `getAllDataForExport`. New `get_report_aggregates(p_event_id, p_session_id)` RPC (`supabase_migration_sprint18_report_aggregates.sql`) returns `attendedDelegates` (arrival-or-session join), `sessionAttendance`, `financials`, `pledges` server-side. `db.getReportAggregates` wraps it with a bounded fallback. Attendance/summary tabs consume the new shape; identity dedup is preserved in `reportData`.
 - **Silent `.limit(5000/10000)` truncation removed:** `harmonizeDistricts`, `deduplicateDelegates`, `deleteScrambledImportDelegates`, and `analyzeScrambledDelegates` now paginate their candidate fetches (1000/page).
 - **FinancialsPage `paginate<T>`** is a module-level helper invoked with explicit type params (`paginate<FinancialEntry>` / `paginate<Pledge>`); generic inference from `useMemo`-derived arrays was unreliable under `tsc`.
+
+### 28. UUID-Only QR + TanStack Query Adoption (v1.10 / Sprint 19)
+- **UUID-only QR:** removed the 4-digit `generateCodeFromId` fallback (utils.ts, `checkInByCode` Pass 4, `checkInDelegate`/`searchDelegates` `code` emission, and its display in `CheckInPage`, `SessionMinistryPage`, `NewDelegatePage`). Manual entry auto-submits on 24/36-char inputs only. `CheckInResult.code?` remains in `types.ts` as an unused optional field (non-breaking).
+- **TanStack Query on FinancialsPage:** `financial-entries`, `pledges`, `sessions` are now `useQuery`; writes still use the manual `loading` state but invalidate via `queryClient.invalidateQueries` (`refreshFinancials`). Realtime is event-scoped and invalidates instead of re-fetching directly.
+- **TanStack Query on ReportsPage:** `report-aggregates`, `sessions`, `events`, `settings`, `ministry-export` are now `useQuery`; district/region scoping moved into the `reportData` `useMemo` (recomputed on user change). `loading` state removed.
+- **Deferred:** MasterListModule (3.3C) kept its manual `useCallback` + server-side pagination + realtime flow — already paginated/deduped; a `useQuery` rewrite there is high-risk for marginal gain.
 
 ## Code Conventions
 
@@ -633,7 +632,7 @@ npm run build   # Production build to /dist
 - Manually INSERT into `auth.users` — always use `supabase.auth.signUp()` (v1.6+)
 
 ### Known Vulnerabilities
-1. **4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots
+1. ~~**4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots~~ — **RESOLVED v1.10**: 4-digit code removed; UUID-only QR (`qr_hash`).
 2. **Audit log has no retention policy** — fire-and-forget inserts with admin-only manual clear-by-period; no automated retention/rotation
 3. **`getAllDelegates()` + `getAllDataForExport()`** — fetch entire table into memory, will fail at 25K
 4. **Context re-render storms** — all context consumers re-render on any state change
@@ -644,7 +643,7 @@ npm run build   # Production build to /dist
 
 | Item | Description | Priority | Target |
 |------|-------------|----------|--------|
-| QR code collisions | 4-digit hash → 10K codes for 25K delegates | CRITICAL | Phase 1 |
+| QR code collisions | 4-digit hash → 10K codes for 25K delegates | RESOLVED | v1.10 (UUID-only QR) |
 | No connection health UI | Officers don't know if writes failed silently | HIGH | Phase 1 |
 | Context performance | Every AppContext change re-renders entire tree | HIGH | Phase 1 |
 | Realtime subscription scope | Subscribes to entire table, not filtered by event | HIGH | Phase 1 |

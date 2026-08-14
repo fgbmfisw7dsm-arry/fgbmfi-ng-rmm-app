@@ -2,7 +2,6 @@ import React, { useState, useEffect, useContext, useCallback, useRef } from 'rea
 import { db } from '../services/supabaseService';
 import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, Chapter } from '../types';
 import { AppContext } from '../context/AppContext';
-import { generateCodeFromId } from '../services/utils';
 import QRCode from 'qrcode';
 import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
@@ -12,7 +11,7 @@ const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
-  const [results, setResults] = useState<(Delegate & { checkedIn: boolean, code?: string })[]>([]);
+  const [results, setResults] = useState<(Delegate & { checkedIn: boolean })[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -20,7 +19,6 @@ const CheckInPage = () => {
   const [badgeQrSvg, setBadgeQrSvg] = useState<string>('');
   const [badgeBannerDataUrl, setBadgeBannerDataUrl] = useState<string>('');
   const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
-  const [badgeCode, setBadgeCode] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
@@ -83,7 +81,6 @@ const CheckInPage = () => {
       setBadgeQrSvg('');
       setBadgeBannerDataUrl('');
       setBadgeCanvasUrl('');
-      setBadgeCode('');
       setPendingReg(null);
     };
   }, []);
@@ -100,8 +97,7 @@ const CheckInPage = () => {
       return {
         ...d,
         checkedIn: d.checkedIn || isVerifiedLocally,
-        verifiedLocally: isVerifiedLocally,
-        code: d.code || generateCodeFromId(d.delegate_id, activeEventId)
+        verifiedLocally: isVerifiedLocally
       };
     });
     setResults(reconciledData);
@@ -140,7 +136,7 @@ const CheckInPage = () => {
               localVerifiedIds.current.add(`${delegateId}_${selectedSessionId || 'arrival'}`);
             }
             setResults(prev => prev.map(d => 
-              d.delegate_id === delegateId ? { ...d, checkedIn: true, verifiedLocally: !res.alreadyCheckedIn, code: res.code || generateCodeFromId(delegateId, activeEventId), qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
+              d.delegate_id === delegateId ? { ...d, checkedIn: true, verifiedLocally: !res.alreadyCheckedIn, qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
             ));
             setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' });
             setTimeout(() => setFeedback(null), res.alreadyCheckedIn ? 3000 : 2000);
@@ -221,7 +217,7 @@ const CheckInPage = () => {
     setCode(cleaned);
     if (feedback?.type === 'error') setFeedback(null);
     setPendingReg(null);
-    if (cleaned.length === 4 || cleaned.length === 24 || cleaned.length === 36) {
+    if (cleaned.length === 24 || cleaned.length === 36) {
       handleCodeSubmit(cleaned);
     }
   };
@@ -261,7 +257,6 @@ const CheckInPage = () => {
       setBadgeBannerDataUrl(bannerResp);
       setBadgeCanvasUrl(badgeCanvasUrl);
       setBadgeDelegate(delegate);
-      setBadgeCode(generateCodeFromId(delegate.delegate_id, activeEventId || ''));
     } catch (e) {
       console.error('QR generation for badge failed:', e);
       setFeedback({ type: 'error', msg: 'Failed to generate badge. Please try again.' });
@@ -449,7 +444,6 @@ const CheckInPage = () => {
     setBadgeQrSvg('');
     setBadgeBannerDataUrl('');
     setBadgeCanvasUrl('');
-    setBadgeCode('');
   };
 
   const printBadge = () => {
@@ -597,7 +591,7 @@ const CheckInPage = () => {
        </div>
        
        <div className={`bg-white p-8 rounded-3xl shadow-xl border-t-8 border-blue-600 animate-in slide-in-from-top-4 ${isLocked ? 'pointer-events-none grayscale opacity-60' : ''}`}>
-            <h2 className="text-lg font-black mb-4 text-blue-900 uppercase tracking-tighter">2. Fast Check-in (QR Code / 4-Digit)</h2>
+            <h2 className="text-lg font-black mb-4 text-blue-900 uppercase tracking-tighter">2. Fast Check-in (QR Code / Delegate ID)</h2>
             <div className="flex flex-col sm:flex-row gap-3 items-stretch">
               <input 
                 className="flex-1 p-6 text-center text-4xl md:text-6xl font-black tracking-[0.15em] border-2 border-blue-50 rounded-2xl bg-blue-50 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-blue-200 font-mono" 
@@ -781,10 +775,6 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                             height={100}
                           />
                           <div className="text-right flex flex-col items-end gap-2">
-                             <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">4-Digit Code:</span>
-                             <span className="text-2xl font-black text-white tracking-[0.25em] font-mono bg-blue-900 px-4 py-2 rounded-xl shadow-md inline-block border-2 border-blue-700 animate-in slide-in-from-right-2">
-                               {d.code || generateCodeFromId(d.delegate_id, activeEventId)}
-                             </span>
                              <div className="flex gap-2 mt-1">
                                <button 
                                  onClick={() => handleReprintBadge(d as Delegate)}

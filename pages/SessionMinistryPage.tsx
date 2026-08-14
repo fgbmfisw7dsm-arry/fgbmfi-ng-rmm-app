@@ -6,7 +6,7 @@ import { db } from '../services/supabaseService';
 import { SessionResponseType, RESPONSE_TYPE_LABELS, Delegate, Chapter, getScopeFilter, isAdminRole, isRegistrarRole } from '../types';
 import QRScanner from '../components/QRScanner';
 import { useMinistry } from '../hooks/useMinistry';
-import { generateCodeFromId, exportToPDF, exportToCSV } from '../services/utils';
+import { exportToPDF, exportToCSV } from '../services/utils';
 
 const RESPONSE_TYPES: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
 
@@ -114,7 +114,6 @@ const SessionMinistryPage: React.FC = () => {
     setResults((searchResults as any[]).map((d: any) => ({
       ...d,
       recorded: combined.has(d.delegate_id),
-      code: d.code || generateCodeFromId(d.delegate_id, activeEventId),
     })));
   }, [searchResults, query, activeEventId, recordedIds]);
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { FinancialEntry, Pledge, Delegate, FinancialType, Session, getScopeFilter, PAYMENT_MODES } from '../types';
+import { FinancialEntry, Pledge, Delegate, FinancialType, getScopeFilter, PAYMENT_MODES } from '../types';
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToCSV, exportToPDF } from '../services/utils';
 
@@ -78,12 +79,31 @@ const FinancialsPage = () => {
     const isLocked = activeEvent?.is_active === false;
     const pledgeNameConfig = activeEvent?.event_config?.pledge_names;
     const pledgeNames = Array.isArray(pledgeNameConfig) ? (pledgeNameConfig as string[]) : [];
-    const [entries, setEntries] = useState<FinancialEntry[]>([]);
-    const [pledges, setPledges] = useState<Pledge[]>([]);
-    const [sessions, setSessions] = useState<Session[]>([]);
     const [activeTab, setActiveTab] = useState<'transactions' | 'redemptions' | 'pledges'>('transactions');
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(1);
+    const queryClient = useQueryClient();
+
+    const { data: entries = [] } = useQuery({
+        queryKey: ['financial-entries', activeEventId],
+        queryFn: () => db.getFinancialEntriesForEvent(activeEventId),
+        enabled: !!activeEventId,
+    });
+    const { data: pledges = [] } = useQuery({
+        queryKey: ['pledges', activeEventId],
+        queryFn: () => db.getPledgesForEvent(activeEventId),
+        enabled: !!activeEventId,
+    });
+    const { data: sessions = [] } = useQuery({
+        queryKey: ['sessions', activeEventId],
+        queryFn: () => db.getSessions(activeEventId),
+        enabled: !!activeEventId,
+    });
+
+    const refreshFinancials = () => {
+        queryClient.invalidateQueries({ queryKey: ['financial-entries', activeEventId] });
+        queryClient.invalidateQueries({ queryKey: ['pledges', activeEventId] });
+    };
 
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<Delegate[]>([]);
@@ -95,22 +115,18 @@ const FinancialsPage = () => {
     const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
     const [rForm, setRForm] = useState({ amount: 0, payment_mode: '', remarks: 'Pledge Redemption' });
 
-    const loadData = () => {
-        if (activeEventId) {
-            db.getFinancialEntriesForEvent(activeEventId).then(setEntries);
-            db.getPledgesForEvent(activeEventId).then(setPledges);
-            db.getSessions(activeEventId).then(setSessions);
-        }
-    };
-
     useEffect(() => {
-        loadData();
+        if (!activeEventId) return;
         const financialSub = supabase.channel(`financial_realtime_${activeEventId}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_entries', filter: `event_id=eq.${activeEventId}` }, () => loadData())
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'pledges', filter: `event_id=eq.${activeEventId}` }, () => loadData())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_entries', filter: `event_id=eq.${activeEventId}` }, () => {
+              queryClient.invalidateQueries({ queryKey: ['financial-entries', activeEventId] });
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'pledges', filter: `event_id=eq.${activeEventId}` }, () => {
+              queryClient.invalidateQueries({ queryKey: ['pledges', activeEventId] });
+          })
           .subscribe();
         return () => { financialSub.unsubscribe(); };
-    }, [activeEventId]);
+    }, [activeEventId, queryClient]);
 
     useEffect(() => { setPage(1); }, [activeTab, activeEventId]);
 
@@ -166,7 +182,7 @@ const FinancialsPage = () => {
         try {
             await db.addFinancialEntry({ ...tForm, event_id: activeEventId });
             alert("Offering Recorded!");
-            loadData();
+            refreshFinancials();
             setTForm({ amount: 0, type: FinancialType.OFFERING, session_id: '', payment_mode: '', remarks: '' });
         } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
@@ -180,7 +196,7 @@ const FinancialsPage = () => {
         try {
             await db.createPledge({ ...pForm, event_id: activeEventId });
             alert("Pledge Recorded Successfully!");
-            loadData();
+            refreshFinancials();
             setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
         } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
@@ -202,7 +218,7 @@ const FinancialsPage = () => {
             });
             alert("Redemption Recorded!");
             setSelectedPledge(null);
-            loadData();
+            refreshFinancials();
         } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
 
