@@ -1231,6 +1231,32 @@ export const db = {
         return result;
     },
 
+    getFinancialEntriesForEvent: async (eventId: string): Promise<FinancialEntry[]> => {
+        let results: FinancialEntry[] = [];
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase.from('financial_entries').select('*').eq('event_id', eventId).order('created_at', { ascending: true }).range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            results = results.concat(data as FinancialEntry[]);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return results;
+    },
+
+    getPledgesForEvent: async (eventId: string): Promise<Pledge[]> => {
+        let results: Pledge[] = [];
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase.from('pledges').select('*').eq('event_id', eventId).order('created_at', { ascending: true }).range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            results = results.concat(data as Pledge[]);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return results;
+    },
+
     clearEventData: async (eventId: string) => { 
         await ensureEventActive(eventId);
         await supabase.from('checkins').delete().eq('event_id', eventId); 
