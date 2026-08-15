@@ -483,6 +483,9 @@ export const db = {
             }
         } catch { /* chapters table may not exist yet */ }
         if (settings.audit_enabled === undefined) settings.audit_enabled = true;
+        if (!Array.isArray(settings.titles) || !Array.isArray(settings.delegate_types)) {
+            console.warn('[getSettings] system_settings missing titles/delegate_types columns — run supabase_migration_fix_system_settings_columns.sql');
+        }
         updateAuditSyncCache(settings);
         return settings;
     },
@@ -490,14 +493,23 @@ export const db = {
     updateSettings: async (settings: SystemSettings, field?: keyof SystemSettings): Promise<SystemSettings> => {
         const { data: current } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         let payload: any = field ? { [field]: settings[field] } : settings;
+        const handleWriteError = (error: any) => {
+            if (error) {
+                const msg = error.message || '';
+                if (error.code === 'PGRST204' || msg.includes('schema cache')) {
+                    throw new Error("System settings column missing on server — run supabase_migration_fix_system_settings_columns.sql in the Supabase SQL Editor, then reload.");
+                }
+                throw error;
+            }
+        };
         if (current) {
             const { data, error } = await supabase.from('system_settings').update(payload).eq('id', current.id).select().single();
-            if (error) throw error;
+            handleWriteError(error);
             if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         } else {
             const { data, error } = await supabase.from('system_settings').insert(payload).select().single();
-            if (error) throw error;
+            handleWriteError(error);
             if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         }
