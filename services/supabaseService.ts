@@ -1067,6 +1067,7 @@ export const db = {
                                     if (!existing.rank?.trim() && rec.rank?.trim()) updates.rank = rec.rank;
                                     if (!existing.office?.trim() && rec.office?.trim()) updates.office = rec.office;
                                     if (!existing.delegate_type?.trim() && rec.delegate_type?.trim()) updates.delegate_type = rec.delegate_type;
+                                    else if (['National Guest', 'Free Guest', 'International'].includes(rec.delegate_type || '') && existing.delegate_type !== rec.delegate_type) updates.delegate_type = rec.delegate_type || '';
                                     if (!existing.external_id?.trim() && rec.external_id?.trim()) updates.external_id = rec.external_id;
                                     if (Object.keys(updates).length > 0) {
                                         await supabase.from('delegates').update(updates).eq('delegate_id', existing.delegate_id);
