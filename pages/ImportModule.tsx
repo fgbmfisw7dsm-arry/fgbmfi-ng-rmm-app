@@ -37,6 +37,16 @@ function parseFullName(fullName: string): { title: string; firstName: string; la
   return { title, firstName, lastName };
 }
 
+function resolveGuestFields(district: string, chapter: string, delegateType: string, status: string): { district: string; chapter: string; delegateType: string } {
+  const d = (district || '').trim().toUpperCase() === 'GUE' ? 'National/External' : district;
+  const c = (chapter || '').trim().toUpperCase() === 'GUE' ? 'Guest' : chapter;
+  const s = (status || '').trim().toUpperCase();
+  let t = delegateType;
+  if (s === 'PAID') t = 'National Guest';
+  else if (s === 'FREE') t = 'Free Guest';
+  return { district: d, chapter: c, delegateType: t };
+}
+
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const role = (user?.role || '').toLowerCase();
@@ -85,6 +95,7 @@ const ImportModule = () => {
       'rank': 'Rank', 'level': 'Rank', 'grade': 'Rank',
       'office': 'Office', 'position': 'Office', 'role': 'Office', 'post': 'Office',
       'delegate_type': 'DelegateType', 'delegate type': 'DelegateType', 'delegatetype': 'DelegateType', 'type': 'DelegateType', 'category': 'DelegateType',
+      'status': 'Status', 'payment_status': 'Status', 'registration_status': 'Status', 'payment status': 'Status', 'registration status': 'Status',
     };
 
     const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
@@ -209,6 +220,11 @@ const ImportModule = () => {
       if (lines.length < 2) return csv;
       const headers = parseHeaders(lines[0]);
 
+      const statusColIdx = getColumnIndex(headers, 'Status');
+      const statusHeader = statusColIdx >= 0 ? headers[statusColIdx] : '';
+      const getStatus = (values: string[]) =>
+        (statusColIdx >= 0 && statusHeader && columnMap[statusHeader] !== false) ? (values[statusColIdx] || '') : '';
+
       const fullNameColIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
       const titleColIdx = getColumnIndex(headers, 'Title');
       const firstNameColIdx = getColumnIndex(headers, 'First Name');
@@ -236,6 +252,10 @@ const ImportModule = () => {
               colValues[field] = field === 'District' ? cleanDistrictForImport(raw) : raw;
             }
           }
+          const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '', getStatus(values));
+          colValues['District'] = guest.district;
+          colValues['Chapter'] = guest.chapter;
+          colValues['DelegateType'] = guest.delegateType;
           const row = fieldOrder.map(f => colValues[f]).join(',');
           if (row.trim().replace(/,/g, '')) resultLines.push(row);
         }
@@ -281,6 +301,10 @@ const ImportModule = () => {
               colValues[s.field || ''] = val;
             }
           }
+          const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '', getStatus(values));
+          colValues['District'] = guest.district;
+          colValues['Chapter'] = guest.chapter;
+          colValues['DelegateType'] = guest.delegateType;
           const fieldOrder = buildFieldOrder();
           const rowParts = fieldOrder.map(f => colValues[f] || '');
           const row = rowParts.join(',');
@@ -293,6 +317,13 @@ const ImportModule = () => {
         const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
         const rowParts = colIndices.map(idx => idx >= 0 ? (values[idx] || '') : '');
         rowParts[fieldOrder.indexOf('District')] = cleanDistrictForImport(rowParts[fieldOrder.indexOf('District')] || '');
+        const dIdx = fieldOrder.indexOf('District');
+        const cIdx = fieldOrder.indexOf('Chapter');
+        const tIdx = fieldOrder.indexOf('DelegateType');
+        const guest = resolveGuestFields(dIdx >= 0 ? rowParts[dIdx] || '' : '', cIdx >= 0 ? rowParts[cIdx] || '' : '', tIdx >= 0 ? rowParts[tIdx] || '' : '', getStatus(values));
+        if (dIdx >= 0) rowParts[dIdx] = guest.district;
+        if (cIdx >= 0) rowParts[cIdx] = guest.chapter;
+        if (tIdx >= 0) rowParts[tIdx] = guest.delegateType;
         const row = rowParts.join(',');
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }

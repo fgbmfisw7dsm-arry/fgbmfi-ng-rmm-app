@@ -613,7 +613,7 @@ GRANT EXECUTE ON FUNCTION confirm_user_by_email(TEXT) TO authenticated;
 -- 4. INITIAL SEED DATA
 INSERT INTO system_settings (districts, ranks, offices, regions)
 SELECT 
-    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra"}',
+    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra", "National/External"}',
     '{"CP", "FR", "ND", "CP-REP"}',
     '{"DC", "RVP", "NVP", "NP", "NEC", "BOT", "CP", "FR", "ND", "CP-REP", "OTHER"}',
     '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}'
