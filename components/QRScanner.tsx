@@ -241,7 +241,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
-      const { Html5Qrcode } = await import('html5-qrcode');
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
       let cameraId: string;
       if (deviceId) {
@@ -266,15 +266,25 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       await new Promise(r => setTimeout(r, 150));
-      const scanner = new Html5Qrcode('qr-scanner-view');
+      const scanner = new Html5Qrcode('qr-scanner-view', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+      const h5VideoConstraints = {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        focusMode: { ideal: 'continuous' } as any
+      };
       await scanner.start(
         cameraId,
         {
-          fps: 20,
+          fps: 25,
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
             const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
             return { width: size, height: size };
-          }
+          },
+          videoConstraints: h5VideoConstraints as any
         },
         (decodedText: string) => {
           setScanning(false);
