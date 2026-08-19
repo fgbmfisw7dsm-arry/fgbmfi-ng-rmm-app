@@ -132,6 +132,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         .sort((a, b) => cameraRank(a.label) - cameraRank(b.label));
       camerasRef.current = videoDevices;
       setCameras(videoDevices);
+      if (selectedCameraRef.current && !videoDevices.some(d => d.deviceId === selectedCameraRef.current)) {
+        selectedCameraRef.current = null;
+        setSelectedCameraId(null);
+      }
     } catch {}
   }, [cameraRank]);
 
@@ -163,13 +167,24 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         focusMode: { ideal: 'continuous' }
       };
       const targetId = deviceId || getDefaultCameraId();
+      const targetLabel = targetId ? camerasRef.current.find(c => c.deviceId === targetId)?.label || targetId.slice(0, 12) : null;
+      log(`Requesting camera: ${targetLabel || 'system default'}`);
       if (targetId && camerasRef.current.some(c => c.deviceId === targetId)) {
         videoConstraints.deviceId = { exact: targetId };
       } else {
         videoConstraints.facingMode = 'environment';
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      let stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      const targetRequested = targetId || null;
+      for (let retry = 0; retry < 3; retry++) {
+        const firstTrack = stream.getVideoTracks()[0];
+        const actual = firstTrack && firstTrack.getSettings ? firstTrack.getSettings().deviceId : '';
+        if (!targetRequested || !actual || actual === targetRequested) break;
+        log(`Device mismatch (req ${targetLabel || targetRequested.slice(0, 8)}), re-requesting exact...`);
+        stream.getTracks().forEach(t => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ video: { ...videoConstraints, deviceId: { exact: targetRequested } } });
+      }
       streamRef.current = stream;
 
       if (!mountedRef.current || !videoRef.current) {
@@ -190,6 +205,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
       const track = stream.getVideoTracks()[0];
       if (track) {
+        const settings = track.getSettings ? track.getSettings() : null;
+        const actualId = settings?.deviceId || '';
+        const actualLabel = camerasRef.current.find(c => c.deviceId === actualId)?.label || actualId.slice(0, 12) || 'unknown';
+        log(`Active camera: ${actualLabel}${targetId && actualId && actualId !== targetId ? ` — WARN requested ${targetLabel}` : ''}`);
         const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
         if (capabilities) {
           log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
@@ -427,7 +446,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setCameras(videoDevices);
 
         const saved = localStorage.getItem('qr-camera-device-id');
-        const savedValid = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
+        const savedIsVirtual = saved && videoDevices.some(d => d.deviceId === saved && cameraRank(d.label) >= 9);
+        if (savedIsVirtual) localStorage.removeItem('qr-camera-device-id');
+        const savedValid = saved && !savedIsVirtual && videoDevices.some(d => d.deviceId === saved) ? saved : null;
         const initialCamera = savedValid || getDefaultCameraId();
         selectedCameraRef.current = initialCamera;
         setSelectedCameraId(initialCamera);
