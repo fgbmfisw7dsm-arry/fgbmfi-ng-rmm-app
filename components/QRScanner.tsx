@@ -86,6 +86,26 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     await new Promise(r => setTimeout(r, 200));
   }, []);
 
+  const applyCameraControls = useCallback(async (track: MediaStreamTrack, lowLight: boolean) => {
+    try {
+      const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
+      if (!capabilities) return;
+      const advanced: any[] = [];
+      if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+        advanced.push({ focusMode: 'continuous' });
+      }
+      if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+        advanced.push({ exposureMode: 'continuous' });
+      }
+      if (capabilities.whiteBalanceMode && capabilities.whiteBalanceMode.includes('continuous')) {
+        advanced.push({ whiteBalanceMode: 'continuous' });
+      }
+      if (advanced.length) {
+        await track.applyConstraints({ advanced });
+      }
+    } catch {}
+  }, []);
+
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
       const videoConstraints: any = {
@@ -120,25 +140,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
-        if (capabilities) {
-          log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
+        const caps = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
+        if (caps) {
+          log(`Camera max: ${caps.width?.max}x${caps.height?.max}`);
           const capsMsg: string[] = [];
-          if (capabilities.focusMode) capsMsg.push(`focus=${capabilities.focusMode.join(',')}`);
-          if (capabilities.focusDistance) capsMsg.push(`distance=${capabilities.focusDistance.min}-${capabilities.focusDistance.max}`);
+          if (caps.focusMode) capsMsg.push(`focus=${caps.focusMode.join(',')}`);
+          if (caps.focusDistance) capsMsg.push(`distance=${caps.focusDistance.min}-${caps.focusDistance.max}`);
+          if (caps.exposureCompensation) capsMsg.push(`expComp=${caps.exposureCompensation.min}-${caps.exposureCompensation.max}`);
           if (capsMsg.length) log(`Capabilities: ${capsMsg.join(', ')}`);
-          if (capabilities.focusDistance) {
-            try {
-              await track.applyConstraints({ advanced: [{ focusDistance: capabilities.focusDistance.min } as any] });
-              log(`Focus set to min: ${capabilities.focusDistance.min}`);
-            } catch {}
-          }
-          if (capabilities.exposureMode) {
-            try {
-              await track.applyConstraints({ advanced: [{ exposureMode: 'continuous' } as any] });
-            } catch {}
-          }
         }
+        await applyCameraControls(track, false);
+        log('Controls applied (focus/exposure/whiteBalance continuous)');
       }
 
       refreshCameras();
@@ -200,7 +212,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log, refreshCameras]);
+  }, [log, refreshCameras, applyCameraControls]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
