@@ -10,6 +10,19 @@ interface CameraInfo {
   label: string;
 }
 
+interface CameraCapabilities {
+  width?: ConstrainDoubleRange;
+  height?: ConstrainDoubleRange;
+  focusMode?: string[];
+  focusDistance?: ConstrainDoubleRange;
+  exposureMode?: string[];
+  whiteBalanceMode?: string[];
+  exposureCompensation?: ConstrainDoubleRange;
+  brightness?: ConstrainDoubleRange;
+  contrast?: ConstrainDoubleRange;
+  sharpness?: ConstrainDoubleRange;
+}
+
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [error, setError] = useState<string>('');
   const [scanning, setScanning] = useState(false);
@@ -29,6 +42,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const camerasRef = useRef<CameraInfo[]>([]);
   const forceHtml5Ref = useRef(false);
   const selectedCameraRef = useRef<string | null>(null);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scanCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const log = useCallback((msg: string) => {
     console.log('[QRScanner]', msg);
@@ -74,8 +89,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
       const videoConstraints: any = {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
         focusMode: { ideal: 'continuous' }
       };
       if (deviceId) {
@@ -95,13 +110,21 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       await videoRef.current.play();
       log(`Video: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
 
+      if (!scanCanvasRef.current) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 480;
+        canvas.height = 480;
+        scanCanvasRef.current = canvas;
+        scanCtxRef.current = canvas.getContext('2d', { willReadFrequently: true });
+      }
+
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const capabilities = track.getCapabilities ? track.getCapabilities() : null;
+        const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
         if (capabilities) {
           log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
           const capsMsg: string[] = [];
-          if (capabilities.focusMode) capsMsg.push(`focus=${(capabilities.focusMode as string[]).join(',')}`);
+          if (capabilities.focusMode) capsMsg.push(`focus=${capabilities.focusMode.join(',')}`);
           if (capabilities.focusDistance) capsMsg.push(`distance=${capabilities.focusDistance.min}-${capabilities.focusDistance.max}`);
           if (capsMsg.length) log(`Capabilities: ${capsMsg.join(', ')}`);
           if (capabilities.focusDistance) {
@@ -124,7 +147,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-      log('BarcodeDetector active (80ms), hold badge in focus zone...');
+      log('BarcodeDetector active (50ms region scan), hold badge in focus zone...');
 
       attemptsRef.current = 0;
       let detecting = false;
@@ -133,18 +156,29 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         detecting = true;
         attemptsRef.current++;
         try {
-          const codes = await detector.detect(videoRef.current);
+          const video = videoRef.current;
+          const canvas = scanCanvasRef.current;
+          const ctx = scanCtxRef.current;
+          if (!canvas || !ctx || !video.videoWidth || !video.videoHeight) return;
+          const size = Math.min(video.videoWidth, video.videoHeight);
+          const sx = (video.videoWidth - size) / 2;
+          const sy = (video.videoHeight - size) / 2;
+          ctx.save();
+          ctx.filter = 'none';
+          ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+          const codes = await detector.detect(canvas);
           if (codes && codes.length > 0) {
             if (intervalRef.current) clearInterval(intervalRef.current);
             if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
             setScanning(false);
             onScanRef.current(codes[0].rawValue.trim());
-          } else if (attemptsRef.current % 80 === 0) {
+          } else if (attemptsRef.current % 100 === 0) {
             log(`Scanning... ${attemptsRef.current} attempts, hold badge in focus zone`);
           }
         } catch (_e) {}
         detecting = false;
-      }, 80);
+      }, 50);
     } catch (e: any) {
       if (mountedRef.current) {
         const msg = e.message || '';
