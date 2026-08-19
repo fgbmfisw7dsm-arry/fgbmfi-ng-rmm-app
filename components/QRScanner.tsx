@@ -31,6 +31,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [forceHtml5, setForceHtml5] = useState(false);
+  const [boost, setBoost] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
@@ -42,6 +43,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const camerasRef = useRef<CameraInfo[]>([]);
   const forceHtml5Ref = useRef(false);
   const selectedCameraRef = useRef<string | null>(null);
+  const boostRef = useRef(false);
   const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const scanCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
@@ -100,6 +102,29 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       if (capabilities.whiteBalanceMode && capabilities.whiteBalanceMode.includes('continuous')) {
         advanced.push({ whiteBalanceMode: 'continuous' });
       }
+      if (lowLight) {
+        if (capabilities.exposureCompensation) {
+          const r = capabilities.exposureCompensation;
+          if (typeof r.max === 'number' && typeof r.min === 'number') {
+            advanced.push({ exposureCompensation: Math.min(r.max, r.min + (r.max - r.min) * 0.25) });
+          }
+        }
+        if (capabilities.brightness) {
+          const r = capabilities.brightness;
+          if (typeof r.max === 'number' && typeof r.min === 'number') {
+            advanced.push({ brightness: Math.min(r.max, (r.min + r.max) / 2 + (r.max - r.min) * 0.25) });
+          }
+        }
+        if (capabilities.contrast) {
+          const r = capabilities.contrast;
+          if (typeof r.max === 'number' && typeof r.min === 'number') {
+            advanced.push({ contrast: Math.min(r.max, (r.min + r.max) / 2 + (r.max - r.min) * 0.25) });
+          }
+        }
+        if (capabilities.sharpness && typeof capabilities.sharpness.max === 'number') {
+          advanced.push({ sharpness: capabilities.sharpness.max });
+        }
+      }
       if (advanced.length) {
         await track.applyConstraints({ advanced });
       }
@@ -149,8 +174,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           if (caps.exposureCompensation) capsMsg.push(`expComp=${caps.exposureCompensation.min}-${caps.exposureCompensation.max}`);
           if (capsMsg.length) log(`Capabilities: ${capsMsg.join(', ')}`);
         }
-        await applyCameraControls(track, false);
-        log('Controls applied (focus/exposure/whiteBalance continuous)');
+        await applyCameraControls(track, boostRef.current);
+        log(`Controls applied (continuous focus/exposure${boostRef.current ? ' + low-light boost' : ''})`);
       }
 
       refreshCameras();
@@ -176,7 +201,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           const sx = (video.videoWidth - size) / 2;
           const sy = (video.videoHeight - size) / 2;
           ctx.save();
-          ctx.filter = 'none';
+          ctx.filter = boostRef.current ? 'brightness(1.2) contrast(1.25)' : 'none';
           ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
           ctx.restore();
           const codes = await detector.detect(canvas);
@@ -337,6 +362,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     }
   }, [stopScanner, startWithEngine]);
 
+  const toggleBoost = useCallback(async () => {
+    const next = !boostRef.current;
+    boostRef.current = next;
+    setBoost(next);
+    localStorage.setItem('qr-lowlight-boost', String(next));
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) await applyCameraControls(track, next);
+    }
+  }, [applyCameraControls]);
+
   useEffect(() => {
     mountedRef.current = true;
     let started = false;
@@ -362,6 +398,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         const savedForceHtml5 = localStorage.getItem('qr-force-html5') === 'true';
         forceHtml5Ref.current = savedForceHtml5 || !('BarcodeDetector' in window);
         setForceHtml5(savedForceHtml5);
+
+        const savedBoost = localStorage.getItem('qr-lowlight-boost') === 'true';
+        boostRef.current = savedBoost;
+        setBoost(savedBoost);
 
         if (started) return;
         started = true;
@@ -453,6 +493,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
                 <option key={cam.deviceId} value={cam.deviceId}>{cam.label}</option>
               ))}
             </select>
+          )}
+          {!useHtml5Fallback && (
+            <button
+              onClick={toggleBoost}
+              className={`px-2.5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                boost
+                  ? 'bg-amber-600/40 hover:bg-amber-600/60 text-amber-200'
+                  : 'bg-white/10 hover:bg-white/20 text-white/70'
+              }`}
+              title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
+            >
+              {boost ? 'Boost ON' : 'Boost'}
+            </button>
           )}
           {hasBarcodeDetector && (
             <button
