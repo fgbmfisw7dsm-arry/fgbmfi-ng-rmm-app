@@ -519,32 +519,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       {useHtml5Fallback ? (
         <div className="relative flex-1 md:h-72">
           <div id="qr-scanner-view" className="absolute inset-0" />
-          <div className="absolute top-3 right-3 flex items-center gap-2 z-50">
-            <button
-              onClick={toggleBoost}
-              className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
-                boost
-                  ? 'bg-amber-500/90 text-black hover:bg-amber-400'
-                  : 'text-white hover:bg-white/20'
-              }`}
-              title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
-            >
-              {boost ? 'Boost ON' : 'Boost'}
-            </button>
-            {hasBarcodeDetector && (
-              <button
-                onClick={toggleEngine}
-                className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
-                  forceHtml5
-                    ? 'bg-yellow-500/90 text-black hover:bg-yellow-400'
-                    : 'bg-blue-600/90 text-white hover:bg-blue-500'
-                }`}
-                title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
-              >
-                {forceHtml5 ? 'html5' : 'BD'}
-              </button>
-            )}
-          </div>
           {activeCameraLabel && (
             <div className="absolute top-3 left-3 flex items-center gap-1.5 z-50 pointer-events-none">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -566,32 +540,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       ) : (
         <div className="relative flex-1 md:h-72">
           <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: 'cover' }} playsInline autoPlay muted />
-          <div className="absolute top-3 right-3 flex items-center gap-2 z-50">
-            <button
-              onClick={toggleBoost}
-              className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
-                boost
-                  ? 'bg-amber-500/90 text-black hover:bg-amber-400'
-                  : 'text-white hover:bg-white/20'
-              }`}
-              title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
-            >
-              {boost ? 'Boost ON' : 'Boost'}
-            </button>
-            {hasBarcodeDetector && (
-              <button
-                onClick={toggleEngine}
-                className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
-                  forceHtml5
-                    ? 'bg-yellow-500/90 text-black hover:bg-yellow-400'
-                    : 'bg-blue-600/90 text-white hover:bg-blue-500'
-                }`}
-                title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
-              >
-                {forceHtml5 ? 'html5' : 'BD'}
-              </button>
-            )}
-          </div>
           {activeCameraLabel && (
             <div className="absolute top-3 left-3 flex items-center gap-1.5 z-50 pointer-events-none">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -609,7 +557,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
             </div>
           </div>
-          <div className="absolute top-16 left-4 right-4">
+          <div className="absolute top-4 left-4 right-4">
             {debugInfo.length > 0 && (
               <div className="bg-black/50 rounded-lg p-1.5">
                 {debugInfo.map((line, i) => (
@@ -644,6 +592,30 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
                 <option key={cam.deviceId} value={cam.deviceId}>{cam.label}</option>
               ))}
             </select>
+          )}
+          <button
+            onClick={toggleBoost}
+            className={`px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              boost
+                ? 'bg-amber-500 text-black hover:bg-amber-400'
+                : 'bg-white/10 hover:bg-white/20 text-white'
+            }`}
+            title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
+          >
+            {boost ? 'Boost ON' : 'Boost'}
+          </button>
+          {hasBarcodeDetector && (
+            <button
+              onClick={toggleEngine}
+              className={`px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                forceHtml5
+                  ? 'bg-yellow-600/40 hover:bg-yellow-600/60 text-yellow-300'
+                  : 'bg-blue-600/40 hover:bg-blue-600/60 text-blue-300'
+              }`}
+              title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
+            >
+              {forceHtml5 ? 'html5' : 'BD'}
+            </button>
           )}
           <button onClick={onClose} className="px-5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-[10px] uppercase tracking-widest transition-all">
             Cancel
