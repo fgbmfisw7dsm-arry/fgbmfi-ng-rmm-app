@@ -553,6 +553,15 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **TanStack Query on ReportsPage:** `report-aggregates`, `sessions`, `events`, `settings`, `ministry-export` are now `useQuery`; district/region scoping moved into the `reportData` `useMemo` (recomputed on user change). `loading` state removed.
 - **Deferred:** MasterListModule (3.3C) kept its manual `useCallback` + server-side pagination + realtime flow — already paginated/deduped; a `useQuery` rewrite there is high-risk for marginal gain.
 
+### 29. QR Scanner Real-Time Performance (Windows Laptops / 1080p Webcams)
+- **Camera stream:** `startBarcodeDetector` requests `1280×720` (native for laptop webcams) instead of `1920×1080` — decode speed improves dramatically because `BarcodeDetector.detect()` cost scales with frame pixels.
+- **Focus/exposure/white balance:** `applyCameraControls(track, lowLight)` reads `getCapabilities()` and applies **only supported** advanced constraints: `focusMode: 'continuous'`, `exposureMode: 'continuous'`, `whiteBalanceMode: 'continuous'`, plus brightness/contrast/sharpness. The old `focusDistance: min` forcing (macro focus) was **removed** — it blurred badges held at arm's length on AF-capable cameras.
+- **Region-based detection:** the scan loop draws only the center square crop of the video onto a small 480×480 offscreen canvas and calls `detector.detect(canvas)` (interval tightened from 80 ms → 50 ms). Scanning is restricted to the visual focus zone and runs 2-4× faster on modest laptop CPUs.
+- **Low-light boost (manual toggle):** `qr-lowlight-boost` localStorage flag + "Boost" button in the scanner footer. When ON: applies +25% exposure compensation, +25% brightness/contrast, max sharpness to the camera track AND applies a `brightness(1.2) contrast(1.25)` CSS filter on the detection canvas. Purely hardware-driven; does not affect bright scenes unless toggled.
+- **html5-qrcode fallback:** `new Html5Qrcode(id, { formatsToSupport: [QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false })` + `start()` config now passes `videoConstraints` (720p + focusMode hint) and `fps: 25` — the fallback reuses native BarcodeDetector when present.
+- **UX:** on-screen hint ("Hold badge 30-45 cm from camera") overlaid on the scan zone for both engines.
+- **Hardware caveat:** most built-in laptop 1080p webcams are **fixed-focus** — they do not advertise `focusMode` in capabilities, so continuous AF is a no-op there. The speed/quality wins for those cameras come from resolution + region detection + low-light boost. External USB webcams with real AF (e.g., Logitech C920) do honor `focusMode: 'continuous'`.
+
 ## Code Conventions
 
 ### Naming

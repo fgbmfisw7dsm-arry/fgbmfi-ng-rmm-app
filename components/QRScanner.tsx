@@ -10,6 +10,19 @@ interface CameraInfo {
   label: string;
 }
 
+interface CameraCapabilities {
+  width?: ConstrainDoubleRange;
+  height?: ConstrainDoubleRange;
+  focusMode?: string[];
+  focusDistance?: ConstrainDoubleRange;
+  exposureMode?: string[];
+  whiteBalanceMode?: string[];
+  exposureCompensation?: ConstrainDoubleRange;
+  brightness?: ConstrainDoubleRange;
+  contrast?: ConstrainDoubleRange;
+  sharpness?: ConstrainDoubleRange;
+}
+
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [error, setError] = useState<string>('');
   const [scanning, setScanning] = useState(false);
@@ -18,6 +31,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [forceHtml5, setForceHtml5] = useState(false);
+  const [boost, setBoost] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
@@ -29,6 +43,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const camerasRef = useRef<CameraInfo[]>([]);
   const forceHtml5Ref = useRef(false);
   const selectedCameraRef = useRef<string | null>(null);
+  const boostRef = useRef(false);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scanCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const log = useCallback((msg: string) => {
     console.log('[QRScanner]', msg);
@@ -36,6 +53,56 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   }, []);
 
   const switchingRef = useRef(false);
+
+  const applyCameraControls = useCallback(async (track: MediaStreamTrack, lowLight: boolean) => {
+    try {
+      const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
+      if (!capabilities) return;
+      const advanced: any[] = [];
+      if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+        advanced.push({ focusMode: 'continuous' });
+      }
+      if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+        advanced.push({ exposureMode: 'continuous' });
+      }
+      if (capabilities.whiteBalanceMode && capabilities.whiteBalanceMode.includes('continuous')) {
+        advanced.push({ whiteBalanceMode: 'continuous' });
+      }
+      if (lowLight) {
+        if (capabilities.exposureCompensation) {
+          if (typeof capabilities.exposureCompensation.max === 'number' && typeof capabilities.exposureCompensation.min === 'number') {
+            advanced.push({ exposureCompensation: Math.min(capabilities.exposureCompensation.max, capabilities.exposureCompensation.min + (capabilities.exposureCompensation.max - capabilities.exposureCompensation.min) * 0.25) });
+          }
+        }
+        if (capabilities.brightness) {
+          if (typeof capabilities.brightness.max === 'number' && typeof capabilities.brightness.min === 'number') {
+            advanced.push({ brightness: Math.min(capabilities.brightness.max, (capabilities.brightness.min + capabilities.brightness.max) / 2 + (capabilities.brightness.max - capabilities.brightness.min) * 0.25) });
+          }
+        }
+        if (capabilities.contrast) {
+          if (typeof capabilities.contrast.max === 'number' && typeof capabilities.contrast.min === 'number') {
+            advanced.push({ contrast: Math.min(capabilities.contrast.max, (capabilities.contrast.min + capabilities.contrast.max) / 2 + (capabilities.contrast.max - capabilities.contrast.min) * 0.25) });
+          }
+        }
+        if (capabilities.sharpness) {
+          if (typeof capabilities.sharpness.max === 'number') advanced.push({ sharpness: capabilities.sharpness.max });
+        }
+      } else {
+        const mid = (v?: ConstrainDoubleRange) => {
+          return v && typeof v.min === 'number' && typeof v.max === 'number' ? (v.min + v.max) / 2 : undefined;
+        };
+        const b = mid(capabilities.brightness);
+        if (b !== undefined) advanced.push({ brightness: b });
+        const c = mid(capabilities.contrast);
+        if (c !== undefined) advanced.push({ contrast: c });
+        const s = mid(capabilities.sharpness);
+        if (s !== undefined) advanced.push({ sharpness: s });
+      }
+      if (advanced.length) {
+        await track.applyConstraints({ advanced });
+      }
+    } catch {}
+  }, []);
 
   const refreshCameras = useCallback(async () => {
     try {
@@ -74,8 +141,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
       const videoConstraints: any = {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
         focusMode: { ideal: 'continuous' }
       };
       if (deviceId) {
@@ -95,27 +162,27 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       await videoRef.current.play();
       log(`Video: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
 
+      if (!scanCanvasRef.current) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 480;
+        canvas.height = 480;
+        scanCanvasRef.current = canvas;
+        scanCtxRef.current = canvas.getContext('2d', { willReadFrequently: true });
+      }
+
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const capabilities = track.getCapabilities ? track.getCapabilities() : null;
+        const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
         if (capabilities) {
           log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
           const capsMsg: string[] = [];
-          if (capabilities.focusMode) capsMsg.push(`focus=${(capabilities.focusMode as string[]).join(',')}`);
+          if (capabilities.focusMode) capsMsg.push(`focus=${capabilities.focusMode.join(',')}`);
           if (capabilities.focusDistance) capsMsg.push(`distance=${capabilities.focusDistance.min}-${capabilities.focusDistance.max}`);
+          if (capabilities.exposureCompensation) capsMsg.push(`expComp=${capabilities.exposureCompensation.min}-${capabilities.exposureCompensation.max}`);
           if (capsMsg.length) log(`Capabilities: ${capsMsg.join(', ')}`);
-          if (capabilities.focusDistance) {
-            try {
-              await track.applyConstraints({ advanced: [{ focusDistance: capabilities.focusDistance.min } as any] });
-              log(`Focus set to min: ${capabilities.focusDistance.min}`);
-            } catch {}
-          }
-          if (capabilities.exposureMode) {
-            try {
-              await track.applyConstraints({ advanced: [{ exposureMode: 'continuous' } as any] });
-            } catch {}
-          }
         }
+        await applyCameraControls(track, boostRef.current);
+        log(`Controls applied (focusMode continuous${boostRef.current ? ' + low-light boost' : ''})`);
       }
 
       refreshCameras();
@@ -124,7 +191,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-      log('BarcodeDetector active (80ms), hold badge in focus zone...');
+      log('BarcodeDetector active (50ms region scan), hold badge in focus zone...');
 
       attemptsRef.current = 0;
       let detecting = false;
@@ -133,7 +200,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         detecting = true;
         attemptsRef.current++;
         try {
-          const codes = await detector.detect(videoRef.current);
+          const video = videoRef.current;
+          const canvas = scanCanvasRef.current;
+          const ctx = scanCtxRef.current;
+          if (!canvas || !ctx || !video.videoWidth || !video.videoHeight) return;
+          const size = Math.min(video.videoWidth, video.videoHeight);
+          const sx = (video.videoWidth - size) / 2;
+          const sy = (video.videoHeight - size) / 2;
+          ctx.save();
+          ctx.filter = boostRef.current ? 'brightness(1.2) contrast(1.25)' : 'none';
+          ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+          const codes = await detector.detect(canvas);
           if (codes && codes.length > 0) {
             if (intervalRef.current) clearInterval(intervalRef.current);
             if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
@@ -144,7 +222,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           }
         } catch (_e) {}
         detecting = false;
-      }, 80);
+      }, 50);
     } catch (e: any) {
       if (mountedRef.current) {
         const msg = e.message || '';
@@ -166,11 +244,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log, refreshCameras]);
+  }, [log, refreshCameras, applyCameraControls]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
-      const { Html5Qrcode } = await import('html5-qrcode');
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
       let cameraId: string;
       if (deviceId) {
@@ -195,15 +273,25 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       setError('');
 
       await new Promise(r => setTimeout(r, 150));
-      const scanner = new Html5Qrcode('qr-scanner-view');
+      const scanner = new Html5Qrcode('qr-scanner-view', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+      const h5VideoConstraints = {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        focusMode: { ideal: 'continuous' } as any
+      };
       await scanner.start(
         cameraId,
         {
-          fps: 20,
+          fps: 25,
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
             const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
             return { width: size, height: size };
-          }
+          },
+          videoConstraints: h5VideoConstraints as any
         },
         (decodedText: string) => {
           setScanning(false);
@@ -213,7 +301,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         },
         () => {}
       );
-      log('html5-qrcode active (20fps)');
+      log('html5-qrcode active (25fps, native detector if supported)');
       html5ScannerRef.current = scanner;
       refreshCameras();
     } catch (e: any) {
@@ -291,6 +379,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     }
   }, [stopScanner, startWithEngine]);
 
+  const toggleBoost = useCallback(async () => {
+    const next = !boostRef.current;
+    boostRef.current = next;
+    setBoost(next);
+    localStorage.setItem('qr-lowlight-boost', String(next));
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) await applyCameraControls(track, next);
+    }
+  }, [applyCameraControls]);
+
   useEffect(() => {
     mountedRef.current = true;
     let started = false;
@@ -316,6 +415,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         const savedForceHtml5 = localStorage.getItem('qr-force-html5') === 'true';
         forceHtml5Ref.current = savedForceHtml5 || !('BarcodeDetector' in window);
         setForceHtml5(savedForceHtml5);
+
+        const savedBoost = localStorage.getItem('qr-lowlight-boost') === 'true';
+        boostRef.current = savedBoost;
+        setBoost(savedBoost);
 
         if (started) return;
         started = true;
@@ -359,6 +462,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
             </div>
           </div>
+          <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none">
+            <span className="bg-black/70 text-white/90 text-[10px] font-medium rounded-full px-3 py-1.5 whitespace-nowrap">
+              Hold badge 30-45 cm from camera
+            </span>
+          </div>
         </div>
       ) : (
         <div className="relative flex-1 md:h-72">
@@ -371,6 +479,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               <div className="absolute bottom-0 left-0 w-5 h-5 border-b-[3px] border-l-[3px] border-cyan-300/80 rounded-bl" />
               <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
             </div>
+          </div>
+          <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none">
+            <span className="bg-black/70 text-white/90 text-[10px] font-medium rounded-full px-3 py-1.5 whitespace-nowrap">
+              Hold badge 30-45 cm from camera
+            </span>
           </div>
           <div className="absolute top-4 left-4 right-4">
             {debugInfo.length > 0 && (
@@ -419,6 +532,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
             >
               {forceHtml5 ? 'html5' : 'BD'}
+            </button>
+          )}
+          {!useHtml5Fallback && (
+            <button
+              onClick={toggleBoost}
+              className={`px-2.5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                boost
+                  ? 'bg-amber-600/40 hover:bg-amber-600/60 text-amber-200'
+                  : 'bg-white/10 hover:bg-white/20 text-white/70'
+              }`}
+              title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
+            >
+              {boost ? 'Boost ON' : 'Boost'}
             </button>
           )}
           <button onClick={onClose} className="px-5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-[10px] uppercase tracking-widest transition-all">
