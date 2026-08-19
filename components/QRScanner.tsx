@@ -482,31 +482,29 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           )}
           {error && <span className="text-xs font-bold text-red-400 truncate">{error}</span>}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
           {cameras.length > 1 && (
             <select
               value={selectedCameraId || ''}
               onChange={(e) => { const v = e.target.value; if (v) switchCamera(v); }}
-              className="bg-gray-800 text-white text-[10px] font-medium rounded-lg px-2 py-2 border border-gray-600 max-w-[130px] truncate appearance-none cursor-pointer hover:border-gray-400 transition-colors"
+              className="bg-gray-800 text-white text-[10px] font-medium rounded-lg px-2 py-2 border border-gray-600 max-w-[120px] truncate appearance-none cursor-pointer hover:border-gray-400 transition-colors"
             >
               {cameras.map(cam => (
                 <option key={cam.deviceId} value={cam.deviceId}>{cam.label}</option>
               ))}
             </select>
           )}
-          {!useHtml5Fallback && (
-            <button
-              onClick={toggleBoost}
-              className={`px-2.5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                boost
-                  ? 'bg-amber-600/40 hover:bg-amber-600/60 text-amber-200'
-                  : 'bg-white/10 hover:bg-white/20 text-white/70'
-              }`}
-              title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
-            >
-              {boost ? 'Boost ON' : 'Boost'}
-            </button>
-          )}
+          <button
+            onClick={toggleBoost}
+            className={`px-2.5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              boost
+                ? 'bg-amber-600/40 hover:bg-amber-600/60 text-amber-200'
+                : 'bg-white/10 hover:bg-white/20 text-white/70'
+            }`}
+            title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
+          >
+            {boost ? 'Boost ON' : 'Boost'}
+          </button>
           {hasBarcodeDetector && (
             <button
               onClick={toggleEngine}
