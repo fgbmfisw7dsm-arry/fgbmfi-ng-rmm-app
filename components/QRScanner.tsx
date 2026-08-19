@@ -104,6 +104,22 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
     } catch {}
   }, []);
 
+  const cameraRank = useCallback((label: string): number => {
+    const l = label.toLowerCase();
+    if (!l || /^camera \d+$/.test(l)) return 5;
+    if (l.includes('obs') || l.includes('virtual') || l.includes('simulator') || l.includes('vcam') || l.includes('stream') || l.includes('nvidia broadcast')) return 9;
+    if (l.includes('integrated') || l.includes('built-in') || l.includes('internal')) return 3;
+    if (l.includes('usb') || l.includes('hd pro') || l.includes('logitech') || l.includes('logi') || l.includes('webcam') || l.includes('c92') || l.includes('razer') || l.includes('microsoft') || l.includes('nexigo') || l.includes('anker')) return 1;
+    return 2;
+  }, []);
+
+  const getDefaultCameraId = useCallback((): string | null => {
+    const cams = camerasRef.current;
+    if (!cams.length) return null;
+    const ranked = [...cams].sort((a, b) => cameraRank(a.label) - cameraRank(b.label));
+    return ranked[0].deviceId;
+  }, [cameraRank]);
+
   const refreshCameras = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -112,11 +128,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         .map((d, i) => ({
           deviceId: d.deviceId,
           label: d.label || `Camera ${i + 1}`
-        }));
+        }))
+        .sort((a, b) => cameraRank(a.label) - cameraRank(b.label));
       camerasRef.current = videoDevices;
       setCameras(videoDevices);
     } catch {}
-  }, []);
+  }, [cameraRank]);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -145,8 +162,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         height: { ideal: 720 },
         focusMode: { ideal: 'continuous' }
       };
-      if (deviceId) {
-        videoConstraints.deviceId = { ideal: deviceId };
+      const targetId = deviceId || getDefaultCameraId();
+      if (targetId && camerasRef.current.some(c => c.deviceId === targetId)) {
+        videoConstraints.deviceId = { exact: targetId };
       } else {
         videoConstraints.facingMode = 'environment';
       }
@@ -244,7 +262,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log, refreshCameras, applyCameraControls]);
+  }, [log, refreshCameras, applyCameraControls, getDefaultCameraId]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
@@ -262,11 +280,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           setError('No camera detected.');
           return;
         }
-        const rear = camList.find((c: { id: string; label: string }) =>
+        const sorted = [...camList].sort((a, b) => cameraRank(a.label) - cameraRank(b.label));
+        const rear = sorted.find((c: { id: string; label: string }) =>
           c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment')
         );
-        cameraId = rear?.id || camList[0].id;
-        log(`Camera: ${rear?.label || camList[0].label}`);
+        cameraId = rear?.id || sorted[0].id;
+        log(`Camera: ${rear?.label || sorted[0].label}`);
       }
 
       setScanning(true);
@@ -332,7 +351,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         }
       }
     }
-  }, [log, refreshCameras]);
+  }, [log, refreshCameras, cameraRank]);
 
   const startWithEngine = useCallback(async (deviceId: string | null) => {
     if (forceHtml5Ref.current) {
@@ -408,7 +427,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setCameras(videoDevices);
 
         const saved = localStorage.getItem('qr-camera-device-id');
-        const initialCamera = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
+        const savedValid = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
+        const initialCamera = savedValid || getDefaultCameraId();
         selectedCameraRef.current = initialCamera;
         setSelectedCameraId(initialCamera);
 
@@ -443,7 +463,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         html5ScannerRef.current.stop().catch(() => {});
       }
     };
-  }, [startWithEngine]);
+  }, [startWithEngine, getDefaultCameraId]);
 
   const hasBarcodeDetector = 'BarcodeDetector' in window;
 
