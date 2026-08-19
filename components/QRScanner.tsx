@@ -32,6 +32,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [forceHtml5, setForceHtml5] = useState(false);
   const [boost, setBoost] = useState(false);
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
@@ -152,6 +153,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+      videoRef.current.controls = false;
+    }
     if (html5ScannerRef.current) {
       try { await html5ScannerRef.current.stop(); } catch {}
       html5ScannerRef.current = null;
@@ -161,29 +166,61 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
-      const videoConstraints: any = {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        focusMode: { ideal: 'continuous' }
-      };
-      const targetId = deviceId || getDefaultCameraId();
-      const targetLabel = targetId ? camerasRef.current.find(c => c.deviceId === targetId)?.label || targetId.slice(0, 12) : null;
-      log(`Requesting camera: ${targetLabel || 'system default'}`);
-      if (targetId && camerasRef.current.some(c => c.deviceId === targetId)) {
-        videoConstraints.deviceId = { exact: targetId };
-      } else {
-        videoConstraints.facingMode = 'environment';
+      const cams = camerasRef.current;
+      const desiredId = deviceId || getDefaultCameraId();
+      const desiredLabel = desiredId ? cams.find(c => c.deviceId === desiredId)?.label || desiredId.slice(0, 12) : null;
+      const explicitVirtualChoice = !!desiredId && cameraRank(cams.find(c => c.deviceId === desiredId)?.label || '') >= 9;
+      log(`Requesting: ${desiredLabel || 'default'}`);
+
+      const ranked = [...cams].sort((a, b) => cameraRank(a.label) - cameraRank(b.label));
+      const candidates: string[] = [];
+      const push = (id: string) => { if (id && !candidates.includes(id)) candidates.push(id); };
+      if (desiredId) push(desiredId);
+      ranked.forEach(c => { if (cameraRank(c.label) < 9) push(c.deviceId); });
+      ranked.forEach(c => { if (cameraRank(c.label) >= 9) push(c.deviceId); });
+      if (!candidates.length && desiredId) candidates.push(desiredId);
+
+      let stream: MediaStream | null = null;
+      let chosenId = '';
+      let rejectedVirtual = false;
+      for (const id of candidates) {
+        try {
+          const constraints: any = {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            focusMode: { ideal: 'continuous' }
+          };
+          if (id) constraints.deviceId = { exact: id };
+          else constraints.facingMode = 'environment';
+          const s = await navigator.mediaDevices.getUserMedia({ video: constraints });
+          const t = s.getVideoTracks()[0];
+          const actual = t && t.getSettings ? t.getSettings().deviceId || '' : '';
+          const actualLabel = cams.find(c => c.deviceId === actual)?.label || actual.slice(0, 12) || 'unknown';
+          const virtual = cameraRank(actualLabel) >= 9;
+          const requestedVirtual = cameraRank(cams.find(c => c.deviceId === id)?.label || '') >= 9;
+          const matched = !actual || id === actual;
+          if (!virtual || requestedVirtual || matched) {
+            stream = s;
+            chosenId = actual || id;
+            log(`Opened: ${actualLabel}${requestedVirtual ? ' (explicit virtual choice)' : ''}`);
+            break;
+          }
+          s.getTracks().forEach(x => x.stop());
+          rejectedVirtual = true;
+          log(`Rejected virtual result while requesting (${desiredLabel || 'default'}): got ${actualLabel}`);
+        } catch (err: any) {
+          const em = (err && err.message) || 'error';
+          log(`Open failed (${id.slice(0, 8)}): ${em.split('\n')[0]}`);
+        }
       }
 
-      let stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
-      const targetRequested = targetId || null;
-      for (let retry = 0; retry < 3; retry++) {
-        const firstTrack = stream.getVideoTracks()[0];
-        const actual = firstTrack && firstTrack.getSettings ? firstTrack.getSettings().deviceId : '';
-        if (!targetRequested || !actual || actual === targetRequested) break;
-        log(`Device mismatch (req ${targetLabel || targetRequested.slice(0, 8)}), re-requesting exact...`);
-        stream.getTracks().forEach(t => t.stop());
-        stream = await navigator.mediaDevices.getUserMedia({ video: { ...videoConstraints, deviceId: { exact: targetRequested } } });
+      if (!stream) {
+        setError(rejectedVirtual
+          ? 'OBS Virtual Camera is intercepting all webcams. Close or stop OBS to free the USB webcam.'
+          : 'No usable camera detected.');
+        setScanning(false);
+        setActiveCameraLabel('');
+        return;
       }
       streamRef.current = stream;
 
@@ -193,6 +230,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       }
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
+      const chosenLabel = cams.find(c => c.deviceId === chosenId)?.label || chosenId.slice(0, 12) || 'unknown';
+      setActiveCameraLabel(chosenLabel);
+      const aliased = rejectedVirtual && !explicitVirtualChoice && cameraRank(chosenLabel) >= 9;
+      log(`ACTIVE: ${chosenLabel}${aliased ? ' — VIRTUAL device used because OBS is intercepting the webcam. Close OBS to use the USB camera.' : ''}`);
+      if (aliased) setError('Showing OBS Virtual Camera — the USB webcam could not be opened (OBS is capturing it). Close or stop OBS and retry.');
       log(`Video: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
 
       if (!scanCanvasRef.current) {
@@ -205,10 +247,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const settings = track.getSettings ? track.getSettings() : null;
-        const actualId = settings?.deviceId || '';
-        const actualLabel = camerasRef.current.find(c => c.deviceId === actualId)?.label || actualId.slice(0, 12) || 'unknown';
-        log(`Active camera: ${actualLabel}${targetId && actualId && actualId !== targetId ? ` — WARN requested ${targetLabel}` : ''}`);
         const capabilities = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
         if (capabilities) {
           log(`Camera max: ${capabilities.width?.max}x${capabilities.height?.max}`);
@@ -281,16 +319,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log, refreshCameras, applyCameraControls, getDefaultCameraId]);
+  }, [log, refreshCameras, applyCameraControls, getDefaultCameraId, cameraRank]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
       let cameraId: string;
+      let camLabel = '';
       if (deviceId) {
         cameraId = deviceId;
-        const camLabel = camerasRef.current.find(c => c.deviceId === deviceId)?.label || deviceId.slice(0, 8);
+        camLabel = camerasRef.current.find(c => c.deviceId === deviceId)?.label || deviceId.slice(0, 8);
         log(`Camera: ${camLabel}`);
       } else {
         const camList = await Html5Qrcode.getCameras();
@@ -304,7 +343,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment')
         );
         cameraId = rear?.id || sorted[0].id;
-        log(`Camera: ${rear?.label || sorted[0].label}`);
+        camLabel = rear?.label || sorted[0].label;
+        log(`Camera: ${camLabel}`);
       }
 
       setScanning(true);
@@ -339,7 +379,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         },
         () => {}
       );
-      log('html5-qrcode active (25fps, native detector if supported)');
+      log("html5-qrcode active (25fps, native detector if supported)");
+      try {
+        const running = scanner.getRunningTrackSettings ? scanner.getRunningTrackSettings() : null;
+        const runningId = running && running.deviceId ? running.deviceId : '';
+        const runningLabel = camerasRef.current.find(c => c.deviceId === runningId)?.label || runningId.slice(0, 12) || cameraId.slice(0, 12);
+        setActiveCameraLabel(runningLabel);
+        log(`ACTIVE: ${runningLabel}${cameraId && runningId && runningId !== cameraId ? ` — WARN requested ${camLabel}` : ''}`);
+      } catch {}
       html5ScannerRef.current = scanner;
       refreshCameras();
     } catch (e: any) {
@@ -508,6 +555,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               Hold badge 30-45 cm from camera
             </span>
           </div>
+          {activeCameraLabel && (
+            <div className="absolute bottom-6 right-3 flex items-center gap-1.5 pointer-events-none">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="bg-black/70 text-white text-[9px] font-medium rounded-full px-2 py-1 truncate max-w-[140px]">
+                {activeCameraLabel}
+              </span>
+            </div>
+          )}
         </div>
       ) : (
         <div className="relative flex-1 md:h-72">
@@ -526,6 +581,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               Hold badge 30-45 cm from camera
             </span>
           </div>
+          {activeCameraLabel && (
+            <div className="absolute bottom-6 right-3 flex items-center gap-1.5 pointer-events-none">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="bg-black/70 text-white text-[9px] font-medium rounded-full px-2 py-1 truncate max-w-[140px]">
+                {activeCameraLabel}
+              </span>
+            </div>
+          )}
           <div className="absolute top-4 left-4 right-4">
             {debugInfo.length > 0 && (
               <div className="bg-black/50 rounded-lg p-1.5">
