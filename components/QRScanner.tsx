@@ -32,6 +32,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [forceHtml5, setForceHtml5] = useState(false);
   const [boost, setBoost] = useState(false);
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mountedRef = useRef(true);
@@ -54,6 +55,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const switchingRef = useRef(false);
 
+  const isVirtualDevice = useCallback((label: string): boolean => {
+    const l = label.toLowerCase();
+    return (
+      l.includes('obs') || l.includes('virtual') || l.includes('simulator') ||
+      l.includes('vcam') || l.includes('nvidia broadcast') || l.includes('stream') ||
+      l.includes('prism') || l.includes('splitcam') || l.includes('manycam') ||
+      l.includes('xsplit') || l.includes('screen') || l.includes('display') ||
+      l.includes('monitor')
+    );
+  }, []);
+
   const refreshCameras = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -62,11 +74,35 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         .map((d, i) => ({
           deviceId: d.deviceId,
           label: d.label || `Camera ${i + 1}`
-        }));
+        }))
+        .sort((a, b) => {
+          const va = isVirtualDevice(a.label) ? 1 : 0;
+          const vb = isVirtualDevice(b.label) ? 1 : 0;
+          return va - vb;
+        });
       camerasRef.current = videoDevices;
       setCameras(videoDevices);
     } catch {}
-  }, []);
+  }, [isVirtualDevice]);
+
+  const pickPhysicalCameraId = useCallback((): string | null => {
+    const physical = camerasRef.current.filter(c => !isVirtualDevice(c.label));
+    if (physical.length) return physical[0].deviceId;
+    return camerasRef.current[0]?.deviceId ?? null;
+  }, [isVirtualDevice]);
+
+  const probeAndRefreshCameras = useCallback(async (): Promise<void> => {
+    const probe = async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true });
+        await new Promise(r => setTimeout(r, 150));
+        s.getTracks().forEach(t => t.stop());
+      } catch {}
+      await new Promise(r => setTimeout(r, 200));
+      await refreshCameras();
+    };
+    await probe();
+  }, [refreshCameras]);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -133,13 +169,20 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
 
   const startBarcodeDetector = useCallback(async (deviceId?: string | null) => {
     try {
+      if (typeof window === 'undefined' || !('BarcodeDetector' in window)) {
+        throw new Error('BarcodeDetector unavailable');
+      }
+      const wantedId = deviceId ?? pickPhysicalCameraId();
+      const labelsKnown = camerasRef.current.some(c => c.label && !/^Camera \d+$/.test(c.label));
       const videoConstraints: any = {
         width: { ideal: 1280 },
         height: { ideal: 720 },
         focusMode: { ideal: 'continuous' }
       };
-      if (deviceId) {
-        videoConstraints.deviceId = { ideal: deviceId };
+      if (wantedId && camerasRef.current.some(c => c.deviceId === wantedId)) {
+        videoConstraints.deviceId = labelsKnown ? { exact: wantedId } : { ideal: wantedId };
+      } else if (labelsKnown) {
+        throw new Error('selected camera is unavailable');
       } else {
         videoConstraints.facingMode = 'environment';
       }
@@ -164,6 +207,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       }
 
       const track = stream.getVideoTracks()[0];
+      const actualId = track?.getSettings?.().deviceId || '';
+      const actualLabel = camerasRef.current.find(c => c.deviceId === actualId)?.label || '';
+      const resolvedLabel = actualLabel || (camerasRef.current.find(c => c.deviceId === (wantedId || actualId))?.label || '');
+      setActiveCameraLabel(actualLabel || '');
       if (track) {
         const caps = (track.getCapabilities ? track.getCapabilities() : null) as unknown as CameraCapabilities | null;
         if (caps) {
@@ -212,6 +259,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             onScanRef.current(codes[0].rawValue.trim());
           } else if (attemptsRef.current % 100 === 0) {
             log(`Scanning... ${attemptsRef.current} attempts, hold badge in focus zone`);
+          } else if (attemptsRef.current === 400) {
+            log('No code found after 20s — possible dead/blank camera feed. Stopping.');
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+            streamRef.current = null;
+            setScanning(false);
+            setError('No code detected after 20 seconds. Check that your webcam is producing a live image, then try again.');
           }
         } catch (_e) {}
         detecting = false;
@@ -237,7 +291,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         setScanning(false);
       }
     }
-  }, [log, refreshCameras, applyCameraControls]);
+  }, [log, refreshCameras, applyCameraControls, pickPhysicalCameraId]);
 
   const tryHtml5Qrcode = useCallback(async (deviceId?: string | null) => {
     try {
@@ -248,6 +302,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         cameraId = deviceId;
         const camLabel = camerasRef.current.find(c => c.deviceId === deviceId)?.label || deviceId.slice(0, 8);
         log(`Camera: ${camLabel}`);
+        setActiveCameraLabel(camerasRef.current.find(c => c.deviceId === deviceId)?.label || '');
       } else {
         const camList = await Html5Qrcode.getCameras();
         if (!mountedRef.current) return;
@@ -255,11 +310,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           setError('No camera detected.');
           return;
         }
-        const rear = camList.find((c: { id: string; label: string }) =>
+        const usable = camList.filter((c: { id: string; label: string }) => !isVirtualDevice(c.label));
+        const list = usable.length ? usable : camList;
+        const rear = list.find((c: { id: string; label: string }) =>
           c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment')
         );
-        cameraId = rear?.id || camList[0].id;
-        log(`Camera: ${rear?.label || camList[0].label}`);
+        cameraId = rear?.id || list[0].id;
+        const pickLabel = rear?.label || list[0].label;
+        log(`Camera: ${pickLabel}${usable.length === 0 ? ' (virtual-only)' : ''}`);
+        setActiveCameraLabel(pickLabel || '');
       }
 
       setScanning(true);
@@ -325,7 +384,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         }
       }
     }
-  }, [log, refreshCameras]);
+  }, [log, refreshCameras, isVirtualDevice]);
 
   const startWithEngine = useCallback(async (deviceId: string | null) => {
     if (forceHtml5Ref.current) {
@@ -396,14 +455,28 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
           .map((d, i) => ({
             deviceId: d.deviceId,
             label: d.label || `Camera ${i + 1}`
-          }));
+          }))
+          .sort((a, b) => {
+            const va = isVirtualDevice(a.label) ? 1 : 0;
+            const vb = isVirtualDevice(b.label) ? 1 : 0;
+            return va - vb;
+          });
         camerasRef.current = videoDevices;
         setCameras(videoDevices);
 
+        await probeAndRefreshCameras();
+
         const saved = localStorage.getItem('qr-camera-device-id');
-        const initialCamera = saved && videoDevices.some(d => d.deviceId === saved) ? saved : null;
-        selectedCameraRef.current = initialCamera;
-        setSelectedCameraId(initialCamera);
+        const savedLabel = saved ? camerasRef.current.find(d => d.deviceId === saved)?.label || '' : '';
+        if (saved && camerasRef.current.some(d => d.deviceId === saved)) {
+          if (savedLabel && /^Camera \d+$/.test(savedLabel) && camerasRef.current.length > 1) {
+            localStorage.removeItem('qr-camera-device-id');
+          } else {
+            selectedCameraRef.current = saved;
+            setSelectedCameraId(saved);
+          }
+        }
+        const initialCamera = selectedCameraRef.current ?? pickPhysicalCameraId() ?? null;
 
         const savedForceHtml5 = localStorage.getItem('qr-force-html5') === 'true';
         forceHtml5Ref.current = savedForceHtml5 || !('BarcodeDetector' in window);
@@ -436,7 +509,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         html5ScannerRef.current.stop().catch(() => {});
       }
     };
-  }, [startWithEngine]);
+  }, [startWithEngine, probeAndRefreshCameras, pickPhysicalCameraId, isVirtualDevice]);
 
   const hasBarcodeDetector = 'BarcodeDetector' in window;
 
@@ -446,13 +519,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       {useHtml5Fallback ? (
         <div className="relative flex-1 md:h-72">
           <div id="qr-scanner-view" className="absolute inset-0" />
-          <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+          <div className="absolute top-3 right-3 flex items-center gap-2 z-50">
             <button
               onClick={toggleBoost}
-              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all shadow ${
+              className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
                 boost
-                  ? 'bg-amber-500 text-black hover:bg-amber-400'
-                  : 'bg-black/60 text-white hover:bg-black/80'
+                  ? 'bg-amber-500/90 text-black hover:bg-amber-400'
+                  : 'text-white hover:bg-white/20'
               }`}
               title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
             >
@@ -461,10 +534,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             {hasBarcodeDetector && (
               <button
                 onClick={toggleEngine}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all shadow ${
+                className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
                   forceHtml5
-                    ? 'bg-yellow-500 text-black hover:bg-yellow-400'
-                    : 'bg-blue-600 text-white hover:bg-blue-500'
+                    ? 'bg-yellow-500/90 text-black hover:bg-yellow-400'
+                    : 'bg-blue-600/90 text-white hover:bg-blue-500'
                 }`}
                 title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
               >
@@ -472,6 +545,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               </button>
             )}
           </div>
+          {activeCameraLabel && (
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-50 pointer-events-none">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="bg-black/70 text-white text-[10px] font-medium rounded-full px-2 py-1 truncate max-w-[150px]">
+                {activeCameraLabel}
+              </span>
+            </div>
+          )}
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="absolute inset-[32px]">
@@ -485,13 +566,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
       ) : (
         <div className="relative flex-1 md:h-72">
           <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: 'cover' }} playsInline autoPlay muted />
-          <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+          <div className="absolute top-3 right-3 flex items-center gap-2 z-50">
             <button
               onClick={toggleBoost}
-              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all shadow ${
+              className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
                 boost
-                  ? 'bg-amber-500 text-black hover:bg-amber-400'
-                  : 'bg-black/60 text-white hover:bg-black/80'
+                  ? 'bg-amber-500/90 text-black hover:bg-amber-400'
+                  : 'text-white hover:bg-white/20'
               }`}
               title={boost ? 'Low light boost ON — tap to disable' : 'Low light boost OFF — tap to brighten dark scenes'}
             >
@@ -500,10 +581,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             {hasBarcodeDetector && (
               <button
                 onClick={toggleEngine}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all shadow ${
+                className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg bg-black/80 backdrop-blur ${
                   forceHtml5
-                    ? 'bg-yellow-500 text-black hover:bg-yellow-400'
-                    : 'bg-blue-600 text-white hover:bg-blue-500'
+                    ? 'bg-yellow-500/90 text-black hover:bg-yellow-400'
+                    : 'bg-blue-600/90 text-white hover:bg-blue-500'
                 }`}
                 title={forceHtml5 ? 'Switch to BarcodeDetector' : 'Switch to html5-qrcode'}
               >
@@ -511,6 +592,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               </button>
             )}
           </div>
+          {activeCameraLabel && (
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-50 pointer-events-none">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="bg-black/70 text-white text-[10px] font-medium rounded-full px-2 py-1 truncate max-w-[150px]">
+                {activeCameraLabel}
+              </span>
+            </div>
+          )}
           <div className="absolute inset-0 border-[3px] border-white/30 rounded-3xl m-8 pointer-events-none" />
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="absolute inset-[32px]">
@@ -520,7 +609,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
               <div className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-cyan-300/80 rounded-br" />
             </div>
           </div>
-          <div className="absolute top-4 left-4 right-4">
+          <div className="absolute top-16 left-4 right-4">
             {debugInfo.length > 0 && (
               <div className="bg-black/50 rounded-lg p-1.5">
                 {debugInfo.map((line, i) => (
