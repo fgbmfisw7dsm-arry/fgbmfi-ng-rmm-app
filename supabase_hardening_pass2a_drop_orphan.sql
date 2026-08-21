@@ -5,10 +5,11 @@
 --
 -- Two known orphans (verified absent from repo + all migrations):
 --   * public.financials           — legacy financial table (superseded by
---                                   financial_entries).
---   * public.event_delegate_codes — legacy per-delegate code table (predates the
---                                   deterministic-code scheme, itself removed in
---                                   v1.10 for UUID-only qr_hash). RLS DISABLED.
+--                                   financial_entries). DROPPED (confirmed empty).
+--   * public.event_delegate_codes — legacy per-delegate 4-digit check-in code
+--                                   table, retired in v1.10 for UUID-only
+--                                   qr_hash. DROP DECISION DEFERRED; quarantined
+--                                   with RLS + admin-only read in the ACTION.
 --
 -- Robust to both tables already being gone (to_regclass-guarded).
 -- Run the PRE-CHECK first; the ACTION section is safe regardless.
@@ -89,27 +90,22 @@ ORDER BY table_name, grantee;
 -- ----------------------------------------------------------------------------
 -- ACTION (safe to run even if one table is already gone):
 -- 1. Drop public.financials if present (confirmed empty, unreferenced).
--- 2. Drop public.event_delegate_codes ONLY if empty; otherwise ENABLE RLS as a
---    safety net so anon can no longer read it until a human decides its fate.
+-- 2. public.event_delegate_codes — DROP DECISION DEFERRED (confirmed as the
+--    retired 4-digit check-in code table, superseded by UUID-only qr_hash in
+--    v1.10). It is quarantined here: RLS ENABLED as a safety net so the anon
+--    role can no longer read it. Revisit for archive/keep/drop in a later pass.
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS public.financials;
 
 DO $$
-DECLARE
-    v_rows BIGINT;
 BEGIN
-    IF to_regclass('public.event_delegate_codes') IS NULL THEN
-        RAISE NOTICE 'event_delegate_codes — already gone (OK).';
-        RETURN;
-    END IF;
-
-    EXECUTE 'SELECT COUNT(*) FROM public.event_delegate_codes' INTO v_rows;
-    IF v_rows = 0 THEN
-        EXECUTE 'DROP TABLE IF EXISTS public.event_delegate_codes';
-        RAISE NOTICE 'event_delegate_codes was empty — dropped.';
-    ELSE
+    IF to_regclass('public.event_delegate_codes') IS NOT NULL THEN
         EXECUTE 'ALTER TABLE public.event_delegate_codes ENABLE ROW LEVEL SECURITY';
-        RAISE NOTICE 'event_delegate_codes has % rows — RLS enabled as safety net, NOT dropped. Human decision required.', v_rows;
+        EXECUTE 'DROP POLICY IF EXISTS event_delegate_codes_admin_read ON event_delegate_codes';
+        EXECUTE 'CREATE POLICY event_delegate_codes_admin_read ON event_delegate_codes FOR SELECT TO authenticated USING (is_admin_user())';
+        RAISE NOTICE 'event_delegate_codes — RLS enabled + admin-only read (quarantine). Drop decision deferred to a later pass.';
+    ELSE
+        RAISE NOTICE 'event_delegate_codes — already gone (OK).';
     END IF;
 END $$;
 
