@@ -5,31 +5,67 @@
 --
 -- Two known orphans (verified absent from repo + all migrations):
 --   * public.financials           — legacy financial table (superseded by
---                                   financial_entries). Confirmed EMPTY.
+--                                   financial_entries).
 --   * public.event_delegate_codes — legacy per-delegate code table (predates the
 --                                   deterministic-code scheme, itself removed in
 --                                   v1.10 for UUID-only qr_hash). RLS DISABLED.
 --
--- Run the PRE-CHECK queries first; only run the ACTION section once confirmed.
+-- Robust to both tables already being gone (to_regclass-guarded).
+-- Run the PRE-CHECK first; the ACTION section is safe regardless.
 -- Idempotent: safe to re-run.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- PRE-CHECK 1: confirm both orphans are empty (expect 0 / 0)
+-- PRE-CHECK 1: row counts for both orphans (any missing table reports 'already gone')
 -- ----------------------------------------------------------------------------
-SELECT 'public.financials' AS tbl, COUNT(*) AS row_count FROM public.financials
-UNION ALL
-SELECT 'public.event_delegate_codes' AS tbl, COUNT(*) AS row_count FROM public.event_delegate_codes;
+DO $$
+DECLARE
+    v_rows BIGINT;
+BEGIN
+    IF to_regclass('public.financials') IS NOT NULL THEN
+        EXECUTE 'SELECT COUNT(*) FROM public.financials' INTO v_rows;
+        RAISE NOTICE 'public.financials rows = %', v_rows;
+    ELSE
+        RAISE NOTICE 'public.financials — already gone (OK)';
+    END IF;
+
+    IF to_regclass('public.event_delegate_codes') IS NOT NULL THEN
+        EXECUTE 'SELECT COUNT(*) FROM public.event_delegate_codes' INTO v_rows;
+        RAISE NOTICE 'public.event_delegate_codes rows = %', v_rows;
+    ELSE
+        RAISE NOTICE 'public.event_delegate_codes — already gone (OK)';
+    END IF;
+END $$;
 
 -- ----------------------------------------------------------------------------
--- PRE-CHECK 1b (event_delegate_codes only): peek at schema + a few rows if any
+-- PRE-CHECK 1b (event_delegate_codes only): schema + sample, if it still exists
 -- ----------------------------------------------------------------------------
-SELECT column_name, data_type FROM information_schema.columns
-WHERE table_schema = 'public' AND table_name = 'event_delegate_codes'
-ORDER BY ordinal_position;
-
--- If it unexpectedly has rows, inspect before deciding:
-SELECT * FROM public.event_delegate_codes LIMIT 10;
+DO $$
+DECLARE
+    r record;
+    s record;
+BEGIN
+    IF to_regclass('public.event_delegate_codes') IS NOT NULL THEN
+        RAISE NOTICE 'event_delegate_codes columns:';
+        FOR r IN
+            SELECT column_name || ' ' || data_type AS col
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'event_delegate_codes'
+            ORDER BY ordinal_position
+        LOOP
+            RAISE NOTICE '  %', r.col;
+        END LOOP;
+        RAISE NOTICE 'event_delegate_codes sample:';
+        FOR s IN
+            SELECT row_to_json(t)::text AS js
+            FROM (SELECT * FROM public.event_delegate_codes LIMIT 10) t
+        LOOP
+            RAISE NOTICE '  %', s.js;
+        END LOOP;
+    ELSE
+        RAISE NOTICE 'event_delegate_codes — already gone (OK)';
+    END IF;
+END $$;
 
 -- ----------------------------------------------------------------------------
 -- PRE-CHECK 2: any other public tables with RLS disabled?
@@ -51,8 +87,8 @@ WHERE table_schema = 'auth'
 ORDER BY table_name, grantee;
 
 -- ----------------------------------------------------------------------------
--- ACTION (run AFTER pre-checks):
--- 1. Drop public.financials (confirmed empty, unreferenced).
+-- ACTION (safe to run even if one table is already gone):
+-- 1. Drop public.financials if present (confirmed empty, unreferenced).
 -- 2. Drop public.event_delegate_codes ONLY if empty; otherwise ENABLE RLS as a
 --    safety net so anon can no longer read it until a human decides its fate.
 -- ----------------------------------------------------------------------------
@@ -62,6 +98,11 @@ DO $$
 DECLARE
     v_rows BIGINT;
 BEGIN
+    IF to_regclass('public.event_delegate_codes') IS NULL THEN
+        RAISE NOTICE 'event_delegate_codes — already gone (OK).';
+        RETURN;
+    END IF;
+
     EXECUTE 'SELECT COUNT(*) FROM public.event_delegate_codes' INTO v_rows;
     IF v_rows = 0 THEN
         EXECUTE 'DROP TABLE IF EXISTS public.event_delegate_codes';
