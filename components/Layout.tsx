@@ -175,12 +175,12 @@ case UserRole.FINANCE: return 'Finance Admin';
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white shadow-sm border-b border-gray-200 p-4 flex justify-between items-center no-print">
-           <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-gray-500 uppercase tracking-tighter">Event Context:</span>
-              <div className="flex items-center gap-2">
+        <header className="bg-white shadow-sm border-b border-gray-200 p-4 flex flex-wrap items-center gap-2 sm:gap-4 no-print">
+           <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+              <span className="text-xs sm:text-sm font-medium text-gray-500 uppercase tracking-tighter hidden sm:inline">Event Context:</span>
+              <div className="flex items-center gap-2 min-w-0">
                 <select 
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-[220px] font-bold"
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-0 w-full sm:w-auto sm:min-w-[220px] font-bold"
                     value={activeEventId}
                     onChange={e => onEventChange(e.target.value)}
                 >
@@ -197,7 +197,7 @@ case UserRole.FINANCE: return 'Finance Admin';
                 )}
               </div>
            </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
                <ConnectionStatus />
                <div className="text-right hidden sm:block">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{user.email}</p>
