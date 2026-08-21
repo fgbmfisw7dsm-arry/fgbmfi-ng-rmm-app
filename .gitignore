@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Security/schema introspection scratch (never commit credentials or live dumps)
+.schemadump/
+live_schema_dump.txt
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

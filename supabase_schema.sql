@@ -1074,3 +1074,239 @@ CREATE POLICY "financials_admin_delete" ON financial_entries FOR DELETE TO authe
 CREATE POLICY "settings_select_all" ON system_settings FOR SELECT TO authenticated USING (true);
 CREATE POLICY "settings_admin_insert" ON system_settings FOR INSERT TO authenticated WITH CHECK (is_admin_user());
 CREATE POLICY "settings_admin_update" ON system_settings FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
+
+-- ============================================================================
+-- LIVE RECONCILIATION (2026-08-21) — authoritative state per live_schema_dump.txt
+-- ----------------------------------------------------------------------------
+-- This appendix converges this file onto the DEPLOYED database. Migrations are
+-- the true source of truth; the section above is historical bootstrapping DDL.
+--
+-- Reconciliation notes:
+--  * ORPHANS REMOVED from live: public.financials, public.event_delegate_codes
+--    (both had RLS disabled, unreferenced; see hardening pass2a/2c). Drop here
+--    too so fresh builds match.
+--  * get_event_export_data (JSON variant, lines 831-878 above) DOES NOT EXIST in
+--    live. The service layer calls it (supabaseService.ts:1193) inside a
+--    try/catch and falls back to paginated fetchAll() — so the app works and is
+--    actually scale-safe. Kept below as a guarded convenience RPC, NOT deployed.
+--  * RLS/policy drift from the bootstrapping section is corrected below to match
+--    the live policy set (incl. Pass-1/2C hardening).
+-- ============================================================================
+
+-- 9. Orphan cleanup (idempotent; no-op on live where already dropped)
+DROP TABLE IF EXISTS public.financials;
+DROP TABLE IF EXISTS public.event_delegate_codes;
+
+-- 10. v_auth_integrity_check grants: service_role only (see hardening 2C F1).
+--     View definition is MITM over auth.users; exposing SELECT to anon/
+--     authenticated triggers the Supabase 'Exposed Auth Users' warning.
+REVOKE ALL ON public.v_auth_integrity_check FROM anon;
+REVOKE ALL ON public.v_auth_integrity_check FROM authenticated;
+GRANT  SELECT ON public.v_auth_integrity_check TO service_role;
+
+-- 11. chapters: drop legacy open policies, keep select-for-all + admin writes
+DROP POLICY IF EXISTS "authenticated_all" ON chapters;
+DROP POLICY IF EXISTS "chapters_insert" ON chapters;
+DROP POLICY IF EXISTS "chapters_update" ON chapters;
+DROP POLICY IF EXISTS "chapters_delete" ON chapters;
+CREATE POLICY "chapters_select" ON chapters FOR SELECT TO public USING (true);
+CREATE POLICY "chapters_admin_insert" ON chapters FOR INSERT TO authenticated WITH CHECK (is_admin_user());
+CREATE POLICY "chapters_admin_update" ON chapters FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
+CREATE POLICY "chapters_admin_delete" ON chapters FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12. policy reconciliation to live set + Pass-1 hardening
+-- 12a. app_users: keep select (own/admin), update/delete admin, self-insert
+--      restricted to NON-admin roles unless caller is an admin (hardening C3).
+DROP POLICY IF EXISTS "app_users_admin_delete" ON app_users;
+DROP POLICY IF EXISTS "app_users_admin_insert_all" ON app_users;
+DROP POLICY IF EXISTS "app_users_admin_update" ON app_users;
+DROP POLICY IF EXISTS "app_users_admin_view_all" ON app_users;
+DROP POLICY IF EXISTS "app_users_insert_own" ON app_users;
+DROP POLICY IF EXISTS "app_users_view_own" ON app_users;
+CREATE POLICY "app_users_admin_delete" ON app_users FOR DELETE TO authenticated USING (is_admin_user());
+CREATE POLICY "app_users_admin_insert_all" ON app_users FOR INSERT TO authenticated WITH CHECK (is_admin_user());
+CREATE POLICY "app_users_admin_update" ON app_users FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
+CREATE POLICY "app_users_admin_view_all" ON app_users FOR SELECT TO authenticated USING (is_admin_user());
+CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (
+  id = auth.uid() AND (role NOT IN ('national_admin','regional_admin','district_admin','admin') OR is_admin_user()));
+CREATE POLICY "app_users_view_own" ON app_users FOR SELECT TO authenticated USING (id = auth.uid());
+
+-- 12b. checkins: registrars + event_admin + admin may insert arrivals/session
+DROP POLICY IF EXISTS "checkins_select_all" ON checkins;
+DROP POLICY IF EXISTS "checkins_admin_registrar_insert" ON checkins;
+DROP POLICY IF EXISTS "checkins_admin_update" ON checkins;
+DROP POLICY IF EXISTS "checkins_admin_delete" ON checkins;
+CREATE POLICY "checkins_select_all" ON checkins FOR SELECT TO authenticated USING (true);
+CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
+    is_admin_user() OR is_event_admin_user() OR EXISTS (
+      SELECT 1 FROM app_users
+      WHERE id = auth.uid()
+        AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+        AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "checkins_admin_update" ON checkins FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
+CREATE POLICY "checkins_admin_delete" ON checkins FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12c. financial_entries + pledges: SELECT scoped to admin/event_admin/finance
+--      (hardening H1 / 2C F?); deletes admin-only (hardening pass1 section 4).
+DROP POLICY IF EXISTS "financials_select_all" ON financial_entries;
+DROP POLICY IF EXISTS "financials_admin_finance_insert" ON financial_entries;
+DROP POLICY IF EXISTS "financials_admin_finance_update" ON financial_entries;
+DROP POLICY IF EXISTS "financials_admin_delete" ON financial_entries;
+CREATE POLICY "financials_select_all" ON financial_entries FOR SELECT TO authenticated USING (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "financials_admin_finance_insert" ON financial_entries FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "financials_admin_finance_update" ON financial_entries FOR UPDATE TO authenticated
+  USING (is_admin_user() OR is_event_admin_user()
+    OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)))
+  WITH CHECK (is_admin_user() OR is_event_admin_user()
+    OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "financials_admin_delete" ON financial_entries FOR DELETE TO authenticated USING (is_admin_user());
+
+DROP POLICY IF EXISTS "pledges_select_all" ON pledges;
+DROP POLICY IF EXISTS "pledges_admin_finance_insert" ON pledges;
+DROP POLICY IF EXISTS "pledges_admin_finance_update" ON pledges;
+DROP POLICY IF EXISTS "pledges_admin_delete" ON pledges;
+CREATE POLICY "pledges_select_all" ON pledges FOR SELECT TO authenticated USING (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "pledges_admin_finance_insert" ON pledges FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "pledges_admin_finance_update" ON pledges FOR UPDATE TO authenticated
+  USING (is_admin_user() OR is_event_admin_user()
+    OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)))
+  WITH CHECK (is_admin_user() OR is_event_admin_user()
+    OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "pledges_admin_delete" ON pledges FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12d. badge_batches: write restricted to admin + event_admin (hardening 2C F8)
+DROP POLICY IF EXISTS "Admin can delete badge batches" ON badge_batches;
+DROP POLICY IF EXISTS "Admin can insert badge batches" ON badge_batches;
+DROP POLICY IF EXISTS "Admin can update badge batches" ON badge_batches;
+DROP POLICY IF EXISTS "Authenticated can view badge batches" ON badge_batches;
+CREATE POLICY "Authenticated can view badge batches" ON badge_batches FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Admin can insert badge batches" ON badge_batches FOR INSERT TO authenticated WITH CHECK (is_admin_user() OR is_event_admin_user());
+CREATE POLICY "Admin can update badge batches" ON badge_batches FOR UPDATE TO authenticated
+  USING (is_admin_user() OR is_event_admin_user()) WITH CHECK (is_admin_user() OR is_event_admin_user());
+CREATE POLICY "Admin can delete badge batches" ON badge_batches FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12e. session_response_summaries + session_voice_distribution: update scoped to
+--      officers (admin/event_admin/registrar) — hardening 2C F3.
+DROP POLICY IF EXISTS "srs_select" ON session_response_summaries;
+DROP POLICY IF EXISTS "srs_insert" ON session_response_summaries;
+DROP POLICY IF EXISTS "srs_update" ON session_response_summaries;
+DROP POLICY IF EXISTS "srs_delete" ON session_response_summaries;
+CREATE POLICY "srs_select" ON session_response_summaries FOR SELECT TO authenticated USING (true);
+CREATE POLICY "srs_insert" ON session_response_summaries FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "srs_update" ON session_response_summaries FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "srs_delete" ON session_response_summaries FOR DELETE TO authenticated USING (is_admin_user());
+
+DROP POLICY IF EXISTS "svd_select" ON session_voice_distribution;
+DROP POLICY IF EXISTS "svd_insert" ON session_voice_distribution;
+DROP POLICY IF EXISTS "svd_update" ON session_voice_distribution;
+DROP POLICY IF EXISTS "svd_delete" ON session_voice_distribution;
+CREATE POLICY "svd_select" ON session_voice_distribution FOR SELECT TO authenticated USING (true);
+CREATE POLICY "svd_insert" ON session_voice_distribution FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "svd_update" ON session_voice_distribution FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "svd_delete" ON session_voice_distribution FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12f. session_responses: delete admin-only; insert scoped to officers (unchanged from live)
+DROP POLICY IF EXISTS "sr_select" ON session_responses;
+DROP POLICY IF EXISTS "sr_insert" ON session_responses;
+DROP POLICY IF EXISTS "sr_delete" ON session_responses;
+CREATE POLICY "sr_select" ON session_responses FOR SELECT TO authenticated USING (true);
+CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "sr_delete" ON session_responses FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12g. delegates: keep admin/event_admin unscoped writes + registrar district scope
+DROP POLICY IF EXISTS "delegates_select_all" ON delegates;
+DROP POLICY IF EXISTS "delegates_insert_scoped" ON delegates;
+DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
+DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
+CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
+CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)));
+CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)));
+CREATE POLICY "delegates_admin_delete" ON delegates FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12h. deleted_users: RLS enabled; select own + admin all (hardening H4)
+ALTER TABLE deleted_users ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "deleted_users_select_own" ON deleted_users;
+DROP POLICY IF EXISTS "deleted_users_admin_all" ON deleted_users;
+CREATE POLICY "deleted_users_select_own" ON deleted_users FOR SELECT TO authenticated USING (id = auth.uid());
+CREATE POLICY "deleted_users_admin_all" ON deleted_users FOR ALL TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
+
+-- 13. FUNCTION GRANT LOCKDOWN (mirrors live + hardening pass1)
+--     Revoke EXECUTE on ALL public functions from anon/PUBLIC/authenticated,
+--     then re-grant to the roles the application uses. check_login_account is
+--     additionally restricted to service_role only (hardening H2).
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT p.oid FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = 'public' AND p.prokind = 'f'
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', r.oid::regprocedure);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM anon', r.oid::regprocedure);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM authenticated', r.oid::regprocedure);
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT p.oid FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = 'public' AND p.prokind = 'f'
+  LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', r.oid::regprocedure);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', r.oid::regprocedure);
+  END LOOP;
+END $$;
+
+REVOKE ALL ON FUNCTION public.check_login_account(TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.check_login_account(TEXT, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.check_login_account(TEXT, TEXT) FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.check_login_account(TEXT, TEXT) TO service_role;
+
+-- 14. SEQUENCES (live)
+--     public.audit_log_id_seq (bigint, start=1, inc=1) — owned by audit_log.id
