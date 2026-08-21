@@ -635,8 +635,26 @@ export const db = {
         const clean = { ...updates };
         if (clean.district === '') delete clean.district;
         if (clean.region === '') delete clean.region;
-        const result = handleSupabaseError(await supabase.from('app_users').update(clean).eq('id', userId).select().single());
-        recordAuditLog('', 'user_update', `User updated: ${result.email || userId}`, null, 'user', userId, { changes: Object.keys(clean) });
+
+        let result: any;
+        if (clean.role) {
+            // Role must propagate to BOTH app_users AND auth.users metadata, or
+            // login/profile flows that read GoTrue metadata see a stale role.
+            const r = await supabase.rpc('update_app_user_role', { user_id: userId, new_role: clean.role });
+            if (r.error) {
+                handleRpcResponse(r, 'update_app_user_role');
+            }
+            result = r.data;
+            delete (clean as any).role;
+            const rest = { ...clean };
+            if (Object.keys(rest).length > 0) {
+                const d = handleSupabaseError(await supabase.from('app_users').update(rest).eq('id', userId).select().single());
+                result = d;
+            }
+        } else {
+            result = handleSupabaseError(await supabase.from('app_users').update(clean).eq('id', userId).select().single());
+        }
+        recordAuditLog('', 'user_update', `User updated: ${result?.email || userId}`, null, 'user', userId, { changes: Object.keys(updates) });
         return result;
     },
 
