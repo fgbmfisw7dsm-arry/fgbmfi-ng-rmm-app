@@ -1,14 +1,35 @@
 -- ============================================================================
 -- FGBMFI EMS — SECURITY HARDENING PASS 2A (orphan table cleanup)
--- Run the PRE-CHECK queries first; only run the DROP once confirmed safe.
+-- Identify and remove legacy tables in the live DB that are not referenced
+-- anywhere in the codebase and have RLS disabled.
+--
+-- Two known orphans (verified absent from repo + all migrations):
+--   * public.financials           — legacy financial table (superseded by
+--                                   financial_entries). Confirmed EMPTY.
+--   * public.event_delegate_codes — legacy per-delegate code table (predates the
+--                                   deterministic-code scheme, itself removed in
+--                                   v1.10 for UUID-only qr_hash). RLS DISABLED.
+--
+-- Run the PRE-CHECK queries first; only run the ACTION section once confirmed.
 -- Idempotent: safe to re-run.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- PRE-CHECK 1: orphan table must be empty (expect 0)
+-- PRE-CHECK 1: confirm both orphans are empty (expect 0 / 0)
 -- ----------------------------------------------------------------------------
-SELECT 'public.financials' AS tbl, COUNT(*) AS row_count
-FROM public.financials;
+SELECT 'public.financials' AS tbl, COUNT(*) AS row_count FROM public.financials
+UNION ALL
+SELECT 'public.event_delegate_codes' AS tbl, COUNT(*) AS row_count FROM public.event_delegate_codes;
+
+-- ----------------------------------------------------------------------------
+-- PRE-CHECK 1b (event_delegate_codes only): peek at schema + a few rows if any
+-- ----------------------------------------------------------------------------
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'event_delegate_codes'
+ORDER BY ordinal_position;
+
+-- If it unexpectedly has rows, inspect before deciding:
+SELECT * FROM public.event_delegate_codes LIMIT 10;
 
 -- ----------------------------------------------------------------------------
 -- PRE-CHECK 2: any other public tables with RLS disabled?
@@ -30,16 +51,32 @@ WHERE table_schema = 'auth'
 ORDER BY table_name, grantee;
 
 -- ----------------------------------------------------------------------------
--- ACTION (run AFTER all three pre-checks pass):
--- Drop the orphan 'financials' table. It is not referenced by any app code,
--- services, or RLS policies (all code uses financial_entries).
+-- ACTION (run AFTER pre-checks):
+-- 1. Drop public.financials (confirmed empty, unreferenced).
+-- 2. Drop public.event_delegate_codes ONLY if empty; otherwise ENABLE RLS as a
+--    safety net so anon can no longer read it until a human decides its fate.
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS public.financials;
 
+DO $$
+DECLARE
+    v_rows BIGINT;
+BEGIN
+    EXECUTE 'SELECT COUNT(*) FROM public.event_delegate_codes' INTO v_rows;
+    IF v_rows = 0 THEN
+        EXECUTE 'DROP TABLE IF EXISTS public.event_delegate_codes';
+        RAISE NOTICE 'event_delegate_codes was empty — dropped.';
+    ELSE
+        EXECUTE 'ALTER TABLE public.event_delegate_codes ENABLE ROW LEVEL SECURITY';
+        RAISE NOTICE 'event_delegate_codes has % rows — RLS enabled as safety net, NOT dropped. Human decision required.', v_rows;
+    END IF;
+END $$;
+
 -- ----------------------------------------------------------------------------
--- VERIFY: orphan gone; any remaining rows in financial_entries are the real data
+-- VERIFY: no RLS-off public tables remain (excluding intentionally-open ones)
 -- ----------------------------------------------------------------------------
-SELECT schemaname || '.' || tablename AS table_name
+SELECT schemaname || '.' || tablename AS table_name, rowsecurity AS rls_enabled
 FROM pg_tables
-WHERE schemaname = 'public' AND tablename = 'financials';
--- Expected: 0 rows above (table no longer exists).
+WHERE schemaname = 'public' AND NOT rowsecurity
+ORDER BY tablename;
+-- Target result: empty (or only tables you intentionally leave open).
