@@ -1,8 +1,9 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState, useRef, useEffect } from 'react';
 import { User, UserRole, isAdminRole, isRegistrarRole, isEventAdminRole, isNationalRole, isRegionalRole, isDistrictRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import ConnectionStatus from './ConnectionStatus';
+import ChangePasswordModal from './ChangePasswordModal';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -22,6 +23,26 @@ const MenuSection = ({ title, children }: { title: string, children?: React.Reac
 const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId, onEventChange }) => {
   const location = useLocation();
   const { activeEvent, events } = useContext(AppContext);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAccountMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
 
   const isActive = (path: string) => location.pathname === path 
     ? "bg-blue-600 text-white shadow-md" 
@@ -181,14 +202,46 @@ const getRoleLabel = () => {
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{user.email}</p>
                   <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">{getRoleLabel()}</p>
               </div>
-                 <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-black border-2 border-white shadow-sm">
-                   {(user.email || 'U').charAt(0).toUpperCase()}
-                </div>
-                <button onClick={onLogout} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="Sign Out">
-                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                </button>
+                 <div className="relative" ref={menuRef}>
+                    <button
+                        onClick={() => setAccountMenuOpen(o => !o)}
+                        className="flex items-center gap-1 rounded-full hover:ring-4 hover:ring-blue-500/10 transition-all p-0.5"
+                        title="Account Menu"
+                    >
+                        <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-black border-2 border-white shadow-sm">
+                            {(user.email || 'U').charAt(0).toUpperCase()}
+                        </div>
+                        <svg className={`w-4 h-4 text-gray-400 transition-transform ${accountMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    {accountMenuOpen && (
+                        <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                            <div className="px-4 py-3 border-b border-gray-100">
+                                <p className="text-[10px] font-black text-gray-700 uppercase tracking-widest truncate">{user.email}</p>
+                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{getRoleLabel()}</p>
+                            </div>
+                            <button
+                                onClick={() => { setAccountMenuOpen(false); setShowChangePassword(true); }}
+                                className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-gray-700 font-bold uppercase text-[10px] tracking-wider hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                Change Password
+                            </button>
+                            <button
+                                onClick={() => { setAccountMenuOpen(false); onLogout(); }}
+                                className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-red-500 font-bold uppercase text-[10px] tracking-wider hover:bg-red-50 transition-colors border-t border-gray-100"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                                Sign Out
+                            </button>
+                        </div>
+                    )}
+                 </div>
            </div>
         </header>
+
+        {showChangePassword && (
+            <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
+        )}
 
         <main className="flex-1 overflow-auto p-4 md:p-8">
           {children}

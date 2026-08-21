@@ -333,6 +333,27 @@ export const auth = {
             return "Login Failed: Invalid email or password. Please check for typos and try again.";
         }
     },
+
+    changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.email) throw new Error("Your session has expired. Please sign in again.");
+
+        const verifyResult = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: currentPassword
+        });
+        if (verifyResult.error) {
+            throw new Error("Current password is incorrect. Please try again.");
+        }
+
+        const updateResult = await supabase.auth.updateUser({ password: newPassword });
+        if (updateResult.error) {
+            const msg = updateResult.error.message || "Password update failed.";
+            throw new Error(msg.includes('database') || msg.includes('connection') ? "Password update failed. Check your connection and try again." : msg);
+        }
+
+        recordAuditLog('', 'password_change', `User changed their own password`, null, 'user', user.id);
+    },
 };
 
 let auditEnabled = true;
