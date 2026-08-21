@@ -41,14 +41,14 @@ CREATE POLICY "archive_select_admin" ON audit_log_archive
 
 -- ----------------------------------------------------------------------------
 -- 3. pg_cron weekly job (idempotent schedule management).
---    Runs every Saturday 03:00 UTC. Archives THEN deletes the same window in
---    one transaction per execution.
+--    Runs every Saturday 03:00 UTC. The job command MUST be a single statement
+--    (cron.schedule rejects multi-statement strings), so archive + delete are
+--    performed inside one DO block. Each execution is atomic in one transaction.
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE
     v_job_id BIGINT;
 BEGIN
-    -- Remove any previous job with the same name (avoids duplicate schedules)
     SELECT jobid INTO v_job_id
     FROM cron.job
     WHERE jobname = 'audit-archive-weekly'
@@ -61,15 +61,15 @@ BEGIN
     PERFORM cron.schedule(
         'audit-archive-weekly',           -- unique job name
         '0 3 * * 6',                      -- cron expr: Saturday 03:00 UTC
-        $$
-        BEGIN TRANSACTION;
-        INSERT INTO audit_log_archive
-        SELECT * FROM audit_log
-        WHERE created_at < NOW() - interval '180 days';
-        DELETE FROM audit_log
-        WHERE created_at < NOW() - interval '180 days';
-        COMMIT;
-        $$
+        'DO $cron$
+         BEGIN
+           INSERT INTO audit_log_archive
+           SELECT * FROM audit_log
+           WHERE created_at < NOW() - interval ''180 days'';
+           DELETE FROM audit_log
+           WHERE created_at < NOW() - interval ''180 days'';
+         END
+         $cron$'
     );
 END $$;
 
