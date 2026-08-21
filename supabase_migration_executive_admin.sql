@@ -1,8 +1,17 @@
 -- ============================================================================
--- FGBMFI EMS — EXECUTIVE ADMIN ROLE (v1.11)
--- Adds 'executive_admin' with identical access to national_admin: full admin
--- tier (all modules), including all Reports + Financials (financial gates
--- authorize via is_admin_user(), so no extra policies are needed).
+-- FGBMFI EMS — EXECUTIVE ADMIN ROLE (v1.11 CORRECTED)
+-- Executive Admin = same access as NATIONAL REGISTRAR (registrar tier, national
+-- scope = unscoped), PLUS read access to all Reports including Financial
+-- reports and Dashboard financials.
+--
+--   * NOT an admin role — no Events/Users/Setup/Data/Storage/Audit/Badges/
+--     MasterList/Import admin modules.
+--   * Gets registrar write access (check-ins, session ministry) just like
+--     national_registrar.
+--   * Financial READ only: can view financial_entries + pledges (RLS SELECT),
+--     dashboard financial totals, and financial report data. Cannot add/edit
+--     financial entries (financial WRITE stays admin/event_admin/finance).
+--
 -- Run in Supabase SQL Editor. Idempotent.
 -- ============================================================================
 
@@ -16,9 +25,7 @@ ALTER TABLE app_users ADD CONSTRAINT app_users_role_check CHECK (
   )
 );
 
--- 2. is_admin_user(): include executive_admin (grants ALL admin privileges:
---    events, users, setup, data, storage, audit, badges, master list, reports,
---    and EVERY financial RLS/RPC gate that authorizes via is_admin_user())
+-- 2. is_admin_user(): MUST NOT include executive_admin (registrar tier, not admin)
 CREATE OR REPLACE FUNCTION is_admin_user()
 RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -27,7 +34,7 @@ AS $function$
   SELECT EXISTS (
     SELECT 1 FROM app_users
     WHERE id = auth.uid()
-      AND role IN ('national_admin','regional_admin','district_admin','executive_admin','admin')
+      AND role IN ('national_admin','regional_admin','district_admin','admin')
       AND (is_active IS NULL OR is_active = true)
   );
 $function$;
@@ -174,7 +181,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $function$;
 
--- 4. deactivate_all_event_users: never bulk-deactivate executive admins
+-- 4. deactivate_all_event_users: bulk deactivation targets all non-admin roles.
+--    Executive Admin is registrar-tier → NOT excluded (matches national registrar).
 CREATE OR REPLACE FUNCTION deactivate_all_event_users()
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
@@ -191,7 +199,7 @@ BEGIN
     UPDATE public.app_users
     SET is_active = false
     WHERE is_active = true
-      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'executive_admin', 'admin')
+      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'admin')
     RETURNING id
   )
   SELECT COUNT(*) INTO v_count FROM updated;
@@ -214,6 +222,87 @@ WITH CHECK (
 );
 
 -- ============================================================================
+-- REGISTRAR WRITE ACCESS (Executive Admin behaves like national_registrar)
+-- ============================================================================
+
+-- 6. check-ins: registrars + executive_admin may record arrivals/session
+DROP POLICY IF EXISTS "checkins_admin_registrar_insert" ON checkins;
+CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- 7. session_response_summaries: insert/update scoped to officers incl. executive_admin
+DROP POLICY IF EXISTS "srs_insert" ON session_response_summaries;
+CREATE POLICY "srs_insert" ON session_response_summaries FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+DROP POLICY IF EXISTS "srs_update" ON session_response_summaries;
+CREATE POLICY "srs_update" ON session_response_summaries FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- 8. session_responses: insert scoped incl. executive_admin
+DROP POLICY IF EXISTS "sr_insert" ON session_responses;
+CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- 9. session_voice_distribution: insert/update scoped incl. executive_admin
+DROP POLICY IF EXISTS "svd_insert" ON session_voice_distribution;
+CREATE POLICY "svd_insert" ON session_voice_distribution FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+DROP POLICY IF EXISTS "svd_update" ON session_voice_distribution;
+CREATE POLICY "svd_update" ON session_voice_distribution FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- ============================================================================
+-- FINANCIAL READ ACCESS (Executive Admin can VIEW financials, not write)
+-- ============================================================================
+
+-- 10. financial_entries SELECT: admin/event_admin/finance/executive_admin
+DROP POLICY IF EXISTS "financials_select_all" ON financial_entries;
+CREATE POLICY "financials_select_all" ON financial_entries FOR SELECT TO authenticated USING (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('finance','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- 11. pledges SELECT: admin/event_admin/finance/executive_admin
+DROP POLICY IF EXISTS "pledges_select_all" ON pledges;
+CREATE POLICY "pledges_select_all" ON pledges FOR SELECT TO authenticated USING (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+     AND role IN ('finance','executive_admin')
+     AND (is_active IS NULL OR is_active = true)));
+
+-- NOTE: financial WRITE policies (insert/update) intentionally left as
+-- admin/event_admin/finance only — Executive Admin is read-only on financials.
+
+-- ============================================================================
 -- VERIFICATION
 -- ============================================================================
 
@@ -222,11 +311,17 @@ SELECT conname, pg_get_constraintdef(oid) AS def
 FROM pg_constraint
 WHERE conrelid = 'public.app_users'::regclass AND conname = 'app_users_role_check';
 
--- 2. is_admin_user includes executive_admin
+-- 2. is_admin_user does NOT include executive_admin (registrar tier)
 SELECT pg_get_functiondef('public.is_admin_user()'::regprocedure);
+
+-- 3. Executive Admin can read financials, cannot write (RLS check)
 INSERT INTO app_users (id, email, role, is_active)
 SELECT gen_random_uuid(), 'exec_admin_probe@fgbmfi.invalid', 'executive_admin', true
 ON CONFLICT (id) DO NOTHING;
+SELECT 'financials_select_all' AS policy,
+       qual::text AS allows_exec_admin
+FROM pg_policies
+WHERE schemaname='public' AND tablename='financial_entries' AND policyname='financials_select_all';
 
--- 3. Cleanup probe row (leave no test data behind)
+-- 4. Cleanup probe row (leave no test data behind)
 DELETE FROM app_users WHERE email = 'exec_admin_probe@fgbmfi.invalid';

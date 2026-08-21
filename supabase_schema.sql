@@ -383,7 +383,7 @@ BEGIN
     UPDATE public.app_users 
     SET is_active = false 
     WHERE is_active = true 
-      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'executive_admin', 'admin')
+      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'admin')
     RETURNING id
   )
   SELECT COUNT(*) INTO v_count FROM updated;
@@ -974,7 +974,7 @@ AS $func$
   SELECT EXISTS (
     SELECT 1 FROM app_users
     WHERE id = auth.uid()
-      AND role IN ('national_admin','regional_admin','district_admin','executive_admin','admin')
+      AND role IN ('national_admin','regional_admin','district_admin','admin')
       AND (is_active IS NULL OR is_active = true)
   );
 $func$;
@@ -1047,7 +1047,7 @@ CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authen
     is_admin_user() OR EXISTS (
       SELECT 1 FROM app_users
       WHERE id = auth.uid()
-        AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+        AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
         AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "checkins_admin_update" ON checkins FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "checkins_admin_delete" ON checkins FOR DELETE TO authenticated USING (is_admin_user());
@@ -1138,11 +1138,11 @@ DROP POLICY IF EXISTS "checkins_admin_update" ON checkins;
 DROP POLICY IF EXISTS "checkins_admin_delete" ON checkins;
 CREATE POLICY "checkins_select_all" ON checkins FOR SELECT TO authenticated USING (true);
 CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
-    is_admin_user() OR is_event_admin_user() OR EXISTS (
-      SELECT 1 FROM app_users
-      WHERE id = auth.uid()
-        AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
-        AND (is_active IS NULL OR is_active = true)));
+     is_admin_user() OR is_event_admin_user() OR EXISTS (
+       SELECT 1 FROM app_users
+       WHERE id = auth.uid()
+         AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+         AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "checkins_admin_update" ON checkins FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "checkins_admin_delete" ON checkins FOR DELETE TO authenticated USING (is_admin_user());
 
@@ -1154,7 +1154,7 @@ DROP POLICY IF EXISTS "financials_admin_finance_update" ON financial_entries;
 DROP POLICY IF EXISTS "financials_admin_delete" ON financial_entries;
 CREATE POLICY "financials_select_all" ON financial_entries FOR SELECT TO authenticated USING (
   is_admin_user() OR is_event_admin_user()
-  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role IN ('finance','executive_admin') AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "financials_admin_finance_insert" ON financial_entries FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
@@ -1171,7 +1171,7 @@ DROP POLICY IF EXISTS "pledges_admin_finance_update" ON pledges;
 DROP POLICY IF EXISTS "pledges_admin_delete" ON pledges;
 CREATE POLICY "pledges_select_all" ON pledges FOR SELECT TO authenticated USING (
   is_admin_user() OR is_event_admin_user()
-  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role IN ('finance','executive_admin') AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "pledges_admin_finance_insert" ON pledges FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'finance' AND (is_active IS NULL OR is_active = true)));
@@ -1203,16 +1203,16 @@ CREATE POLICY "srs_select" ON session_response_summaries FOR SELECT TO authentic
 CREATE POLICY "srs_insert" ON session_response_summaries FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "srs_update" ON session_response_summaries FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)))
 WITH CHECK (is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "srs_delete" ON session_response_summaries FOR DELETE TO authenticated USING (is_admin_user());
 
@@ -1224,16 +1224,16 @@ CREATE POLICY "svd_select" ON session_voice_distribution FOR SELECT TO authentic
 CREATE POLICY "svd_insert" ON session_voice_distribution FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "svd_update" ON session_voice_distribution FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)))
 WITH CHECK (is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "svd_delete" ON session_voice_distribution FOR DELETE TO authenticated USING (is_admin_user());
 
@@ -1245,7 +1245,7 @@ CREATE POLICY "sr_select" ON session_responses FOR SELECT TO authenticated USING
 CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar')
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "sr_delete" ON session_responses FOR DELETE TO authenticated USING (is_admin_user());
 
