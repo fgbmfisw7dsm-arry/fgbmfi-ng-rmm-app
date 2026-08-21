@@ -3,10 +3,13 @@
 -- Automatically archives audit_log rows older than 180 days into an immutable
 -- audit_log_archive table, weekly via pg_cron. Permanent trail, lean live table.
 --
--- PREREQUISITE (dashboard step — I cannot enable extensions from here):
---   Supabase Dashboard → Database → Extensions → enable "pg_cron".
---   After enabling, run this file. It is idempotent (safe to re-run).
+-- Idempotent: safe to re-run. Requires pg_cron — created here if absent.
 -- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 0. Ensure pg_cron is available (SQL Editor runs as postgres, which may create it)
+-- ----------------------------------------------------------------------------
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- ----------------------------------------------------------------------------
 -- 1. Archive table (immutable copy of audit_log, no sequence, no RLS write path)
