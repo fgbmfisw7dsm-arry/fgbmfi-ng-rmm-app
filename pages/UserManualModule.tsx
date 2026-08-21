@@ -59,7 +59,7 @@ const UserManualModule = () => {
                             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">Regional Events Management System (EMS)</p>
                             <div className="mt-6 flex justify-center gap-4">
                                 <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.8</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.9</span>
                             </div>
                         </div>
 
@@ -76,6 +76,10 @@ const UserManualModule = () => {
                                     <li>Click <strong>"Sign In To System"</strong>. A blue "Verifying" status indicates the secure link is establishing.</li>
                                     <li><strong>Session Recovery:</strong> If the screen hangs or the login button stays on "Verifying", click the <span className="text-blue-600 font-bold">"Reset Connection"</span> button at the bottom. This clears browser cache and forces a fresh secure handshake.</li>
                                 </ol>
+                                <div className="p-4 border rounded-2xl bg-gray-50">
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Change Your Password (Self-Service)</h4>
+                                    <p className="text-xs text-gray-600">Any user (all roles) can update their own password without an administrator. Tap the <strong>account avatar</strong> (top-right) to open the <strong>account menu</strong>, then select <strong>"Change Password"</strong>. Enter your current password and a new password (min 6 characters), then confirm. The system validates your current password, updates the account, and keeps you signed in. Other sessions on different devices are automatically signed out for security.</p>
+                                </div>
                             </div>
                         </section>
 
@@ -131,6 +135,11 @@ const UserManualModule = () => {
                                         <span>A green "Verified!" flash confirms success. The delegate's information and badge QR appear. <strong>Duplicate Protection:</strong> If the delegate has already checked in, a red <strong>"Already Checked-in"</strong> stamp appears to prevent double-counting.</span>
                                     </li>
                                 </ol>
+                                <div className="mt-5 bg-white/5 p-4 rounded-2xl border border-white/10">
+                                    <h4 className="text-xs font-black uppercase text-blue-300 mb-1">Automatic Camera Selection</h4>
+                                    <p className="text-xs text-gray-300 leading-relaxed">The scanner automatically picks the right camera for the device:
+                                    <strong>Phones/tablets → rear (back) camera</strong> for scanning badges at a distance; <strong>PCs/laptops → front (built-in) camera</strong> by default. No manual front/back selection is needed — the system resolves the correct lens for you on every device.</p>
+                                </div>
                                 <h4 className="text-xs font-black uppercase text-blue-400 mt-6 mb-4 tracking-widest">Method 2: Manual Lookup</h4>
                                 <ol className="space-y-4">
                                     <li className="flex gap-4 items-start text-sm">
@@ -164,7 +173,7 @@ const UserManualModule = () => {
                                 </ol>
                                 <div className="mt-6 bg-blue-500/10 p-4 rounded-2xl border border-blue-500/30">
                                     <h4 className="text-xs font-black uppercase text-blue-300 mb-2">How QR Code Resolution Works (3-Pass Lookup)</h4>
-                                    <p className="text-xs text-gray-300 leading-relaxed">When a QR code or ID is scanned, the system performs three sequential lookups: <strong>Pass 1</strong> — matches by UUID QR hash (badge QR). <strong>Pass 2</strong> — matches by external ID (imported delegates). <strong>Pass 3</strong> — matches by delegate ID. All passes are scoped to the active event, ensuring cross-event data isolation.</p>
+                                    <p className="text-xs text-gray-300 leading-relaxed">When a QR code or ID is scanned, the system performs three sequential lookups: <strong>Pass 1</strong> — matches by UUID QR hash (badge QR). <strong>Pass 2</strong> — matches by external ID (imported delegates). <strong>Pass 3</strong> — matches by delegate ID. All passes are scoped to the active event, ensuring cross-event data isolation. The older 4-digit fallback was removed — badges use UUID-only QR codes.</p>
                                 </div>
                                 <div className="mt-4 bg-red-500/10 p-4 rounded-2xl border border-red-500/30">
                                     <h4 className="text-xs font-black uppercase text-red-300 mb-2">Duplicate Check-in Prevention</h4>
@@ -438,6 +447,37 @@ const UserManualModule = () => {
                                 </div>
                             </div>
                         </section>
+
+                        {/* Section 11: Roles & Access */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">11</span>
+                                User Roles & Access Levels
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">System accounts are assigned a role by an Administrator in <strong>User Management</strong> (<span className="font-mono bg-gray-100 px-1 rounded">#/admin/users</span>). Each role controls which modules appear in the sidebar and what the account may read or write.</p>
+                            <div className="space-y-4 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">ADMIN TIER (National, Regional, District, Legacy System Admin)</span>
+                                    Full access to all modules including Events & Config, User Management, System Setup, Data Management, Storage, Audit Log, Badge Printing, Master List, Import Data, and Financials.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">REGISTRAR TIER (National, Regional, District, Legacy Registrar)</span>
+                                    District-scoped operations: Dashboard, Reports, Check-In, Session Details, New Delegate. Data is filtered to the assigned district (national/regional tiers are wider or unscoped).
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">EXECUTIVE ADMIN (Executive/National Registrar-level access + Financial View)</span>
+                                    Operates exactly like a <strong>National Registrar</strong> (Dashboard, Reports, Check-In, Session Details, New Delegate) at national scope, <strong>PLUS full financial visibility</strong>: the Reports Center shows all Financial Matrix, Pledge Summary, and Pledge List tabs, and the Dashboard displays financial totals. Executive Admins can <strong>view</strong> financials but cannot record or edit offerings/pledges — financial writes remain reserved for Admins, Event Admins, and Finance officers.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">FINANCE</span>
+                                    Financial operations: Dashboard, Financials, Reports.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">EVENT ADMIN</span>
+                                    Global (unscoped) registrar modules + Badge Printing, Master List, Import Data (bulk), and Financials. Excluded from admin-only modules (Events, Users, Setup, Data, Storage, Audit).
+                                </div>
+                            </div>
+                        </section>
                     </>
                 ) : (
                     /* VOLUNTEER TRAINING GUIDE CONTENT (SCENARIO-BASED) */
@@ -580,7 +620,7 @@ const UserManualModule = () => {
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: QR scanner won't open!</p>
-                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure camera permission is granted in your browser settings. Tap "SCAN QR" — the camera should activate. If on desktop, ensure a webcam is connected.</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure camera permission is granted in your browser settings. Tap "SCAN QR" — the camera should activate automatically (rear camera on phones, front camera on laptops/desktop). If on desktop, ensure a webcam is connected.</p>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: "Already Recorded" for alter call!</p>
@@ -602,7 +642,7 @@ const UserManualModule = () => {
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>© 2025 FGBMFI Nigeria EMS</span>
-                    <span>Document: EMS-USER-V2.8</span>
+                    <span>Document: EMS-USER-V2.9</span>
                     <span>System Training & Operations Reference</span>
                 </div>
             </div>

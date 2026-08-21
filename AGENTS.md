@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.8 (Event Admin Role + Audit Log Pagination & Clear + Role/Module Access Refactor)
+- **Current Version:** 1.11 (Executive Admin Role + Security Hardening + Self-Service Change Password + Camera Auto-Select + Role Metadata Sync)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -187,14 +187,16 @@ CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_res
 2. **Profile sync:** `auth.getOrCreateProfile()` ensures an `app_users` row exists after login
 3. **Session persistence:** Supabase handles token refresh; localStorage fallback for `active_event_id`
 4. **Logout:** `supabase.auth.signOut()` + `localStorage.clear()`
+5. **Self-service Change Password (v1.11):** header account dropdown → **Change Password**; verifies current password (`signInWithPassword`) then `supabase.auth.updateUser({ password })` + `recordAuditLog('password_change')`. Keeps session; signs out other devices. All roles.
 
-### Roles (Current — 10)
+### Roles (Current — 11)
 | Role | Access Scope | Pages |
 |------|-------------|-------|
 | `national_admin` / `regional_admin` / `district_admin` / `admin` (legacy) | Full access, event management, user management | All |
 | `national_registrar` / `regional_registrar` / `district_registrar` / `registrar` (legacy) | District-scoped (data filtered by `user.district`), check-in ops | Dashboard, CheckIn, Session Details, New Delegate, Reports |
 | `finance` | Financial operations | Dashboard, Financials, Reports |
 | `event_admin` | **Global (unscoped)** — registrar modules + Badge Printing + Master List + Import Data (bulk only) + Financials | Dashboard, CheckIn, Session Details, New Delegate, Reports, Badge Printing, Master List, Import Data, Financials |
+| `executive_admin` (v1.11) | **National Registrar access + Financial READ** — registrar modules (national scope) PLUS full Reports (incl. Financial/pledge tabs) + Dashboard financials | Dashboard, Reports (all tabs w/ financials), CheckIn, Session Details, New Delegate |
 
 **Event Admin (v1.8) — access model:**
 - **Inherits all registrar modules** (Dashboard, Check-In, Session Details, New Delegate, Reports) but is **global/unscoped** (no district/region field; `getScopeFilter` returns `{}`).
@@ -204,10 +206,17 @@ CREATE UNIQUE INDEX idx_session_responses_delegate_session_unique ON session_res
 - Not added to `is_admin_user()` (DB) or `isAdminRole()` (client) — keeps admin-only modules locked; not added to `isRegistrarRole()` (avoids district scoping).
 - RLS write grants (via `is_event_admin_user()`): delegates insert/update, checkins insert, session ministry inserts, badge_batches insert/update, badge_print_logs insert, pledges/financial_entries insert/update. Delete is admin-only.
 
+**Executive Admin (v1.11) — access model:**
+- **Registrar tier + national scope:** added to `isRegistrarRole()`/`isNationalRole()` (client) and the registrar write policies (checkins insert, session ministry insert/update) — behaves exactly like `national_registrar` for operations. NOT included in `is_admin_user()`/`isAdminRole()` → admin-only modules (Events, Users, Setup, Data, Storage, Audit, Badges, Master List, Import) stay locked.
+- **Financial READ only:** `financials_select_all`/`pledges_select_all` RLS SELECT and the `get_event_dashboard_stats`/`get_report_aggregates`/`get_dashboard_stats` RPC financial gates include `executive_admin` so Reports financial tabs + Dashboard financials render.
+- **Cannot write financials:** financial INSERT/UPDATE/DELETE stays `admin`/`event_admin`/`finance` only.
+- Route guards: present in `ADMIN_AND_REGISTRAR`/`ADMIN_REGISTRAR_AND_EVENT_ADMIN` (CheckIn, Session Details, New Delegate, Reports) — absent from `ALL_ADMIN_ROLES`/`ADMIN_FINANCE_AND_EVENT_ADMIN`.
+- **Role metadata sync (v1.11):** role edits flow through `update_app_user_role(user_id, role)` which atomically sets role in `app_users` **and** `auth.users.raw_user_meta_data`/`raw_app_meta_data`, so session/`get_auth_user_role`/login diagnostics never see a stale role. Re-login required after edit.
+
 ### Role Enforcement
 - **Server-side:** RLS policies on Supabase tables (in `supabase_schema.sql`)
 - **Client-side:** `user.role` checks in pages (e.g., admin-only buttons for event CRUD)
-- **Data scoping:** `user.district` filters delegate/checkin queries for REGISTRAR role; `event_admin` is unscoped
+- **Data scoping:** `user.district` filters delegate/checkin queries for REGISTRAR role; `event_admin` is unscoped; `executive_admin` is national-scope (unscoped)
 - **Write guard:** `ensureEventActive()` prevents writes on locked events regardless of role
 
 ### Auth Priority (Current)
@@ -633,11 +642,24 @@ npm run build   # Production build to /dist
 
 ### Known Vulnerabilities
 1. ~~**4-digit QR code collisions** at >10K delegates — deterministic hash, only 10K slots~~ — **RESOLVED v1.10**: 4-digit code removed; UUID-only QR (`qr_hash`).
-2. **Audit log has no retention policy** — fire-and-forget inserts with admin-only manual clear-by-period; no automated retention/rotation
-3. **`getAllDelegates()` + `getAllDataForExport()`** — fetch entire table into memory, will fail at 25K
+2. **Audit log retention** — **PARTIALLY RESOLVED v1.11**: `audit_log_archive` table + weekly pg_cron job (Sat 03:00 UTC) archives rows older than 180 days; live-table manual clear-by-period still available in Admin Audit Log.
+3. **`getAllDelegates()` + `getAllDataForExport()`** — fetch entire table into memory, will fail at 25K (paginated variants exist; `get_event_export_data` RPC not deployed — service falls back to bounded `fetchAll`).
 4. **Context re-render storms** — all context consumers re-render on any state change
-5. **No rate limiting** — 50 concurrent officers could exhaust Supabase connection pool
-6. **Event data isolation is client-enforced** — RLS policies on `delegates` do not enforce `event_id` scoping; isolation relies on application-level queries, hard gates, post-filters, and scoped RPCs. A bypass of the service layer could leak cross-event data.
+5. **No rate limiting** — 50 concurrent officers could exhaust Supabase connection pool (Pass-1 locked most RPCs to `authenticated`/`service_role`; anon attack surface removed).
+6. **Event data isolation is client-enforced** — RLS policies on `delegates` do not enforce `event_id` scoping; isolation relies on application-level queries, hard gates, post-filters, and scoped RPCs. A bypass of the service layer could leak cross-event data. (Pass 2C hardened `search_delegates*`/`get_dashboard_stats` to require `event_id` server-side.)
+
+### Security Hardening (v1.11)
+- **Pass 1 (`supabase_hardening_pass1.sql`):** revoke anon/PUBLIC EXECUTE on all public functions → re-grant to `authenticated`+`service_role`; `check_login_account` → service_role-only (kills the login oracle / "Exposed Auth Users" warning); in-RPC `is_admin_user()` guards on admin/management RPCs; financial gates on `get_event_dashboard_stats` + `get_report_aggregates`; RLS fixes (`app_users` self-insert admin block, financials/pledges SELECT scoping, `deleted_users` RLS, chapters admin-write).
+- **Pass 2A/2B/2C (`pass2a_drop_orphan`, schema reconcile, `pass2c_live_fixes`):** dropped orphans `public.financials` + `public.event_delegate_codes` (both RLS-disabled) + quarantined any remaining; sealed `v_auth_integrity_check` (auth-users view) to service_role; scoped `srs_update`/`svd_update`; guarded `update_auth_user_email`/`update_pledge_redemption`; event-scoped `search_delegates*`/`get_dashboard_stats`; `badge_batches` writes to admin+event_admin; `supabase_schema.sql` reconciled to live DB.
+- **Pass 2D (`pass2d_audit_archive`):** immutable `audit_log_archive` + weekly pg_cron archive job (needs `CREATE EXTENSION pg_cron` first).
+- **Executive Admin role (`supabase_migration_executive_admin.sql`)** — see Roles above.
+- **Role sync (`supabase_migration_fix_role_sync.sql`):** `update_app_user_role(user_id, new_role)` atomically syncs role in `app_users` + `auth.users.raw_user_meta_data`/`raw_app_meta_data`; backfills diverged users. **Never edit role via raw `app_users` update alone** — always go through `update_app_user_role`.
+
+### QR Scanner Camera Behavior (v1.11)
+- **Auto camera selection by device class:** mobile/tablet → **rear (back) camera** via `facingMode: 'environment'`; PC/laptop → **front (built-in) camera** via `facingMode: 'user'`.
+- Both engines (native BarcodeDetector + html5-qrcode fallback) request `facingMode` declaratively; on `Overconstrained/NotFound`, a label-aware `pickCameraForFacing()` fallback resolves a deviceId (mobile prefers `back/rear/environment`, desktop prefers `front/user/built-in/face`, virtual cameras denied).
+- **Manual front/back camera dropdown removed** — no user camera selection; `qr-camera-device-id` preference no longer persisted.
+- Kept: BD/html5 engine toggle, low-light Boost, active-camera label badge.
 
 ## Known Technical Debt
 
@@ -649,7 +671,11 @@ npm run build   # Production build to /dist
 | Realtime subscription scope | Subscribes to entire table, not filtered by event | HIGH | Phase 1 |
 | Single-row settings | `system_settings` is single-row JSONB — potential write conflicts | MEDIUM | Phase 2 |
 | No audit log | No immutable record of operations | RESOLVED | v1.6/v1.8 |
-| Audit log retention | No automated retention/rotation; manual admin clear-by-period only | MEDIUM | Phase 2 |
+| Audit log retention | Now automatic: `audit_log_archive` + weekly pg_cron job (Sat 03:00 UTC) archives >180 days; manual clear-by-period retained | RESOLVED | v1.11 |
+| No Executive Admin tier | New `executive_admin` role: national-registrar access + financial READ (Reports + Dashboard financials); financial write stays admin/event_admin/finance | RESOLVED | v1.11 |
+| Role metadata drift | `db.updateUser` wrote app_users only; now `update_app_user_role` syncs app_users + auth.users metadata atomically | RESOLVED | v1.11 |
+| Exposed auth-users view | `v_auth_integrity_check` SELECT revoked from anon/authenticated → service_role only | RESOLVED | v1.11 |
+| Orphan RLS-off tables | `public.financials` + `public.event_delegate_codes` dropped (unreferenced, RLS-disabled) | RESOLVED | v1.11 |
 | Client-side role enforcement | RLS is fallback, but UI gates are purely client-side | LOW | Phase 2 |
 | No TypeScript strict mode | `any` used in several service functions | LOW | Phase 3 |
 | Gemini API key in env | Referenced in README but no AI feature implemented | LOW | Phase 4 |
