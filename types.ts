@@ -39,11 +39,12 @@ export enum UserRole {
   ADMIN = 'admin',
   REGISTRAR = 'registrar',
   FINANCE = 'finance',
-  EVENT_ADMIN = 'event_admin'
+  EVENT_ADMIN = 'event_admin',
+  EXECUTIVE_ADMIN = 'executive_admin'
 }
 
 export const isAdminRole = (role: string): boolean =>
-  role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN;
+  role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN || role === UserRole.EXECUTIVE_ADMIN;
 
 export const isRegistrarRole = (role: string): boolean =>
   role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR;

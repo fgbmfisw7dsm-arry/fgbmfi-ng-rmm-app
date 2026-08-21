@@ -32,7 +32,7 @@ import AuditLogPage from './pages/AuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const ALL_ADMIN_ROLES: UserRole[] = [
-  UserRole.NATIONAL_ADMIN, UserRole.REGIONAL_ADMIN, UserRole.DISTRICT_ADMIN, UserRole.ADMIN
+  UserRole.NATIONAL_ADMIN, UserRole.REGIONAL_ADMIN, UserRole.DISTRICT_ADMIN, UserRole.ADMIN, UserRole.EXECUTIVE_ADMIN
 ];
 const ADMIN_AND_REGISTRAR: UserRole[] = [
   ...ALL_ADMIN_ROLES,

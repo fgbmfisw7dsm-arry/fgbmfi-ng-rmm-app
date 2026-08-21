@@ -94,9 +94,9 @@ CREATE TABLE IF NOT EXISTS app_users (
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT app_users_role_check CHECK (role IN (
-      'national_admin','regional_admin','district_admin','admin',
+      'national_admin','regional_admin','district_admin','executive_admin','admin',
       'national_registrar','regional_registrar','district_registrar','registrar',
-      'finance'
+      'finance','event_admin'
     ))
 );
 
@@ -156,9 +156,9 @@ BEGIN
     new_user_id := gen_random_uuid();
 
     v_sanitized_role := CASE
-        WHEN role IN ('national_admin','regional_admin','district_admin','admin',
+        WHEN role IN ('national_admin','regional_admin','district_admin','executive_admin','admin',
                       'national_registrar','regional_registrar','district_registrar','registrar',
-                      'finance')
+                      'finance','event_admin')
         THEN role
         ELSE 'registrar'
     END;
@@ -383,7 +383,7 @@ BEGIN
     UPDATE public.app_users 
     SET is_active = false 
     WHERE is_active = true 
-      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'admin')
+      AND role NOT IN ('national_admin', 'regional_admin', 'district_admin', 'executive_admin', 'admin')
     RETURNING id
   )
   SELECT COUNT(*) INTO v_count FROM updated;
@@ -974,7 +974,7 @@ AS $func$
   SELECT EXISTS (
     SELECT 1 FROM app_users
     WHERE id = auth.uid()
-      AND role IN ('national_admin','regional_admin','district_admin','admin')
+      AND role IN ('national_admin','regional_admin','district_admin','executive_admin','admin')
       AND (is_active IS NULL OR is_active = true)
   );
 $func$;
@@ -1128,7 +1128,7 @@ CREATE POLICY "app_users_admin_insert_all" ON app_users FOR INSERT TO authentica
 CREATE POLICY "app_users_admin_update" ON app_users FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_view_all" ON app_users FOR SELECT TO authenticated USING (is_admin_user());
 CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (
-  id = auth.uid() AND (role NOT IN ('national_admin','regional_admin','district_admin','admin') OR is_admin_user()));
+  id = auth.uid() AND (role NOT IN ('national_admin','regional_admin','district_admin','executive_admin','admin') OR is_admin_user()));
 CREATE POLICY "app_users_view_own" ON app_users FOR SELECT TO authenticated USING (id = auth.uid());
 
 -- 12b. checkins: registrars + event_admin + admin may insert arrivals/session
