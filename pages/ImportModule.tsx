@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.22 · blank-title';
+const IMPORT_BUILD_LABEL = 'v1.23 · repair guidance';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -680,21 +680,39 @@ const ImportModule = () => {
         setRepairResult(null);
         setRepairItems([]);
         try {
+            const evtName = activeEvent?.name || 'the selected event';
             const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
             if (hasFile) {
-                const { items, parsedCount, headerDesc } = await analyzeRepairCsv(repairOrder);
+                const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
+                const actionable = items.filter(i => !i.skip && i.delegate_id);
                 setRepairItems(items);
                 if (parsedCount === 0) {
                     setRepairResult({
                         type: 'error', count: 0,
-                        msg: `No rows parsed${headerDesc ? ` — ${headerDesc}` : ''}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is).`
+                        msg: `No rows parsed from the file${headerDesc ? ` — ${headerDesc}` : ''}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is), and that you are on the ${evtName} event.`
+                    });
+                    return;
+                }
+                if (actionable.length === 0) {
+                    const skipped = items.filter(i => i.skip && i.delegate_id).length;
+                    setRepairResult({
+                        type: 'preview', count: 0,
+                        msg: `File read OK (${parsedCount} rows${rowsDroppedNoPhone ? `, ${rowsDroppedNoPhone} without phone` : ''}) but 0 rows need changes (${skipped} already correct/no-match). Active event: ${evtName}. If titles are still 'Mr', confirm this is the NC2 event and the file phones match its delegates.`
                     });
                     return;
                 }
                 await runApply(items);
             } else {
                 const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
+                const actionable = items.filter(i => !i.skip && i.delegate_id);
                 setRepairItems(items);
+                if (actionable.length === 0) {
+                    setRepairResult({
+                        type: 'preview', count: 0,
+                        msg: `No trapped-title records found in ${evtName}. To CLEAR the default 'Mr' on title-less rows (incl. ladies), LOAD the source CSV below (FULL NAME, PHONE ...) and run Auto-Detect & Normalize NOW again — the file is required, because a stored 'Mr' cannot be told apart from an explicit one without it.`
+                    });
+                    return;
+                }
                 await runApply(items);
             }
         } catch (e: any) {
