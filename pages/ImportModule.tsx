@@ -678,30 +678,20 @@ const ImportModule = () => {
         try {
             const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
             if (hasFile) {
-                const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
-                const actionable = items.filter(i => !i.skip && i.delegate_id);
+                const { items, parsedCount, headerDesc } = await analyzeRepairCsv(repairOrder);
                 setRepairItems(items);
-                const desc = headerDesc ? ` — ${headerDesc}` : '';
                 if (parsedCount === 0) {
                     setRepairResult({
-                        type: 'preview', count: 0,
-                        msg: `No rows parsed${desc}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is).`
+                        type: 'error', count: 0,
+                        msg: `No rows parsed${headerDesc ? ` — ${headerDesc}` : ''}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is).`
                     });
-                } else {
-                    setRepairResult({
-                        type: 'preview',
-                        count: actionable.length,
-                        msg: `File-based re-derive (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'})${desc}: ${parsedCount} rows parsed; ${actionable.length} repairable; ${items.length - actionable.length} skipped${rowsDroppedNoPhone > 0 ? `; ${rowsDroppedNoPhone} rows had no phone` : ''}.`
-                    });
+                    return;
                 }
+                await runApply(items);
             } else {
                 const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
                 setRepairItems(items);
-                setRepairResult({
-                    type: 'preview',
-                    count: items.length,
-                    msg: `Scanned the active event — ${items.length} existing record${items.length === 1 ? '' : 's'} with a trapped title can be normalized. Tip: for FULL coverage (incl. title-less rows) paste the CSV (FULL NAME, PHONE) below and run Auto-Detect again — the file pins the surname-first order per row.`
-                });
+                await runApply(items);
             }
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
@@ -710,8 +700,8 @@ const ImportModule = () => {
         }
     };
 
-    const handleRepairBackup = () => {
-        const actionable = repairItems.filter(i => !i.skip && i.delegate_id);
+    const handleRepairBackup = (items?: any[]) => {
+        const actionable = (items || repairItems).filter(i => !i.skip && i.delegate_id);
         if (actionable.length === 0) return;
         const blob = new Blob([JSON.stringify({ eventId: activeEventId, exportedAt: new Date().toISOString(), records: actionable }, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -721,44 +711,48 @@ const ImportModule = () => {
         URL.revokeObjectURL(url);
     };
 
+    const runApply = async (items: any[]) => {
+        const actionable = items.filter((i: any) => !i.skip && i.delegate_id);
+        if (actionable.length === 0) {
+            setRepairResult({ type: 'error', count: 0, msg: 'No records found to repair. Load the source CSV, or check the active event holds the NC2 delegates.' });
+            return;
+        }
+        handleRepairBackup(items);
+        const rows = actionable.map((i: any) => ({
+            delegateId: i.delegate_id,
+            title: i.after.title,
+            firstName: i.after.first_name,
+            lastName: i.after.last_name,
+            district: i.after.district || undefined,
+        }));
+        const res = await db.repairNamesFromFile(activeEventId, rows);
+        setRepairItems([]);
+        const verified = res.verified ?? res.updated;
+        setRepairResult({
+            type: 'repaired',
+            count: res.updated,
+            msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List to verify.`
+        });
+    };
+
     const handleRepairApply = async () => {
         if (!activeEventId) return;
         setRepairLoading(true);
         setRepairResult(null);
         try {
-            let actionable = repairItems.filter(i => !i.skip && i.delegate_id);
-            if (actionable.length === 0) {
+            let items: any[] = repairItems;
+            if (!items.some((i: any) => !i.skip && i.delegate_id)) {
                 const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
                 if (hasFile) {
-                    const { items } = await analyzeRepairCsv(repairOrder);
-                    actionable = items.filter(i => !i.skip && i.delegate_id);
+                    const r = await analyzeRepairCsv(repairOrder);
+                    items = r.items;
                     setRepairItems(items);
                 } else {
-                    const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
-                    actionable = items.filter(i => !i.skip && i.delegate_id);
+                    items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
                     setRepairItems(items);
                 }
             }
-            if (actionable.length === 0) {
-                setRepairResult({ type: 'error', count: 0, msg: 'Nothing to repair — no candidate records were found. Load the source CSV (FULL NAME, PHONE) or check the active event.' });
-                return;
-            }
-            handleRepairBackup();
-            const rows = actionable.map(i => ({
-                delegateId: i.delegate_id,
-                title: i.after.title,
-                firstName: i.after.first_name,
-                lastName: i.after.last_name,
-                district: i.after.district || undefined,
-            }));
-            const res = await db.repairNamesFromFile(activeEventId, rows);
-            setRepairItems([]);
-            const verified = res.verified ?? res.updated;
-            setRepairResult({
-                type: 'repaired',
-                count: res.updated,
-                msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Refresh the Master List to verify.`
-            });
+            await runApply(items);
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
         } finally {
@@ -1047,7 +1041,7 @@ const ImportModule = () => {
                             disabled={repairLoading || !activeEventId}
                             className="px-4 py-2 bg-amber-800 hover:bg-amber-700 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50 shadow"
                         >
-                            {repairLoading ? 'SCANNING...' : 'Auto-Detect & Normalize'}
+                            {repairLoading ? 'SCANNING...' : 'Auto-Detect & Normalize NOW'}
                         </button>
                         <p className="text-[7px] font-bold text-amber-600 uppercase mt-1">
                             With a CSV pasted/uploaded below: re-derives every row from the file (full coverage). Without a file: scans existing records and only proposes rows with a real title trapped in the Last Name.
@@ -1138,6 +1132,13 @@ const ImportModule = () => {
                             repairResult.type === 'error' ? 'bg-red-100 border border-red-200 text-red-800' : 'bg-white border border-amber-200 text-amber-900'
                         }`}>
                             <p className="text-[9px] font-black uppercase">{repairResult.msg}</p>
+                        </div>
+                    )}
+                    {repairResult?.type === 'preview' && repairItems.filter(i => !i.skip && i.delegate_id).length > 0 && (
+                        <div className="mt-2 p-2 rounded-xl bg-amber-100 border-2 border-amber-300">
+                            <p className="text-[8px] font-black text-amber-800 uppercase">
+                                {'\u26A0\uFE0F'} Preview only — these changes are NOT saved yet. Click the green {'"3. Backup & Apply Now"'} button to write them, or use {'"Auto-Detect & Normalize NOW"'} which applies automatically.
+                            </p>
                         </div>
                     )}
                     {repairItems.length > 0 && (
