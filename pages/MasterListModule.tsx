@@ -48,7 +48,8 @@ const MasterListModule = () => {
         title: '', first_name: '', last_name: '', district: '', chapter: '', rank: '', office: '', phone: '', email: '', delegate_type: 'Member'
     });
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [listLoading, setListLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(0);
     const [totalRecords, setTotalRecords] = useState(0);
@@ -61,7 +62,7 @@ const MasterListModule = () => {
     const loadData = useCallback(async (p?: number) => {
         if (!activeEventId) return;
         const currentPage = p ?? pageRef.current;
-        setLoading(true);
+        setListLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
                 db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId),
@@ -76,7 +77,7 @@ const MasterListModule = () => {
         } catch (err) {
             console.error("Master List Load Error:", err);
         } finally {
-            setLoading(false);
+            setListLoading(false);
         }
     }, [searchTerm, selectedDistrict, activeEventId]);
 
@@ -123,6 +124,7 @@ const MasterListModule = () => {
             console.error('[MasterList] loadAllDistricts error:', err);
         } finally {
             setDistrictListLoading(false);
+            setListLoading(false);
         }
     }, [activeEventId, loadDistrictPage]);
 
@@ -182,16 +184,22 @@ const MasterListModule = () => {
             alert("First Name, Last Name, and District are required.");
             return;
         }
-        setLoading(true);
+        setSaving(true);
         try {
             await db.updateDelegate(editingId, editForm);
             alert("SUCCESS: Delegate record updated and normalized.");
-            setEditingId(null); 
-            await loadData();
+            const editedDistrict = (editForm.district || '').trim();
+            setEditingId(null);
+            if (!selectedDistrict && !searchTerm) {
+                loadDistrictPage(editedDistrict, districtSections[editedDistrict]?.page || 1);
+                db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
+            } else {
+                await loadData();
+            }
         } catch(err: any) {
             alert("UPDATE FAILED: " + (err.message || "An error occurred."));
         } finally {
-            setLoading(false);
+            setSaving(false);
         }
     };
 
@@ -369,8 +377,8 @@ const MasterListModule = () => {
                         </div>
                         )}
                         <div className="flex items-end">
-                            <button type="submit" disabled={loading} className="w-full py-4 bg-blue-900 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-xl h-[52px]">
-                                {loading ? 'SAVING...' : 'SAVE CHANGES'}
+                            <button type="submit" disabled={saving} className="w-full py-4 bg-blue-900 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-xl h-[52px]">
+                                {saving ? 'SAVING...' : 'SAVE CHANGES'}
                             </button>
                         </div>
                     </form>
@@ -397,7 +405,7 @@ const MasterListModule = () => {
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
-                {((!selectedDistrict && !searchTerm) ? districtListLoading : loading) ? (
+                {((!selectedDistrict && !searchTerm) ? districtListLoading : listLoading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
                 ) : !selectedDistrict && !searchTerm ? (
                     /* --- MULTI-DISTRICT VIEW: per-district sections with independent pagination --- */

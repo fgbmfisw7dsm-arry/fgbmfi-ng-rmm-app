@@ -1105,7 +1105,17 @@ export const db = {
 
     importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
-        const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3);
+        const hasAlpha = (s: string): boolean => /[A-Za-z]/.test(s || '');
+        const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3).filter(p => {
+            const first = (p[2] || '').trim();
+            const last = (p[3] || '').trim();
+            if (!first && !last) return false;
+            if (first && !hasAlpha(first)) return false;
+            if (last && !hasAlpha(last)) return false;
+            const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (/^(GRAND TOTAL|SUBTOTAL|SUB TOTAL|TOTAL|SUMMARY|ZONE SUMMARY|REGISTRATION RECORDS|NOTES:|BATCH [1-5])/.test(firstCell)) return false;
+            return true;
+        });
         const BATCH_SIZE = 500;
         let inserted = 0;
         let updated = 0;

@@ -49,9 +49,47 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
   return { district: d, chapter: c, delegateType: normalizeDelegateType(delegateType) };
 }
 
+const hasAlpha = (s: string): boolean => /[A-Za-z]/.test(s || '');
+
+const normCell = (v: string): string => (v || '').replace(/\s+/g, ' ').trim();
+
+const JUNK_MARKERS = [
+  'GRAND TOTAL', 'SUBTOTAL', 'SUB TOTAL', 'TOTAL', 'SUMMARY', 'ZONE SUMMARY',
+  'REGISTRATION RECORDS', 'NOTES:', 'BATCH 1', 'BATCH 2', 'BATCH 3', 'BATCH 4', 'BATCH 5',
+];
+
+const HEADER_FIRST_CELLS = new Set([
+  'SN', 'S/N', 'NO', 'NUMBER', 'CAT', 'ZONE', 'AREA', 'CHAPTER', 'DISTRICT',
+  'NAME', 'FULL NAME', 'SURNAME', 'FIRST NAME', 'LAST NAME', 'TITLE',
+  'EMAIL', 'PHONE', 'PHONE NUMBER', 'WHATSAPP', 'WHATSAPP NO',
+  'SEX', 'STATE', 'COUNTRY', 'ADULTS', 'TEENS', 'CHILDREN',
+  'TOTAL', 'AMOUNT', 'AMOUNT (N)', 'AMOUNT(N)',
+]);
+
+const isRepeatedHeaderRow = (values: string[]): boolean => {
+  const cells = values.map(normCell).filter(Boolean);
+  if (cells.length < 2) return false;
+  return HEADER_FIRST_CELLS.has(cells[0].toUpperCase());
+};
+
+const junkRowReason = (first?: string, last?: string): string | null => {
+  const f = normCell(first || '');
+  const l = normCell(last || '');
+  if (!f && !l) return 'no name';
+  if ((f && !hasAlpha(f)) || (l && !hasAlpha(l))) return 'numeric/blank name';
+  return null;
+};
+
+const isJunkDataRow = (values: string[], firstName?: string, lastName?: string): boolean => {
+  const cells = values.map(normCell).filter(Boolean);
+  const firstNonEmpty = cells[0] || '';
+  if (JUNK_MARKERS.some(m => firstNonEmpty.toUpperCase().startsWith(m))) return true;
+  return junkRowReason(firstName, lastName) !== null;
+};
+
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.28 · district zone fix';
+const IMPORT_BUILD_LABEL = 'v1.29 · import junk-row guard + preview';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -365,6 +403,9 @@ const ImportModule = () => {
           colValues['Last Name'] = firstIdx('Last Name') >= 0 ? (values[firstIdx('Last Name')] || '') : '';
         }
 
+        if (isRepeatedHeaderRow(values)) continue;
+        if (isJunkDataRow(values, colValues['First Name'], colValues['Last Name'])) continue;
+
         let districtBefore = pickRowValue(values, districtIndices);
         if (effectiveBanner && /^(?:ZONE|AREA)\s*\d+$/i.test(districtBefore)) districtBefore = '';
         else if (effectiveBanner && /^\d+$/i.test(districtBefore)) districtBefore = '';
@@ -395,6 +436,63 @@ const ImportModule = () => {
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
+    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder]);
+
+    const importPreview = React.useMemo(() => {
+      if (!csv.trim() || !showMapping || detectedColumns.length === 0) return null;
+      const lines = csv.trim().split('\n');
+      const { headerIndex: hi } = detectHeaderRow(lines);
+      if (hi < 0 || hi >= lines.length) return null;
+      const headers = parseHeaders(lines[hi]);
+      const fieldIndices = new Map<string, number[]>();
+      for (const field of OUTPUT_FIELDS) fieldIndices.set(field, getEnabledColumnIndices(headers, field));
+      const firstIdxP = (field: string) => (fieldIndices.get(field) || [])[0] ?? -1;
+      const hasEnabledP = (field: string) => (fieldIndices.get(field) || []).length > 0;
+      const fullNameIdxP = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+      const useFullNameP = fullNameIdxP >= 0 && !(hasEnabledP('Title') && hasEnabledP('First Name') && hasEnabledP('Last Name'));
+      const orderP = effectiveNameOrder();
+
+      const kept: Array<{ first: string; last: string; raw: string }> = [];
+      const skipped: Array<{ raw: string; reason: string }> = [];
+      for (let i = hi + 1; i < lines.length; i++) {
+        const raw = (lines[i] || '').trim();
+        if (!raw) continue;
+        const values = raw.split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+        if (values.every(v => !v)) continue;
+        if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(raw)) continue;
+        const headerLike = values.filter(v => {
+          const k = normalizeKey(v);
+          return !!KNOWN_FIELDS[k] && !AMBIGUOUS_VALUE_KEYS.has(k);
+        }).length;
+        if (headerLike >= 3) {
+          skipped.push({ raw: raw.slice(0, 120), reason: 'header-like' });
+          continue;
+        }
+        if (isRepeatedHeaderRow(values)) {
+          skipped.push({ raw: raw.slice(0, 120), reason: 'repeated header' });
+          continue;
+        }
+
+        let first = '';
+        let last = '';
+        if (useFullNameP) {
+          const parsed = parseFullName(values[fullNameIdxP] || '', orderP);
+          first = parsed.firstName;
+          last = parsed.lastName;
+        } else {
+          first = firstIdxP('First Name') >= 0 ? (values[firstIdxP('First Name')] || '') : '';
+          last = firstIdxP('Last Name') >= 0 ? (values[firstIdxP('Last Name')] || '') : '';
+        }
+        const junkReason = isJunkDataRow(values, first, last)
+          ? (junkRowReason(first, last) || (JUNK_MARKERS.some(m => (values.map(normCell).filter(Boolean)[0] || '').toUpperCase().startsWith(m)) ? 'summary/marker row' : 'repeat header/summary'))
+          : null;
+        if (junkReason) {
+          skipped.push({ raw: raw.slice(0, 120), reason: junkReason });
+          continue;
+        }
+        if (kept.length < 8) kept.push({ first, last, raw: raw.slice(0, 90) });
+      }
+      return { kept, skipped };
     }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder]);
 
     const handleDownloadTemplate = () => {
@@ -588,6 +686,8 @@ const ImportModule = () => {
             }
             fullName = fullName.replace(/\s+/g, ' ').trim();
             if (!fullName || !phone) continue;
+            if (isRepeatedHeaderRow(values)) continue;
+            if (!hasAlpha(fullName)) continue;
             const p = parseFullName(fullName, order);
             parsedRows.push({ phone, title: p.title, first: p.firstName, last: p.lastName, district, raw: fullName });
         }
@@ -1387,6 +1487,39 @@ const hasFile = repairHasFile;
                                 {!showDelegateType && 'DelegateType is hidden per event config. '}
                                 Extra/unknown columns are automatically excluded.
                             </p>
+                            {importPreview && (
+                                <div className="mt-3 bg-white/80 rounded-xl border border-gray-200 p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="text-[8px] font-black text-gray-600 uppercase">Import preview</span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase ${
+                                            importPreview.skipped.length > 0 ? 'bg-amber-200 text-amber-800' : 'bg-green-100 text-green-700'
+                                        }`}>
+                                            {importPreview.kept.length}+ kept · {importPreview.skipped.length} junk skipped
+                                        </span>
+                                    </div>
+                                    {importPreview.skipped.length > 0 && (
+                                        <div className="mb-2">
+                                            <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">Rows that will be skipped as junk (header/summary/marker rows) — these will NOT be imported:</p>
+                                            <div className="max-h-24 overflow-y-auto bg-amber-50 rounded-lg p-2 font-mono text-[8px] text-amber-900">
+                                                {importPreview.skipped.slice(0, 8).map((s, i) => (
+                                                    <div key={i} className="truncate">· {s.reason}: {s.raw}</div>
+                                                ))}
+                                                {importPreview.skipped.length > 8 && (
+                                                    <div>… and {importPreview.skipped.length - 8} more</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <p className="text-[8px] font-bold text-gray-500 uppercase mb-1">First records to import:</p>
+                                    <div className="grid grid-cols-1 gap-1 font-mono text-[8px] text-gray-700">
+                                        {importPreview.kept.length > 0 ? importPreview.kept.map((k, i) => (
+                                            <div key={i} className="truncate"><span className="font-black">{k.first} {k.last}</span> <span className="text-gray-400">← {k.raw}</span></div>
+                                        )) : (
+                                            <div className="text-gray-400">No data rows after the header — check the file / column mapping.</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
