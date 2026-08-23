@@ -562,6 +562,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **TanStack Query on ReportsPage:** `report-aggregates`, `sessions`, `events`, `settings`, `ministry-export` are now `useQuery`; district/region scoping moved into the `reportData` `useMemo` (recomputed on user change). `loading` state removed.
 - **Deferred:** MasterListModule (3.3C) kept its manual `useCallback` + server-side pagination + realtime flow — already paginated/deduped; a `useQuery` rewrite there is high-risk for marginal gain.
 
+### 29. CSV Import Hardening: District Short Codes + WhatsApp Phone (v1.12 / Sprint 20)
+- **Problem solved:** bulk CSV imports carried district short codes (`NC1`, `SS2`, `SW 2`, `NC1-0116`) in the District column (and sometimes in a Title/banner row above the real header), plus phone data in `WhatsApp`/`WHA`/`N PHONE`/`Phone No` columns that were either unmapped, dropped, or not normalized.
+- **Shared helpers in `services/utils.ts`:** `resolveDistrictShortCode(raw)` (cleans `NC1-0116` → `NC1`, expands any `NC/NE/NW/SE/SS/SW` + digits into official names, e.g., `SW 2` → `South West 2`, via `REGION_PREFIXES`) and `normalizePhone(raw)` (`2348…` / `+2348…` → `08…`, 10-digit `8…` → `08…`, keeps `0…` 11-digit). Imports to canonical district names at input time; `harmonizeDistricts` remains a safety net.
+- **Robust header detection (`detectHeaderRow` in ImportModule.tsx):** scans the first 10 rows, picks the first row with ≥2 "strong" matches (known-field headers excluding ambiguous title-value keys like `mr`/`mrs`), and captures a **banner district** from preceding title/junk rows (e.g., `SOUTH WEST 2 DISTRICT` → applied to rows missing a District). Headerless data pastes (strong < 2) now import every line as a data row instead of silently skipping the first record.
+- **Column aliases expanded:** district-code headers (`district code`, `short district code`, `shortdistrictcode`, `zone code`, …) map to District; phone headers (`phone no`, `phoneno`, `mobile number`, `contact number`, `n phone`, `whatsapp number`, `wa`, …) map to Phone. `normalizeKey` now collapses repeated whitespace so `N     PHONE` matches.
+- **District column priority:** when both ZONE and DISTRICT headers map to District, a `district*`/`short code`/`chapter code`-named column is preferred over generic zone/region columns (prevents numeric zone values filling District).
+- **Phone fallback:** per-row extraction scans all Phone columns — true phone-like columns first, WhatsApp columns as fallback — then normalizes. Import feedback reports rows filled from banner district, short codes resolved, and WhatsApp-supplied phones.
+
 ## Code Conventions
 
 ### Naming

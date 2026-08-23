@@ -30,6 +30,36 @@ export const generateRegId = (): string => {
     return `CON26${ts}${suffix}`;
 };
 
+export const REGION_PREFIXES: Record<string, string> = {
+    'NC': 'North Central', 'NE': 'North East', 'NW': 'North West',
+    'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
+};
+
+export const resolveDistrictShortCode = (raw?: string | null): string => {
+    const trimmed = (raw || '').trim();
+    let v = trimmed;
+    const dashIdx = v.indexOf('-');
+    if (dashIdx > 0) {
+        const prefix = v.substring(0, dashIdx);
+        const suffix = v.substring(dashIdx + 1);
+        if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) v = prefix.toUpperCase();
+    }
+    const cleaned = v.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
+    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+    if (!match) return trimmed;
+    return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+};
+
+export const normalizePhone = (raw?: string | null): string => {
+    let digits = (raw || '').replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.startsWith('234') && digits.length > 10) digits = '0' + digits.slice(3);
+    if (digits.length === 11 && digits.startsWith('0')) return digits;
+    if (digits.length === 10 && digits.charAt(0) !== '0') return `0${digits}`;
+    return digits;
+};
+
 export const downloadJSON = (data: any, filename: string) => {
     const jsonStr = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });

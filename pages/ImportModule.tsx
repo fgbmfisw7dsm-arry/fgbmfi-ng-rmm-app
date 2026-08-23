@@ -4,7 +4,36 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode } from '../services/utils';
+
+const AMBIGUOUS_VALUE_KEYS = new Set([
+    'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
+    'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
+    'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
+    'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia'
+]);
+
+const WHATSAPP_LIKE_HEADERS = new Set([
+    'whatsapp', 'whatsapp number', 'whatsappnumber', 'whatsapp no', 'whatsappno',
+    'whatsapp phone', 'whatsappphone', 'wha', 'wa', 'watsapp', 'whatapp', 'whats app'
+]);
+
+const extractBannerDistrict = (line: string): string => {
+    const t = (line || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!t) return '';
+    const full = t.match(/(NORTH CENTRAL|NORTH EAST|NORTH WEST|SOUTH EAST|SOUTH SOUTH|SOUTH WEST)\s*(\d{1,2})\s*DISTRICT/);
+    if (full) {
+        const region = full[1].toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return `${region} ${Number(full[2])}`;
+    }
+    const code = t.match(/(?:^|[^A-Z])(NC|NE|NW|SE|SS|SW)\s*(\d{1,2})(?:$|[^A-Z0-9])/);
+    if (code) {
+        const regionMap: Record<string, string> = { NC: 'North Central', NE: 'North East', NW: 'North West', SE: 'South East', SS: 'South South', SW: 'South West' };
+        const region = regionMap[code[1]];
+        return region ? `${region} ${Number(code[2])}` : '';
+    }
+    return '';
+};
 
 const KNOWN_TITLES = new Set([
   'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -76,11 +105,13 @@ const ImportModule = () => {
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
+    const [bannerDistrict, setBannerDistrict] = useState('');
+    const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 });
     const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
     const [scrambleSamples, setScrambleSamples] = useState<string[]>([]);
     const [scrambleTotal, setScrambleTotal] = useState(0);
@@ -95,8 +126,12 @@ const ImportModule = () => {
       'last_name': 'Last Name', 'last name': 'Last Name', 'lastname': 'Last Name', 'surname': 'Last Name', 'family name': 'Last Name',
       'full_name': 'Full Name', 'full name': 'Full Name', 'fullname': 'Full Name', 'complete name': 'Full Name',
       'district': 'District', 'zone': 'District', 'region': 'District', 'chaptercode': 'District', 'chapter code': 'District',
+      'district code': 'District', 'districtcode': 'District', 'district short code': 'District', 'districtshortcode': 'District',
+      'dist code': 'District', 'distcode': 'District', 'short district code': 'District', 'shortdistrictcode': 'District',
+      'short code': 'District', 'shortcode': 'District', 'zone code': 'District', 'zonecode': 'District',
       'chapter': 'Chapter', 'branch': 'Chapter', 'unit': 'Chapter',
-      'phone': 'Phone', 'phone number': 'Phone', 'mobile': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'cell': 'Phone', 'contact': 'Phone', 'nphone': 'Phone', 'whatsapp': 'Phone', 'wha': 'Phone',
+      'phone': 'Phone', 'phone number': 'Phone', 'phone no': 'Phone', 'phoneno': 'Phone', 'mobile': 'Phone', 'mobile no': 'Phone', 'mobileno': 'Phone', 'mobile number': 'Phone', 'mobilenumber': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'tel no': 'Phone', 'telno': 'Phone', 'cell': 'Phone', 'contact': 'Phone', 'contact number': 'Phone', 'contactnumber': 'Phone', 'nphone': 'Phone', 'n phone': 'Phone', 'direct line': 'Phone',
+      'whatsapp': 'Phone', 'whatsapp number': 'Phone', 'whatsappnumber': 'Phone', 'whatsapp no': 'Phone', 'whatsappno': 'Phone', 'whatsapp phone': 'Phone', 'whatsappphone': 'Phone', 'wha': 'Phone', 'wa': 'Phone',
       'email': 'Email', 'email address': 'Email', 'e-mail': 'Email', 'mail': 'Email',
       'rank': 'Rank', 'level': 'Rank', 'grade': 'Rank',
       'office': 'Office', 'position': 'Office', 'role': 'Office', 'post': 'Office',
@@ -108,7 +143,7 @@ const ImportModule = () => {
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
 
-    const normalizeKey = (h: string) => h.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const normalizeKey = (h: string) => h.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9\s]/g, '').trim();
 
     const parseHeaders = (headerLine: string): string[] => {
       return headerLine.split(',').map(h => h.trim().replace(/^["']|["']$/g, '')).filter(h => h.length > 0);
@@ -136,6 +171,43 @@ const ImportModule = () => {
       return map;
     };
 
+    const detectHeaderRow = (lines: string[]): { headerIndex: number; bannerDistrict: string; found: boolean } => {
+      let banner = '';
+      const scanLimit = Math.min(lines.length, 10);
+      for (let i = 0; i < scanLimit; i++) {
+        const rawLine = lines[i] || '';
+        const strong = parseHeaders(rawLine).filter(c => {
+          const k = normalizeKey(c);
+          return !!KNOWN_FIELDS[k] && !AMBIGUOUS_VALUE_KEYS.has(k);
+        }).length;
+        if (strong >= 2) return { headerIndex: i, bannerDistrict: banner, found: true };
+        const d = extractBannerDistrict(rawLine);
+        if (d && !banner) banner = d;
+      }
+      return { headerIndex: 0, bannerDistrict: banner, found: false };
+    };
+
+    const getEnabledColumnIndices = (headers: string[], fieldName: string): number[] => {
+      const result: number[] = [];
+      const fieldKey = fieldName.toLowerCase();
+      headers.forEach((h, i) => {
+        if (columnMap[h] === false) return;
+        const k = normalizeKey(h);
+        if (KNOWN_FIELDS[k] === fieldName || k === fieldKey) result.push(i);
+      });
+      return result;
+    };
+
+    const pickRowValue = (values: string[], indices: number[]): string => {
+      for (const idx of indices) {
+        const v = (values[idx] || '').trim();
+        if (v) return v;
+      }
+      return '';
+    };
+
+    const isWhatsappLike = (h: string): boolean => WHATSAPP_LIKE_HEADERS.has(normalizeKey(h));
+
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -146,8 +218,10 @@ const ImportModule = () => {
         setCsv(text);
         const lines = text.trim().split('\n');
         if (lines.length > 1) {
-          const headers = parseHeaders(lines[0]);
-          if (headers.length > 1) {
+          const { headerIndex, bannerDistrict: bd, found } = detectHeaderRow(lines);
+          const headers = parseHeaders(lines[headerIndex]);
+          setBannerDistrict(bd || '');
+          if (found && headers.length > 1) {
             setDetectedColumns(headers);
             const map = matchColumns(headers);
             setColumnMap(map);
@@ -197,136 +271,98 @@ const ImportModule = () => {
       return fieldOrder;
     };
 
-    const getColumnIndex = (headers: string[], fieldName: string): number => {
-      const key = fieldName.toLowerCase();
-      for (let i = 0; i < headers.length; i++) {
-        const hKey = normalizeKey(headers[i]);
-        if (KNOWN_FIELDS[hKey] === fieldName || hKey === key) return i;
-      }
-      return -1;
-    };
-
-    const cleanDistrictForImport = (raw: string): string => {
-      const trimmed = (raw || '').trim();
-      const dashIdx = trimmed.indexOf('-');
-      if (dashIdx > 0) {
-        const prefix = trimmed.substring(0, dashIdx);
-        const suffix = trimmed.substring(dashIdx + 1);
-        if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) {
-          return prefix.toUpperCase();
-        }
-      }
-      return trimmed;
-    };
-
     const mappedCsvData = React.useMemo(() => {
-      if (!showMapping || detectedColumns.length === 0 || !csv.trim()) return csv;
+      statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 };
+      if (!csv.trim()) return csv;
       const lines = csv.trim().split('\n');
-      if (lines.length < 2) return csv;
-      const headers = parseHeaders(lines[0]);
+      if (lines.length < 2) return showMapping ? '' : csv;
 
-      const fullNameColIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
-      const titleColIdx = getColumnIndex(headers, 'Title');
-      const firstNameColIdx = getColumnIndex(headers, 'First Name');
-      const lastNameColIdx = getColumnIndex(headers, 'Last Name');
-
-      const useFullName = fullNameColIdx >= 0 && columnMap[headers[fullNameColIdx]] !== false
-        && (titleColIdx < 0 || columnMap[headers[titleColIdx]] === false
-         || firstNameColIdx < 0 || columnMap[headers[firstNameColIdx]] === false
-         || lastNameColIdx < 0 || columnMap[headers[lastNameColIdx]] === false);
-
-      if (useFullName) {
-        const fieldOrder = buildFieldOrder();
-        const resultLines: string[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-          const parsed = parseFullName(values[fullNameColIdx] || '');
-          const colValues: Record<string, string> = {};
-          for (const field of fieldOrder) {
-            if (field === 'Title') colValues[field] = parsed.title;
-            else if (field === 'First Name') colValues[field] = parsed.firstName;
-            else if (field === 'Last Name') colValues[field] = parsed.lastName;
-            else {
-              const idx = getColumnIndex(headers, field);
-              let raw = (idx >= 0 && columnMap[headers[idx]] !== false) ? (values[idx] || '') : '';
-              colValues[field] = field === 'District' ? cleanDistrictForImport(raw) : raw;
-            }
-          }
-          const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '');
-          colValues['District'] = guest.district;
-          colValues['Chapter'] = guest.chapter;
-          colValues['DelegateType'] = guest.delegateType;
-          const row = OUTPUT_FIELDS.map(f => colValues[f] ?? '').join(',');
-          if (row.trim().replace(/,/g, '')) resultLines.push(row);
-        }
-        return resultLines.join('\n');
+      const { headerIndex: hi, bannerDistrict: detectedBanner } = detectHeaderRow(lines);
+      const effectiveBanner = (detectedBanner || bannerDistrict || '').trim();
+      if (!showMapping || detectedColumns.length === 0) {
+        if (hi > 0) return lines.slice(hi + 1).join('\n');
+        return csv;
       }
+      const headers = parseHeaders(lines[hi]);
 
-      const colIndices: number[] = [];
-      for (const field of OUTPUT_FIELDS) {
-        const idx = getColumnIndex(headers, field);
-        colIndices.push(idx);
-      }
-      const remaining = colIndices.every(i => i >= 0);
-      if (!remaining) {
-        const selected = headers.map((h, idx) => ({ h, idx, field: KNOWN_FIELDS[normalizeKey(h)] || null }))
-          .filter(({ h }) => columnMap[h] !== false);
-        const hasRegId = selected.some(s => s.field === 'RegId');
-        const resultLines: string[] = [];
-        const KNOWN_TITLE_VALUES = new Set([
-          'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
-          'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
-          'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
-          'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia', 'arc', 'pst',
-          'esv', 'evang', 'prof.', 'dcn', 'judge', 'justice', 'dame', 'r.ady',
-          'ready', 'avm', 'asc', 'pharm.', 'pharm', 'cmd', 'cmdr', 'amb.', 'amb',
-          'sen', 'cp'
-        ]);
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-          const allEmpty = values.every(v => !v);
-          if (allEmpty) continue;
-          const knownMatches = selected.filter(s => {
-            const val = (values[s.idx] || '').toLowerCase().replace(/\.$/, '').trim();
-            return val && KNOWN_FIELDS[normalizeKey(s.h)];
-          }).length;
-          if (knownMatches >= 3) continue;
-          const colValues: Record<string, string> = {};
-          for (const s of selected) {
-            const val = values[s.idx] || '';
-            if (s.field === 'District') {
-              colValues[s.field] = cleanDistrictForImport(val);
-            } else {
-              colValues[s.field || ''] = val;
-            }
-          }
-          const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '');
-          colValues['District'] = guest.district;
-          colValues['Chapter'] = guest.chapter;
-          colValues['DelegateType'] = guest.delegateType;
-          const rowParts = OUTPUT_FIELDS.map(f => colValues[f] || '');
-          const row = rowParts.join(',');
-          if (row.trim().replace(/,/g, '')) resultLines.push(row);
-        }
-        return resultLines.join('\n');
-      }
+      const fieldIndices = new Map<string, number[]>();
+      for (const field of OUTPUT_FIELDS) fieldIndices.set(field, getEnabledColumnIndices(headers, field));
+      const firstIdx = (field: string) => (fieldIndices.get(field) || [])[0] ?? -1;
+      const hasEnabled = (field: string) => (fieldIndices.get(field) || []).length > 0;
+
+      const districtPriority = (i: number) => {
+        const k = normalizeKey(headers[i]);
+        return (k.startsWith('district') || k.includes('short code') || k.includes('chaptercode')) ? 0 : 1;
+      };
+      const districtIndices = [...(fieldIndices.get('District') || [])].sort((a, b) => districtPriority(a) - districtPriority(b));
+
+      const fullNameIdx = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+      const useFullName = fullNameIdx >= 0 && !(hasEnabled('Title') && hasEnabled('First Name') && hasEnabled('Last Name'));
+
+      const phoneLikeIdx = headers.map((_, i) => i).filter(i =>
+        columnMap[headers[i]] !== false && KNOWN_FIELDS[normalizeKey(headers[i])] === 'Phone' && !isWhatsappLike(headers[i])
+      );
+      const whatsappIdx = headers.map((_, i) => i).filter(i =>
+        columnMap[headers[i]] !== false && KNOWN_FIELDS[normalizeKey(headers[i])] === 'Phone' && isWhatsappLike(headers[i])
+      );
+
+      const stripDistrictSuffix = (raw: string): string => {
+        const t = (raw || '').trim();
+        const dashIdx = t.indexOf('-');
+        if (dashIdx > 0 && /^\d+$/.test(t.substring(dashIdx + 1)) && /^[A-Z]{2}\d+$/i.test(t.substring(0, dashIdx))) return t.substring(0, dashIdx).toUpperCase();
+        return t;
+      };
+
       const resultLines: string[] = [];
-      for (let i = 1; i < lines.length; i++) {
+      for (let i = hi + 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-        const rowParts = colIndices.map(idx => idx >= 0 ? (values[idx] || '') : '');
-        const dIdx = OUTPUT_FIELDS.indexOf('District');
-        const cIdx = OUTPUT_FIELDS.indexOf('Chapter');
-        const tIdx = OUTPUT_FIELDS.indexOf('DelegateType');
-        if (dIdx >= 0) rowParts[dIdx] = cleanDistrictForImport(rowParts[dIdx] || '');
-        const guest = resolveGuestFields(dIdx >= 0 ? rowParts[dIdx] || '' : '', cIdx >= 0 ? rowParts[cIdx] || '' : '', tIdx >= 0 ? rowParts[tIdx] || '' : '');
-        if (dIdx >= 0) rowParts[dIdx] = guest.district;
-        if (cIdx >= 0) rowParts[cIdx] = guest.chapter;
-        if (tIdx >= 0) rowParts[tIdx] = guest.delegateType;
-        const row = rowParts.join(',');
+        if (values.every(v => !v)) continue;
+        const headerLike = values.filter(v => {
+          const k = normalizeKey(v);
+          return !!KNOWN_FIELDS[k] && !AMBIGUOUS_VALUE_KEYS.has(k);
+        }).length;
+        if (headerLike >= 3) continue;
+
+        const colValues: Record<string, string> = {};
+        if (useFullName) {
+          const parsed = parseFullName(values[fullNameIdx] || '');
+          colValues['Title'] = parsed.title;
+          colValues['First Name'] = parsed.firstName;
+          colValues['Last Name'] = parsed.lastName;
+        } else {
+          colValues['Title'] = firstIdx('Title') >= 0 ? (values[firstIdx('Title')] || '') : '';
+          colValues['First Name'] = firstIdx('First Name') >= 0 ? (values[firstIdx('First Name')] || '') : '';
+          colValues['Last Name'] = firstIdx('Last Name') >= 0 ? (values[firstIdx('Last Name')] || '') : '';
+        }
+
+        const districtBefore = pickRowValue(values, districtIndices);
+        if (!districtBefore && effectiveBanner) statsRef.current.bannerUsed++;
+        const resolvedDistrict = resolveDistrictShortCode(districtBefore || effectiveBanner);
+        if (districtBefore && resolvedDistrict && resolvedDistrict !== stripDistrictSuffix(districtBefore)) statsRef.current.shortCodesResolved++;
+        colValues['District'] = resolvedDistrict;
+        colValues['Chapter'] = pickRowValue(values, fieldIndices.get('Chapter') || []);
+
+        const phoneFromPhoneCol = pickRowValue(values, phoneLikeIdx);
+        const phoneFromWhatsapp = pickRowValue(values, whatsappIdx);
+        if (!phoneFromPhoneCol && phoneFromWhatsapp) statsRef.current.whatsappFilled++;
+        colValues['Phone'] = normalizePhone(phoneFromPhoneCol || phoneFromWhatsapp);
+
+        colValues['Email'] = firstIdx('Email') >= 0 ? (values[firstIdx('Email')] || '') : '';
+        colValues['Rank'] = firstIdx('Rank') >= 0 ? (values[firstIdx('Rank')] || '') : '';
+        colValues['Office'] = firstIdx('Office') >= 0 ? (values[firstIdx('Office')] || '') : '';
+        colValues['DelegateType'] = firstIdx('DelegateType') >= 0 ? (values[firstIdx('DelegateType')] || '') : '';
+        colValues['RegId'] = firstIdx('RegId') >= 0 ? (values[firstIdx('RegId')] || '') : '';
+
+        const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '');
+        colValues['District'] = guest.district;
+        colValues['Chapter'] = guest.chapter;
+        colValues['DelegateType'] = guest.delegateType;
+
+        const row = OUTPUT_FIELDS.map(f => colValues[f] ?? '').join(',');
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
-    }, [csv, showMapping, detectedColumns, columnMap]);
+    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict]);
 
     const handleDownloadTemplate = () => {
       const fieldOrder = buildFieldOrder();
@@ -343,6 +379,7 @@ const ImportModule = () => {
 
     const handleImport = async () => {
         const dataToImport = mappedCsvData;
+        const importStats = { ...statsRef.current };
         if (!dataToImport.trim()) {
             setFeedback({ type: 'error', msg: 'Please upload a CSV file or paste CSV data before attempting import.' });
             return;
@@ -363,7 +400,8 @@ const ImportModule = () => {
                     msg: 'Import Complete!',
                     inserted: result.inserted,
                     updated: result.updated,
-                    skipped: result.skipped
+                    skipped: result.skipped,
+                    stats: importStats
                 });
                 setProgress(null);
                 setCsv('');
@@ -566,6 +604,21 @@ const ImportModule = () => {
                                             {'\u23ED\uFE0F'} {feedback.skipped} records skipped (already complete)
                                         </p>
                                     )}
+                                    {(feedback.stats?.bannerUsed ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-blue-700 uppercase">
+                                            {'\uD83C\uDFF7\uFE0F'} {feedback.stats?.bannerUsed} rows got District from the file title/banner
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.shortCodesResolved ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-teal-700 uppercase">
+                                            {'\uD83D\uDD17'} {feedback.stats?.shortCodesResolved} district short codes resolved to official names
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.whatsappFilled ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-purple-700 uppercase">
+                                            {'\uD83D\uDCF2'} {feedback.stats?.whatsappFilled} phones extracted from WhatsApp columns
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -735,10 +788,10 @@ const ImportModule = () => {
                             </div>
                         </label>
                         {csv && (
-                            <button
-                                onClick={() => { setCsv(''); setFileName(''); setShowMapping(false); setDetectedColumns([]); setColumnMap({}); setFeedback(null); }}
-                                className="px-4 py-4 bg-red-50 hover:bg-red-100 text-red-600 font-black rounded-2xl text-[10px] uppercase tracking-wider transition-all"
-                            >
+<button
+                                        onClick={() => { setCsv(''); setFileName(''); setShowMapping(false); setDetectedColumns([]); setColumnMap({}); setBannerDistrict(''); setFeedback(null); }}
+                                        className="px-4 py-4 bg-red-50 hover:bg-red-100 text-red-600 font-black rounded-2xl text-[10px] uppercase tracking-wider transition-all"
+                                    >
                                 Clear
                             </button>
                         )}
@@ -801,6 +854,14 @@ const ImportModule = () => {
                                     </p>
                                 </div>
                             )}
+                            {bannerDistrict && (
+                                <div className="bg-blue-50 p-2 rounded-xl border border-blue-200 mb-2">
+                                    <p className="text-[8px] font-bold text-blue-700 uppercase">
+                                        {'\u2139\uFE0F'} District detected from file title/banner:{' '}
+                                        <span className="font-mono text-blue-900">{bannerDistrict}</span> — will be applied to rows without a District value.
+                                    </p>
+                                </div>
+                            )}
                             <p className="text-[8px] font-bold text-amber-600 uppercase">
                                 Only checked columns will be imported.{' '}
                                 {!showRank && 'Rank is hidden per event config. '}
@@ -815,20 +876,22 @@ const ImportModule = () => {
                         className="w-full h-64 p-6 border-2 border-gray-100 rounded-[2rem] font-mono text-xs bg-gray-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none shadow-inner"
                         value={csv}
                         onChange={e => {
-                            setCsv(e.target.value);
-                            const lines = e.target.value.trim().split('\n');
-                            if (lines.length > 1) {
-                                const headers = parseHeaders(lines[0]);
-                                if (headers.length > 1 && headers.some(h => KNOWN_FIELDS[normalizeKey(h)])) {
-                                    if (detectedColumns.length === 0) {
-                                        setDetectedColumns(headers);
-                                        const map = matchColumns(headers);
-                                        setColumnMap(map);
+                                setCsv(e.target.value);
+                                const lines = e.target.value.trim().split('\n');
+                                if (lines.length > 1) {
+                                    const { headerIndex, bannerDistrict: bd, found } = detectHeaderRow(lines);
+                                    const headers = parseHeaders(lines[headerIndex]);
+                                    if (found && headers.length > 1) {
+                                        if (detectedColumns.length === 0) {
+                                            setDetectedColumns(headers);
+                                            const map = matchColumns(headers);
+                                            setColumnMap(map);
+                                            setBannerDistrict(bd || '');
+                                        }
+                                        setShowMapping(true);
                                     }
-                                    setShowMapping(true);
                                 }
-                            }
-                        }}
+                            }}
                         placeholder="Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType..."
                     />
 
