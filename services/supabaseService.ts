@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateQrHash, generateRegId, normalizePhone } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -1823,6 +1823,49 @@ export const db = {
             }
         }
         return merged;
+    },
+
+    autoRepairScannedNames: async (eventId: string, districtOverride?: string) => {
+        const all: any[] = [];
+        let from = 0;
+        while (true) {
+            let q = supabase.from('delegates').select('*').order('delegate_id').range(from, from + 999);
+            if (eventId) q = q.eq('event_id', eventId);
+            const { data } = await q;
+            if (!data || data.length === 0) break;
+            all.push(...data);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        const override = (districtOverride || '').trim();
+        const items: any[] = [];
+        for (const d of all) {
+            const first = (d.first_name || '').trim();
+            const last = (d.last_name || '').trim();
+            if (!first || !last) continue;
+            const rebuilt = `${first} ${last}`;
+            const tokens = tokenizeFullName(rebuilt);
+            if (tokens.length === 0) continue;
+            const anyTitle = tokens.some(t => KNOWN_TITLES.has(normalizeTitleToken(t)));
+            if (!anyTitle) continue;
+            const parsed = parseFullName(rebuilt, 'surname-first');
+            if (!parsed.firstName) continue;
+            if (normNameKey(parsed.lastName) !== normNameKey(first)) continue;
+            const changed =
+                parsed.title !== (d.title || '').trim() ||
+                parsed.firstName !== first ||
+                parsed.lastName !== last;
+            if (!changed) continue;
+            const zoneDistrict = override && (!d.district || /^(ZONE|AREA)\s*\d+$/i.test(d.district || '')) ? override : (d.district || '');
+            items.push({
+                delegate_id: d.delegate_id,
+                raw: rebuilt,
+                before: { title: d.title || '', first_name: first, last_name: last, district: d.district || '' },
+                after: { title: parsed.title, first_name: parsed.firstName, last_name: parsed.lastName, district: zoneDistrict },
+                districtReason: zoneDistrict !== (d.district || '') ? 'will fix district' : '',
+            });
+        }
+        return items;
     },
 
     getDelegatesByPhones: async (eventId: string, phones: string[]) => {

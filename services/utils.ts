@@ -60,6 +60,121 @@ export const normalizePhone = (raw?: string | null): string => {
     return digits;
 };
 
+// ---------- Full-name parser (Sprint 22/23) ----------
+export const KNOWN_TITLES = new Set([
+    'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
+    'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
+    'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
+    'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia',
+    'arc', 'arch', 'archt', 'comrade', 'evang', 'evng', 'pst', 'eld', 'sen',
+    'esq', 'otunba', 'capt', 'maj', 'lt', 'col', 'cmdr', 'adm'
+]);
+
+export type NameOrder = 'given-first' | 'surname-first';
+
+export const canonicalTitle = (rawToken: string): string => {
+    const cleaned = (rawToken || '').replace(/^\(|\)$/g, '').trim().toLowerCase().replace(/\.$/, '').trim();
+    const shorthand: Record<string, string> = {
+        evang: 'Evangelist', evng: 'Evangelist', pst: 'Pastor', eld: 'Elder',
+        engr: 'Engr', prof: 'Prof', mrs: 'Mrs', mr: 'Mr', ms: 'Ms', miss: 'Miss',
+        dr: 'Dr', chief: 'Chief', pastor: 'Pastor', rev: 'Rev', barr: 'Barr',
+        sir: 'Sir', lady: 'Lady', hon: 'Hon', deacon: 'Deacon', deaconess: 'Deaconess',
+        bishop: 'Bishop', apostle: 'Apostle', evangelist: 'Evangelist', ven: 'Ven',
+        snr: 'Snr', bro: 'Bro', sis: 'Sis', prince: 'Prince', princess: 'Princess',
+        oba: 'Oba', alhaji: 'Alhaji', alhaja: 'Alhaja', mallam: 'Mallam', hajia: 'Hajia',
+        arc: 'Arch', arch: 'Arch', archt: 'Arch', comrade: 'Comrade', sen: 'Sen',
+        esq: 'Esq', otunba: 'Otunba', capt: 'Capt', maj: 'Maj', lt: 'Lt', col: 'Col',
+        cmdr: 'Cmdr', adm: 'Adm'
+    };
+    if (shorthand[cleaned]) return shorthand[cleaned];
+    if (!cleaned) return 'Mr';
+    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
+};
+
+export const normalizeTitleToken = (t: string): string => {
+    return (t || '').replace(/^\(|\)$/g, '').trim().toLowerCase().replace(/\.$/, '').trim();
+};
+
+export const tokenizeFullName = (fullName: string): string[] => {
+    const cleaned = (fullName || '').trim()
+        .replace(/^[\s.:,;]+/, '')
+        .replace(/\s+/g, ' ');
+    if (!cleaned) return [];
+    const tokens: string[] = [];
+    for (const word of cleaned.split(' ')) {
+        if (!word) continue;
+        const segments = word.split(/[.,;:]/);
+        for (let seg of segments) {
+            seg = (seg || '').trim();
+            if (!seg) continue;
+            if (seg.length === 1) {
+                const prev = tokens.pop();
+                tokens.push((prev ? prev + ' ' : '') + seg);
+            } else {
+                tokens.push(seg);
+            }
+        }
+    }
+    return tokens.filter(t => t && t.trim());
+};
+
+export function parseFullName(fullName: string, order: NameOrder = 'given-first'): { title: string; firstName: string; lastName: string } {
+    const empty = { title: 'Mr', firstName: '', lastName: '' };
+    if (!fullName || !fullName.trim()) return empty;
+    const tokens = tokenizeFullName(fullName);
+    if (tokens.length === 0) return empty;
+
+    const titleRuns: Array<{ start: number; end: number }> = [];
+    let i = 0;
+    while (i < tokens.length) {
+        if (KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) {
+            const start = i;
+            while (i < tokens.length && KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) i++;
+            titleRuns.push({ start, end: i });
+        } else {
+            i++;
+        }
+    }
+
+    if (titleRuns.length >= 2) {
+        const firstRun = titleRuns[0];
+        const lastRun = titleRuns[titleRuns.length - 1];
+        const title = canonicalTitle(tokens[firstRun.start]);
+        const surname = tokens.slice(firstRun.end, lastRun.start).join(' ') || tokens[0];
+        const given = tokens.slice(lastRun.end).join(' ');
+        return { title, firstName: given, lastName: surname };
+    }
+
+    if (titleRuns.length === 1) {
+        const run = titleRuns[0];
+        const title = canonicalTitle(tokens[run.start]);
+        const before = tokens.slice(0, run.start);
+        const after = tokens.slice(run.end);
+        if (run.start === 0) {
+            const firstName = after[0] || '';
+            const lastName = after.slice(1).join(' ');
+            return { title, firstName, lastName };
+        }
+        if (order === 'surname-first') {
+            const surname = before.join(' ');
+            const given = after.join(' ');
+            return { title, firstName: given, lastName: surname };
+        }
+        const firstName = before[0] || '';
+        const lastName = before.slice(1).concat(after).join(' ');
+        return { title, firstName, lastName: lastName || firstName };
+    }
+
+    if (order === 'surname-first') {
+        const surname = tokens[0];
+        const given = tokens.slice(1).join(' ');
+        return { title: 'Mr', firstName: given, lastName: surname };
+    }
+    const firstName = tokens[0];
+    const lastName = tokens.slice(1).join(' ');
+    return { title: 'Mr', firstName, lastName: lastName || firstName };
+}
+
 export const downloadJSON = (data: any, filename: string) => {
     const jsonStr = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });

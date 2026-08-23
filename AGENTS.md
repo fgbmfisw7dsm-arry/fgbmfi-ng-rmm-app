@@ -586,6 +586,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Junk-row guard:** skips `NUMBER: 45`-style data rows.
 - **Repair Imported Names (admin, ImportModule):** pastes `FULL NAME, PHONE [, DISTRICT]`, matches existing delegates by `phone_normalized` + current `first_name==file surname`, warns on already-correct/spouse-shared-phone rows, downloads a JSON backup, then updates `title/first_name/last_name/district` **in place** via `db.repairNamesFromFile` (no duplicates, attendance preserved). `db.getDelegatesByPhones` supports the candidate lookup.
 
+### 32. Existing-Row Name Normalization — Auto-Detect Scrambled Names (v1.15 / Sprint 23)
+- **Problem solved:** rows imported from surname-first files BEFORE the Sprint 22 parser landed stayed scrambled — `Achizue Engr Kenneth` still stored as title=`Mr`, first=`Achizue`, last=`Engr Kenneth`.
+- **Parser relocated** to `services/utils.ts` (`KNOWN_TITLES`, `NameOrder`, `normalizeTitleToken`, `tokenizeFullName`, `parseFullName`, new `canonicalTitle`): single source shared by ImportModule + service. `canonicalTitle` maps shorthand to the app-standard titles (`Evang/Evng→Evangelist`, `Arc/Arch/Archt→Arch`, `Pst→Pastor`, `Eld→Elder`, `Engr/Prof/Mr/Mrs/…` canonicalized).
+- **`db.autoRepairScannedNames(eventId, districtOverride?)`** — scans the event's delegates (paginated) and proposes normalization **from stored values alone (no file needed)**. Rebuilds `first_name + ' ' + last_name`, re-parses `surname-first`, and marks a record a candidate **only when all hold**: the rebuilt name contains a real title with a given-name after it, `normNameKey(parsed.lastName) === normNameKey(stored.firstName)` (stored first name was really the surname), and the parse changes something. Skips untitled rows (`Agabi Kennedy`), already-correct rows, and false positives (title-word surnames like `Justice`, portal rows). Optionally rewrites `ZONE/AREA \d+` districts to the override.
+- **Repair panel "Auto-Detect Scrambled Names" button** seeds the before/after preview from the scan; existing **Backup JSON → Apply Repairs** flow writes via `db.repairNamesFromFile`.
+- **Self-healing with duplicates:** after normalization, any previously re-imported duplicate rows share the Sprint 21 identity, so the next import or DataModule `deduplicateDelegates` merges them automatically.
+
 ## Code Conventions
 
 ### Naming

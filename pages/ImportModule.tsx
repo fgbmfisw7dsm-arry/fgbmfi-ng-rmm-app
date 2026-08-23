@@ -4,7 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -34,106 +34,6 @@ const extractBannerDistrict = (line: string): string => {
     }
     return '';
 };
-
-const KNOWN_TITLES = new Set([
-  'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
-  'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
-  'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
-  'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia',
-  'arc', 'arch', 'archt', 'comrade', 'evang', 'evng', 'pst', 'eld', 'sen',
-  'esq', 'otunba', 'capt', 'maj', 'lt', 'col', 'cmdr', 'adm'
-]);
-
-type NameOrder = 'given-first' | 'surname-first';
-
-const normalizeTitleToken = (t: string): string => {
-  return (t || '').replace(/^\(|\)$/g, '').trim().toLowerCase().replace(/\.$/, '').trim();
-};
-
-const tokenizeFullName = (fullName: string): string[] => {
-  const cleaned = (fullName || '').trim()
-    .replace(/^[\s.:,;]+/, '')
-    .replace(/\s+/g, ' ');
-  if (!cleaned) return [];
-  const tokens: string[] = [];
-  for (const word of cleaned.split(' ')) {
-    if (!word) continue;
-    const segments = word.split(/[.,;:]/);
-    for (let seg of segments) {
-      seg = (seg || '').trim();
-      if (!seg) continue;
-      if (seg.length === 1) {
-        const prev = tokens.pop();
-        tokens.push((prev ? prev + ' ' : '') + seg);
-      } else {
-        tokens.push(seg);
-      }
-    }
-  }
-  return tokens.filter(t => t && t.trim());
-};
-
-function titleForDisplay(rawToken: string): string {
-  const cleaned = (rawToken || '').replace(/^\(|\)$/g, '').replace(/\.$/, '').trim();
-  return cleaned.length > 0 ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase() : 'Mr';
-}
-
-function parseFullName(fullName: string, order: NameOrder = 'given-first'): { title: string; firstName: string; lastName: string } {
-  const empty = { title: 'Mr', firstName: '', lastName: '' };
-  if (!fullName || !fullName.trim()) return empty;
-  const tokens = tokenizeFullName(fullName);
-  if (tokens.length === 0) return empty;
-
-  const titleRuns: Array<{ start: number; end: number }> = [];
-  let i = 0;
-  while (i < tokens.length) {
-    if (KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) {
-      const start = i;
-      while (i < tokens.length && KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) i++;
-      titleRuns.push({ start, end: i });
-    } else {
-      i++;
-    }
-  }
-
-  if (titleRuns.length >= 2) {
-    const firstRun = titleRuns[0];
-    const lastRun = titleRuns[titleRuns.length - 1];
-    const title = titleForDisplay(tokens[firstRun.start]);
-    const surname = tokens.slice(firstRun.end, lastRun.start).join(' ') || tokens[0];
-    const given = tokens.slice(lastRun.end).join(' ');
-    return { title, firstName: given, lastName: surname };
-  }
-
-  if (titleRuns.length === 1) {
-    const run = titleRuns[0];
-    const title = titleForDisplay(tokens[run.start]);
-    const before = tokens.slice(0, run.start);
-    const after = tokens.slice(run.end);
-    if (run.start === 0) {
-      const firstName = after[0] || '';
-      const lastName = after.slice(1).join(' ');
-      return { title, firstName, lastName };
-    }
-    if (order === 'surname-first') {
-      const surname = before.join(' ');
-      const given = after.join(' ');
-      return { title, firstName: given, lastName: surname };
-    }
-    const firstName = before[0] || '';
-    const lastName = before.slice(1).concat(after).join(' ');
-    return { title, firstName, lastName: lastName || firstName };
-  }
-
-  if (order === 'surname-first') {
-    const surname = tokens[0];
-    const given = tokens.slice(1).join(' ');
-    return { title: 'Mr', firstName: given, lastName: surname };
-  }
-  const firstName = tokens[0];
-  const lastName = tokens.slice(1).join(' ');
-  return { title: 'Mr', firstName, lastName: lastName || firstName };
-}
 
 function normalizeDelegateType(raw: string): string {
   const t = (raw || '').trim().toUpperCase().replace(/[_\-\s]+/g, ' ');
@@ -738,6 +638,26 @@ const ImportModule = () => {
         }
     };
 
+    const handleRepairAutoDetect = async () => {
+        if (!activeEventId) return;
+        setRepairLoading(true);
+        setRepairResult(null);
+        setRepairItems([]);
+        try {
+            const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
+            setRepairItems(items);
+            setRepairResult({
+                type: 'preview',
+                count: items.length,
+                msg: `Scanned the active event — ${items.length} existing record${items.length === 1 ? '' : 's'} with a trapped title can be normalized with the correct Title / First / Last naming.`
+            });
+        } catch (e: any) {
+            setRepairResult({ type: 'error', count: 0, msg: e.message });
+        } finally {
+            setRepairLoading(false);
+        }
+    };
+
     const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
     const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
     const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
@@ -1005,8 +925,20 @@ const ImportModule = () => {
                             </p>
                         </div>
                     </div>
+                    <div className="mb-3">
+                        <button
+                            onClick={handleRepairAutoDetect}
+                            disabled={repairLoading || !activeEventId}
+                            className="px-4 py-2 bg-amber-800 hover:bg-amber-700 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50 shadow"
+                        >
+                            {repairLoading ? 'SCANNING...' : 'Auto-Detect Scrambled Names (no pasting needed)'}
+                        </button>
+                        <p className="text-[7px] font-bold text-amber-600 uppercase mt-1">
+                            Scans existing records in the active event and proposes normalization only where a real title is trapped in the Last Name field (safe: skips already-correct and ambiguous rows).
+                        </p>
+                    </div>
                     <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
-                        Paste one row per line: FULL NAME, PHONE (optional: , DISTRICT)
+                        OR paste one row per line: FULL NAME, PHONE (optional: , DISTRICT)
                     </p>
                     <textarea
                         className="w-full h-28 p-4 border-2 border-amber-200 rounded-xl bg-white font-mono text-xs focus:ring-4 focus:ring-amber-500/10 outline-none transition-all resize-none"
