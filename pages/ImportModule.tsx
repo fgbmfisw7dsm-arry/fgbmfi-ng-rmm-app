@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.24 · repair event picker';
+const IMPORT_BUILD_LABEL = 'v1.25 · reuse top file';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -596,7 +596,7 @@ const ImportModule = () => {
     };
 
     const analyzeRepairCsv = async (order: NameOrder, eventId: string): Promise<{ items: any[]; parsedCount: number; banner: string; headerDesc: string | null; rowsDroppedNoPhone: number }> => {
-        const { parsedRows, banner, headerDesc } = extractRepairRows(repairCsv, order);
+        const { parsedRows, banner, headerDesc } = extractRepairRows(repairSourceCsv, order);
         const districtDefault = banner;
         const phones = Array.from(new Set(parsedRows.map(r => r.phone))).filter(Boolean);
         const realParsed = parsedRows.filter(r => r.phone);
@@ -643,9 +643,9 @@ const ImportModule = () => {
 
     const handleRepairAnalyze = async () => {
         if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
-        const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
+        const lines = repairSourceCsv.split('\n').map(l => l.trim()).filter(Boolean);
         if (lines.length === 0) {
-            setRepairResult({ type: 'preview', count: 0, msg: 'Paste or upload FULL NAME, PHONE rows first, or use Auto-Detect below.' });
+            setRepairResult({ type: 'preview', count: 0, msg: 'Paste or upload FULL NAME, PHONE rows (or load the CSV in the Bulk Delegate Import section above), then analyze.' });
             return;
         }
         setRepairLoading(true);
@@ -682,7 +682,7 @@ const ImportModule = () => {
         setRepairItems([]);
         try {
             const evtName = targetEventName;
-            const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
+            const hasFile = repairHasFile;
             if (hasFile) {
                 const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder, targetEventId);
                 const actionable = items.filter(i => !i.skip && i.delegate_id);
@@ -766,7 +766,7 @@ const ImportModule = () => {
         try {
             let items: any[] = repairItems;
             if (!items.some((i: any) => !i.skip && i.delegate_id)) {
-                const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
+const hasFile = repairHasFile;
                 if (hasFile) {
                     const r = await analyzeRepairCsv(repairOrder, targetEventId);
                     items = r.items;
@@ -792,11 +792,14 @@ const ImportModule = () => {
     const targetEvent = events.find((e: any) => e.event_id === targetEventId) || activeEvent || null;
     const targetEventName = targetEvent?.name || 'the selected event';
 
+    const repairSourceCsv = repairCsv.trim() ? repairCsv : csv;
+    const repairHasFile = repairSourceCsv.trim().split('\n').map(l => l.trim()).filter(Boolean).length > 0;
+
     const repairFilePreview = (() => {
-      const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = repairSourceCsv.split('\n').map(l => l.trim()).filter(Boolean);
       if (lines.length === 0) return null;
-      const { parsedRows, banner, headerDesc } = extractRepairRows(repairCsv, repairOrder);
-      return { rows: parsedRows.slice(0, 3), banner, headerDesc, total: parsedRows.length };
+      const { parsedRows, banner, headerDesc } = extractRepairRows(repairSourceCsv, repairOrder);
+      return { rows: parsedRows.slice(0, 3), banner, headerDesc, total: parsedRows.length, fromTopImport: !repairCsv.trim() && !!csv.trim() };
     })();
 
     return (
@@ -1138,7 +1141,7 @@ const ImportModule = () => {
                     {repairFilePreview && (
                         <div className="mt-2 bg-white rounded-xl border border-amber-100 p-2">
                             <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
-                                {repairFilePreview.headerDesc || 'No header detected — using col0=FULL NAME, col1=PHONE'} · {repairFilePreview.total} rows read{repairFilePreview.banner ? ` · banner/district: ${repairFilePreview.banner}` : ''}
+                                {repairFilePreview.fromTopImport ? 'Using the file from the Bulk Delegate Import section above' : repairFilePreview.headerDesc || 'No header detected — using col0=FULL NAME, col1=PHONE'} · {repairFilePreview.total} rows read{repairFilePreview.banner ? ` · banner/district: ${repairFilePreview.banner}` : ''}
                             </p>
                             <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 font-mono text-[8px] text-gray-600">
                                 {repairFilePreview.rows.map((r, i) => (
@@ -1153,7 +1156,7 @@ const ImportModule = () => {
                     <div className="flex flex-wrap gap-2 mt-3">
                         <button
                             onClick={handleRepairAnalyze}
-                            disabled={repairLoading || !targetEventId || !repairCsv.trim()}
+                            disabled={repairLoading || !targetEventId || !repairSourceCsv.trim()}
                             className="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
                             {repairLoading ? 'ANALYZING...' : '1. Analyze'}
