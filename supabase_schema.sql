@@ -35,11 +35,65 @@ CREATE TABLE IF NOT EXISTS delegates (
     room_number TEXT,
     delegate_type TEXT DEFAULT 'Member',
     qr_hash TEXT NOT NULL,
+    phone_normalized TEXT,
+    title_key TEXT,
+    name_first_key TEXT,
+    name_last_key TEXT,
     event_id UUID REFERENCES events(event_id) ON DELETE SET NULL,
     external_id TEXT,
     registration_source TEXT DEFAULT 'import' CHECK (registration_source IN ('import', 'manual', 'qr_scan')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ---- Delegate identity normalization (Sprint 21 zero-tolerance dedup) ----
+-- Canonical identity: (event, title_key, name_first_key, name_last_key, phone_normalized).
+-- TITLE is part of the identity -> "Mr A" and "Mrs A" sharing phone+email are distinct.
+CREATE OR REPLACE FUNCTION normalize_phone_sql(p_phone TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE
+AS $fn$
+  SELECT NULLIF(
+    CASE
+      WHEN NULLIF(TRIM(COALESCE(p_phone, '')), '') IS NULL THEN ''
+      ELSE (
+        WITH d AS (
+          SELECT regexp_replace(regexp_replace(TRIM(COALESCE(p_phone, '')), '[^0-9]', '', 'g'), '^00', '') AS x
+        )
+        SELECT CASE
+          WHEN x LIKE '234%' AND length(x) > 10 THEN '0' || substring(x FROM 4)
+          WHEN length(x) = 11 AND x LIKE '0%' THEN x
+          WHEN length(x) = 10 AND substring(x, 1, 1) <> '0' THEN '0' || x
+          ELSE x
+        END FROM d
+      )
+    END, ''
+  );
+$fn$;
+
+CREATE OR REPLACE FUNCTION normalize_name_key(p_text TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE
+AS $fn$
+  SELECT regexp_replace(regexp_replace(upper(trim(COALESCE(p_text, ''))), '\s+', ' ', 'g'), '[^A-Z0-9 ]', '', 'g');
+$fn$;
+
+CREATE OR REPLACE FUNCTION delegates_identity_norm_trigger()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $fn$
+BEGIN
+  NEW.phone_normalized := normalize_phone_sql(NEW.phone);
+  NEW.title_key := normalize_name_key(COALESCE(NULLIF(TRIM(NEW.title), ''), 'Mr'));
+  NEW.name_first_key := normalize_name_key(NEW.first_name);
+  NEW.name_last_key := normalize_name_key(NEW.last_name);
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_delegates_identity_norm ON delegates;
+CREATE TRIGGER trg_delegates_identity_norm
+BEFORE INSERT OR UPDATE OF title, first_name, last_name, phone ON delegates
+FOR EACH ROW EXECUTE FUNCTION delegates_identity_norm_trigger();
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -645,6 +699,21 @@ CREATE INDEX IF NOT EXISTS idx_delegates_external_id ON delegates(external_id) W
 DROP INDEX IF EXISTS idx_delegates_qr_hash;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_delegates_qr_hash ON delegates(qr_hash);
 
+-- Zero-tolerance backstop (Sprint 21): one person = one row. Enforced for every
+-- identified delegate (phone present). Rows without a phone cannot be reliably
+-- identified and are exempted (handled by the merging/email fallback).
+-- NOTE for existing databases: create this ONLY after running the Spring 21
+-- cleanup migration (supabase_migration_sprint21_dedup_cleanup.sql) has merged
+-- current duplicates — creation fails while duplicates exist.
+DROP INDEX IF EXISTS idx_delegates_same_person;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_delegates_same_person ON delegates(
+  event_id,
+  title_key,
+  name_first_key,
+  name_last_key,
+  COALESCE(phone_normalized, '')
+) WHERE NULLIF(phone_normalized, '') IS NOT NULL;
+
 -- 6. CHAPTERS TABLE (District-linked chapter registry)
 CREATE TABLE IF NOT EXISTS chapters (
     chapter_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -878,9 +947,12 @@ END;
 $func$;
 
 -- Bulk import delegates with per-event dedup merge (insert + gap-fill update)
+-- Sprint 21: matches on canonical identity (event, title_key, name_first_key,
+-- name_last_key, phone_normalized) with email fallback when phone is blank.
 CREATE OR REPLACE FUNCTION import_delegates_batch_merge(p_delegates JSONB, p_event_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions
 AS $func$
 DECLARE
   v_inserted INT := 0;
@@ -889,39 +961,102 @@ DECLARE
   v_item JSONB;
   v_existing_id UUID;
   v_rows_affected INT;
+  v_phone_norm TEXT;
+  v_title_key TEXT;
+  v_first_key TEXT;
+  v_last_key TEXT;
+  v_email_lower TEXT;
 BEGIN
+  IF NOT (is_admin_user() OR is_event_admin_user()) THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator or event administrator privileges required';
+  END IF;
+
   FOR v_item IN SELECT * FROM JSONB_ARRAY_ELEMENTS(p_delegates)
   LOOP
-    SELECT delegate_id INTO v_existing_id
-    FROM delegates
-    WHERE event_id = p_event_id
-      AND UPPER(TRIM(first_name)) = UPPER(TRIM(v_item->>'first_name'))
-      AND UPPER(TRIM(last_name)) = UPPER(TRIM(v_item->>'last_name'))
-      AND COALESCE(phone, '') = COALESCE(TRIM(v_item->>'phone'), '')
-    LIMIT 1;
+    v_phone_norm := normalize_phone_sql(v_item->>'phone');
+    v_title_key := normalize_name_key(COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'));
+    v_first_key := normalize_name_key(v_item->>'first_name');
+    v_last_key := normalize_name_key(v_item->>'last_name');
+    v_email_lower := LOWER(TRIM(COALESCE(v_item->>'email', '')));
+
+    v_existing_id := NULL;
+    IF NULLIF(v_phone_norm, '') IS NOT NULL THEN
+      SELECT delegate_id INTO v_existing_id
+      FROM delegates
+      WHERE event_id = p_event_id
+        AND title_key = v_title_key
+        AND name_first_key = v_first_key
+        AND name_last_key = v_last_key
+        AND NULLIF(phone_normalized, '') IS NOT NULL
+        AND phone_normalized = v_phone_norm
+      LIMIT 1;
+    ELSIF v_email_lower <> '' THEN
+      SELECT delegate_id INTO v_existing_id
+      FROM delegates
+      WHERE event_id = p_event_id
+        AND title_key = v_title_key
+        AND name_first_key = v_first_key
+        AND name_last_key = v_last_key
+        AND NULLIF(email, '') IS NOT NULL
+        AND LOWER(TRIM(email)) = v_email_lower
+      LIMIT 1;
+    END IF;
 
     IF v_existing_id IS NULL THEN
-      INSERT INTO delegates (
-        title, first_name, last_name, district, chapter,
-        phone, email, rank, office, delegate_type,
-        qr_hash, event_id, registration_source, external_id
-      ) VALUES (
-        COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'),
-        TRIM(v_item->>'first_name'),
-        TRIM(v_item->>'last_name'),
-        TRIM(v_item->>'district'),
-        TRIM(v_item->>'chapter'),
-        TRIM(v_item->>'phone'),
-        LOWER(TRIM(v_item->>'email')),
-        COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), 'CP'),
-        COALESCE(NULLIF(TRIM(v_item->>'office'), ''), 'OTHER'),
-        COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), 'Member'),
-        COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
-        p_event_id,
-        COALESCE(v_item->>'registration_source', 'import'),
-        COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'))
-      );
-      v_inserted := v_inserted + 1;
+      BEGIN
+        INSERT INTO delegates (
+          title, first_name, last_name, district, chapter,
+          phone, email, rank, office, delegate_type,
+          qr_hash, event_id, registration_source, external_id
+        ) VALUES (
+          COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'),
+          TRIM(v_item->>'first_name'),
+          TRIM(v_item->>'last_name'),
+          TRIM(v_item->>'district'),
+          TRIM(v_item->>'chapter'),
+          v_phone_norm,
+          LOWER(TRIM(v_item->>'email')),
+          COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), 'CP'),
+          COALESCE(NULLIF(TRIM(v_item->>'office'), ''), 'OTHER'),
+          COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), 'Member'),
+          COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
+          p_event_id,
+          COALESCE(v_item->>'registration_source', 'import'),
+          COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'))
+        );
+        v_inserted := v_inserted + 1;
+      EXCEPTION WHEN unique_violation THEN
+        SELECT delegate_id INTO v_existing_id
+        FROM delegates
+        WHERE event_id = p_event_id
+          AND title_key = v_title_key
+          AND name_first_key = v_first_key
+          AND name_last_key = v_last_key
+          AND COALESCE(phone_normalized, '') = COALESCE(v_phone_norm, '')
+        LIMIT 1;
+        IF v_existing_id IS NOT NULL THEN
+          UPDATE delegates SET
+            title = CASE WHEN COALESCE(NULLIF(TRIM(delegates.title), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'title'), ''), '') <> '' THEN TRIM(v_item->>'title') ELSE delegates.title END,
+            email = CASE WHEN COALESCE(NULLIF(TRIM(delegates.email), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'email'), ''), '') <> '' THEN LOWER(TRIM(v_item->>'email')) ELSE delegates.email END,
+            district = CASE WHEN COALESCE(NULLIF(TRIM(delegates.district), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'district'), ''), '') <> '' THEN TRIM(v_item->>'district') ELSE delegates.district END,
+            chapter = CASE WHEN COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') <> '' THEN TRIM(v_item->>'chapter') ELSE delegates.chapter END,
+            rank = CASE WHEN COALESCE(NULLIF(TRIM(delegates.rank), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), '') <> '' THEN TRIM(v_item->>'rank') ELSE delegates.rank END,
+            office = CASE WHEN COALESCE(NULLIF(TRIM(delegates.office), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'office'), ''), '') <> '' THEN TRIM(v_item->>'office') ELSE delegates.office END,
+            delegate_type = CASE
+              WHEN TRIM(COALESCE(v_item->>'delegate_type', '')) IN ('National Guest', 'Free Guest', 'International')
+                AND COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') <> TRIM(v_item->>'delegate_type')
+                THEN TRIM(v_item->>'delegate_type')
+              WHEN COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), '') <> '' THEN TRIM(v_item->>'delegate_type')
+              ELSE delegates.delegate_type END,
+            phone = CASE WHEN NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm THEN v_phone_norm ELSE delegates.phone END,
+            external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END
+          WHERE delegate_id = v_existing_id;
+          GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+          IF v_rows_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
+        ELSE
+          v_skipped := v_skipped + 1;
+        END IF;
+      END;
     ELSE
       UPDATE delegates SET
         title = CASE WHEN COALESCE(NULLIF(TRIM(delegates.title), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'title'), ''), '') <> '' THEN TRIM(v_item->>'title') ELSE delegates.title END,
@@ -936,6 +1071,10 @@ BEGIN
             THEN TRIM(v_item->>'delegate_type')
           WHEN COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), '') <> '' THEN TRIM(v_item->>'delegate_type')
           ELSE delegates.delegate_type END,
+        phone = CASE
+          WHEN NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm
+            THEN v_phone_norm
+          ELSE delegates.phone END,
         external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END
       WHERE delegate_id = v_existing_id
         AND (
@@ -949,6 +1088,7 @@ BEGIN
           OR (TRIM(COALESCE(v_item->>'delegate_type', '')) IN ('National Guest', 'Free Guest', 'International')
               AND COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') <> TRIM(v_item->>'delegate_type'))
           OR (COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '')
+          OR (NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm AND delegates.phone <> v_phone_norm)
         );
       GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
       IF v_rows_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;

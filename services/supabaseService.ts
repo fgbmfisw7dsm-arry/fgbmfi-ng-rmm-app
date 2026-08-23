@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateQrHash, generateRegId } from './utils';
+import { generateQrHash, generateRegId, normalizePhone } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -10,6 +10,8 @@ import { createClient } from '@supabase/supabase-js';
 const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
+
+const normNameKey = (val?: string) => (val || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
 
 const cleanDistrict = (raw: string): string => {
   const trimmed = (raw || '').trim();
@@ -972,13 +974,32 @@ export const db = {
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
         if (!delegate.event_id) throw new Error('registerDelegate requires event_id');
+        const payload = { ...delegate, phone: normalizePhone(delegate.phone || '') };
+        if (payload.phone) {
+            const { data: candidates } = await supabase.from('delegates')
+                .select('delegate_id, title, first_name, last_name, phone')
+                .eq('event_id', payload.event_id)
+                .eq('first_name', payload.first_name)
+                .eq('last_name', payload.last_name)
+                .limit(25);
+            const dup = (candidates || []).find(r =>
+                normNameKey(r.title) === normNameKey(payload.title || 'Mr') &&
+                normalizePhone(r.phone) === payload.phone
+            );
+            if (dup) throw new Error('A delegate with this name and phone already exists for this event.');
+        }
         const { data, error } = await supabase.from('delegates').insert({
-            ...delegate,
-            qr_hash: delegate.qr_hash || generateQrHash(),
-            external_id: delegate.external_id || generateRegId(),
-            registration_source: delegate.registration_source || 'manual'
+            ...payload,
+            qr_hash: payload.qr_hash || generateQrHash(),
+            external_id: payload.external_id || generateRegId(),
+            registration_source: payload.registration_source || 'manual'
         }).select().single();
-        if (error) throw error;
+        if (error) {
+            if (error.code === '23505' || error.message?.includes('duplicate')) {
+                throw new Error('A delegate with this name and phone already exists for this event.');
+            }
+            throw error;
+        }
         return data;
     },
 
@@ -1090,13 +1111,41 @@ export const db = {
                         const { error } = await supabase.from('delegates').insert(rec);
                         if (error) {
                             if (error.code === '23505' || error.message?.includes('duplicate')) {
-                                const { data: existing } = await supabase.from('delegates')
-                                    .select('delegate_id, title, email, district, chapter, rank, office, delegate_type, external_id')
-                                    .eq('event_id', eventId)
-                                    .eq('first_name', rec.first_name)
-                                    .eq('last_name', rec.last_name)
-                                    .eq('phone', rec.phone)
-                                    .maybeSingle();
+                                const recPhone = normalizePhone(rec.phone || '');
+                                const recTitle = normNameKey(rec.title || 'Mr');
+                                const recFirst = normNameKey(rec.first_name);
+                                const recLast = normNameKey(rec.last_name);
+                                const recEmail = (rec.email || '').trim().toLowerCase();
+
+                                let candidates: any[] = [];
+                                if (recPhone) {
+                                    const { data: byPhone } = await supabase.from('delegates')
+                                        .select('delegate_id, title, email, district, chapter, rank, office, delegate_type, external_id, first_name, last_name, phone')
+                                        .eq('event_id', eventId)
+                                        .eq('phone_normalized', recPhone)
+                                        .limit(25);
+                                    candidates = byPhone || [];
+                                } else {
+                                    const { data: broad } = await supabase.from('delegates')
+                                        .select('delegate_id, title, email, district, chapter, rank, office, delegate_type, external_id, first_name, last_name, phone')
+                                        .eq('event_id', eventId)
+                                        .limit(200);
+                                    candidates = (broad || []).filter(r =>
+                                        normNameKey(r.first_name) === recFirst &&
+                                        normNameKey(r.last_name) === recLast &&
+                                        normNameKey(r.title || 'Mr') === recTitle &&
+                                        (r.email || '').trim().toLowerCase() === recEmail
+                                    );
+                                }
+
+                                const existing = recPhone
+                                    ? (candidates || []).find(r =>
+                                        normNameKey(r.first_name) === recFirst &&
+                                        normNameKey(r.last_name) === recLast &&
+                                        normNameKey(r.title || 'Mr') === recTitle
+                                      )
+                                    : (candidates || [])[0];
+
                                 if (existing) {
                                     const updates: Record<string, string> = {};
                                     if (!existing.title?.trim() && rec.title?.trim()) updates.title = rec.title;
@@ -1108,6 +1157,7 @@ export const db = {
                                     if (!existing.delegate_type?.trim() && rec.delegate_type?.trim()) updates.delegate_type = rec.delegate_type;
                                     else if (['National Guest', 'Free Guest', 'International'].includes(rec.delegate_type || '') && existing.delegate_type !== rec.delegate_type) updates.delegate_type = rec.delegate_type || '';
                                     if (!existing.external_id?.trim() && rec.external_id?.trim()) updates.external_id = rec.external_id;
+                                    if (!existing.phone?.trim() && rec.phone?.trim()) updates.phone = rec.phone;
                                     if (Object.keys(updates).length > 0) {
                                         await supabase.from('delegates').update(updates).eq('delegate_id', existing.delegate_id);
                                         updated++;
@@ -1713,14 +1763,66 @@ export const db = {
             from += 1000;
         }
         if (all.length === 0) return 0;
-        const seen = new Set();
-        const dups = [];
+
+        const identityKey = (d: any) => {
+            const phoneNorm = normalizePhone(d.phone || '');
+            if (phoneNorm) return `P:${phoneNorm}`;
+            const emailLower = (d.email || '').trim().toLowerCase();
+            return emailLower ? `E:${emailLower}` : '';
+        };
+
+        const groups = new Map<string, any[]>();
         for (const d of all) {
-            const key = `${normalize(d.first_name)}|${normalize(d.last_name)}|${normalize(d.phone)}`.toUpperCase();
-            if (seen.has(key)) dups.push(d.delegate_id); else seen.add(key);
+            const idKey = identityKey(d);
+            if (!idKey) continue;
+            const key = `${d.event_id}|${normNameKey(d.title || 'Mr')}|${normNameKey(d.first_name)}|${normNameKey(d.last_name)}|${idKey}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(d);
         }
-        if (dups.length > 0) await supabase.from('delegates').delete().in('delegate_id', dups);
-        return dups.length;
+
+        const completeness = (d: any) =>
+            [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
+                .filter(v => v && String(v).trim()).length;
+
+        let merged = 0;
+        for (const members of groups.values()) {
+            if (members.length < 2) continue;
+            members.sort((a, b) => (completeness(b) - completeness(a)) || ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
+            const survivor = members[0];
+            for (const dup of members.slice(1)) {
+                try {
+                    const { data: survCheckins } = await supabase.from('checkins').select('session_id').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
+                    const survSessions = new Set((survCheckins || []).map(c => c.session_id ?? '__ARRIVAL__'));
+                    const { data: dupCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                    for (const c of (dupCheckins || [])) {
+                        const key = c.session_id ?? '__ARRIVAL__';
+                        if (survSessions.has(key)) {
+                            await supabase.from('checkins').delete().eq('checkin_id', c.checkin_id);
+                        } else {
+                            await supabase.from('checkins').update({ delegate_id: survivor.delegate_id }).eq('checkin_id', c.checkin_id);
+                        }
+                    }
+
+                    const { data: survResp } = await supabase.from('session_responses').select('session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
+                    const survRespKeys = new Set((survResp || []).map(x => `${x.session_id}|${x.response_type}`));
+                    const { data: dupResp } = await supabase.from('session_responses').select('response_id, session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                    for (const x of (dupResp || [])) {
+                        if (survRespKeys.has(`${x.session_id}|${x.response_type}`)) {
+                            await supabase.from('session_responses').delete().eq('response_id', x.response_id);
+                        } else {
+                            await supabase.from('session_responses').update({ delegate_id: survivor.delegate_id }).eq('response_id', x.response_id);
+                        }
+                    }
+
+                    await supabase.from('badge_print_logs').update({ delegate_id: survivor.delegate_id }).eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                    await supabase.from('delegates').delete().eq('delegate_id', dup.delegate_id);
+                    merged++;
+                } catch (e) {
+                    console.error('[deduplicateDelegates] merge failed for', dup.delegate_id, e);
+                }
+            }
+        }
+        return merged;
     },
 
     regenerateQrHash: async (delegateId: string): Promise<string> => {
