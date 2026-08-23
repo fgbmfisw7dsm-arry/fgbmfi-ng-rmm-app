@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.27 · clear titles + no-contact dedup';
+const IMPORT_BUILD_LABEL = 'v1.28 · district zone fix';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -366,7 +366,9 @@ const ImportModule = () => {
         }
 
         let districtBefore = pickRowValue(values, districtIndices);
-        if (effectiveBanner && /^(ZONE|AREA)\s*\d+$/i.test(districtBefore)) districtBefore = '';
+        if (effectiveBanner && /^(?:ZONE|AREA)\s*\d+$/i.test(districtBefore)) districtBefore = '';
+        else if (effectiveBanner && /^\d+$/i.test(districtBefore)) districtBefore = '';
+        else if (effectiveBanner && /^[A-Z]{2}\d+(?:-\d+)?$/i.test(districtBefore)) districtBefore = '';
         if (!districtBefore && effectiveBanner) statsRef.current.bannerUsed++;
         const resolvedDistrict = resolveDistrictShortCode(districtBefore || effectiveBanner);
         if (districtBefore && resolvedDistrict && resolvedDistrict !== stripDistrictSuffix(districtBefore)) statsRef.current.shortCodesResolved++;
