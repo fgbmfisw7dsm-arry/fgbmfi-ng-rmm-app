@@ -106,8 +106,7 @@ BEGIN
           COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
           p_event_id,
           COALESCE(v_item->>'registration_source', 'import'),
-          COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''),
-'))
+          COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'))
         );
         v_inserted := v_inserted + 1;
       EXCEPTION WHEN unique_violation THEN
