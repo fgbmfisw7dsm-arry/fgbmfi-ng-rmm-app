@@ -35,6 +35,26 @@ export const REGION_PREFIXES: Record<string, string> = {
     'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
 };
 
+export const districtAliasKey = (v?: string | null): string =>
+    (v || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
+
+// Explicit district aliases: labels used in source CSVs that must resolve to
+// an official FGBMFI district. Extend here as new state/zone labels appear.
+export const DISTRICT_ALIASES: Record<string, string> = {
+    'ANAMBRA': 'South East 1',
+};
+
+// Resolves a district value to its official name. Handles the region short
+// codes (NC1, SW 2, ...) INCLUDING the 'D' variant used in some manual-reg
+// files (SED 1 -> South East 1), plus explicit aliases (Anambra -> South East 1).
+export const resolveDistrictAlias = (raw?: string | null): string | null => {
+    const key = districtAliasKey(raw || '');
+    if (!key) return null;
+    const match = key.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
+    if (match) return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+    return DISTRICT_ALIASES[key] || null;
+};
+
 export const resolveDistrictShortCode = (raw?: string | null): string => {
     const trimmed = (raw || '').trim();
     let v = trimmed;
@@ -45,9 +65,11 @@ export const resolveDistrictShortCode = (raw?: string | null): string => {
         if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) v = prefix.toUpperCase();
     }
     const cleaned = v.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
-    if (!match) return trimmed;
-    return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
+    if (match) return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+    const alias = DISTRICT_ALIASES[districtAliasKey(trimmed)];
+    if (alias) return alias;
+    return trimmed;
 };
 
 export const normalizePhone = (raw?: string | null): string => {

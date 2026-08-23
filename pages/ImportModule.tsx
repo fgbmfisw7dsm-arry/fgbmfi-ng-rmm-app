@@ -97,7 +97,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.30 · import junk guard v2 (note rows)';
+const IMPORT_BUILD_LABEL = 'v1.31 · district aliases (SED 1 / Anambra → South East 1)';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);

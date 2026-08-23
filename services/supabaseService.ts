@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -1444,8 +1444,9 @@ export const db = {
           if (!d) return false;
           if (officialDistricts.has(d)) return true;
           const abbr = d.replace(/[^A-Z0-9]/g, '');
-          if (/^(NC|NE|NW|SE|SS|SW)\d+$/.test(abbr)) return true;
+          if (/^(NC|NE|NW|SE|SS|SW)D?\d+$/.test(abbr)) return true;
           if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
+          if (resolveDistrictAlias(dist)) return true;
           return false;
         }
         const scrambledIds: string[] = [];
@@ -1588,8 +1589,9 @@ export const db = {
             if (!d) return false;
             if (officialDistricts.has(d)) return true;
             const abbr = d.replace(/[^A-Z0-9]/g, '');
-            if (/^(NC|NE|NW|SE|SS|SW)\d+$/.test(abbr)) return true;
+            if (/^(NC|NE|NW|SE|SS|SW)D?\d+$/.test(abbr)) return true;
             if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
+            if (resolveDistrictAlias(dist)) return true;
             return false;
         }
 
@@ -1723,7 +1725,7 @@ export const db = {
                     const raw = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
                     if (!raw) continue;
                     const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+                    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
                     if (!match) continue;
                     const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
                     let resolved = official.find((o: string) => o.toUpperCase() === fullName.toUpperCase());
@@ -1769,7 +1771,7 @@ export const db = {
         };
         const resolveAbbreviation = (abbreviated: string, officialList: string[]): string | null => {
             const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
             if (!match) return null;
             const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
             const exact = officialList.find(o => o.toUpperCase() === fullName.toUpperCase());
@@ -1808,8 +1810,17 @@ export const db = {
         const tryResolve = (abbreviated: string): string | null => {
             let result = resolveAbbreviation(abbreviated, official);
             if (result) return result;
+            const alias = resolveDistrictAlias(abbreviated);
+            if (alias) {
+                if (!autoRegistered.has(alias)) {
+                    official.push(alias);
+                    autoRegistered.add(alias);
+                    console.log(`[harmonizeDistricts] ALIAS-REGISTERED: "${abbreviated}" → "${alias}"`);
+                }
+                return alias;
+            }
             const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)(\d+)$/);
+            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
             if (!match) return null;
             const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
             if (!autoRegistered.has(fullName)) {
