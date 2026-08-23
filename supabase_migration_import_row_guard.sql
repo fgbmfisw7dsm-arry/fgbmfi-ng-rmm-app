@@ -42,8 +42,10 @@ BEGIN
 
   FOR v_item IN SELECT * FROM JSONB_ARRAY_ELEMENTS(p_delegates)
   LOOP
-    -- Row-quality guard: skip blank / purely-numeric / junk rows so they can
-    -- never be inserted or gap-fill a real record.
+    -- Row-quality guard (v2): skip blank / purely-numeric / numeric-leading /
+    -- '='/<> = laced / summary-note-token rows so they can never be inserted
+    -- or gap-fill a real record. Catches manual-reg trailer notes such as
+    -- '7. Batch 3 S/N 85C... marked as CAT=C.' and 'Combined = 306 records.'.
     IF (
       TRIM(COALESCE(v_item->>'first_name','')) = ''
       AND TRIM(COALESCE(v_item->>'last_name','')) = ''
@@ -56,6 +58,12 @@ BEGIN
       TRIM(COALESCE(v_item->>'last_name','')) <> ''
       AND TRIM(v_item->>'last_name') !~ '[A-Za-z]'
     )
+    OR TRIM(COALESCE(v_item->>'first_name','')) ~ '^\d'
+    OR TRIM(COALESCE(v_item->>'last_name','')) ~ '^\d'
+    OR TRIM(COALESCE(v_item->>'first_name','')) ~ '[=<>]'
+    OR TRIM(COALESCE(v_item->>'last_name','')) ~ '[=<>]'
+    OR (UPPER(TRIM(COALESCE(v_item->>'first_name',''))) || ' ' || UPPER(TRIM(COALESCE(v_item->>'last_name',''))))
+       ~ '(GRAND TOTAL|ZONE SUMMARY|REGISTRATION RECORDS|SUBTOTAL|SOURCE:|MARKED AS|PER NOTES|AS AT|DATE OF BIRTH|RECORDS|NOTES:|NAIRA|DELIVERABLES|SUMMARY|BATCH |ADULTS|TEENS|CHILDREN|TOTAL|CAT=)'
     THEN
       v_skipped := v_skipped + 1;
       CONTINUE;

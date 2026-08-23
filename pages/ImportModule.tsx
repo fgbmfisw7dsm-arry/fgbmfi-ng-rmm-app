@@ -77,6 +77,14 @@ const junkRowReason = (first?: string, last?: string): string | null => {
   const l = normCell(last || '');
   if (!f && !l) return 'no name';
   if ((f && !hasAlpha(f)) || (l && !hasAlpha(l))) return 'numeric/blank name';
+  if (/^\d/.test(f) || /^\d/.test(l)) return 'numeric-leading name (note row)';
+  if (/[=<>]/.test(f) || /[=<>]/.test(l)) return 'note/summary fragment';
+  const fu = f.toUpperCase();
+  const lu = l.toUpperCase();
+  const tokens = ['GRAND TOTAL', 'ZONE SUMMARY', 'REGISTRATION RECORDS', 'SUBTOTAL', 'SOURCE:', 'MARKED AS', 'PER NOTES', 'AS AT', 'DATE OF BIRTH', 'RECORDS', 'NOTES:', 'NAIRA', 'DELIVERABLES', 'SUMMARY', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'CAT='];
+  for (const t of tokens) {
+    if (fu.includes(t) || lu.includes(t)) return `summary/note token: ${t}`;
+  }
   return null;
 };
 
@@ -89,7 +97,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.29 · import junk-row guard + preview';
+const IMPORT_BUILD_LABEL = 'v1.30 · import junk guard v2 (note rows)';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);

@@ -1105,16 +1105,12 @@ export const db = {
 
     importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
-        const hasAlpha = (s: string): boolean => /[A-Za-z]/.test(s || '');
         const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
             const last = (p[3] || '').trim();
-            if (!first && !last) return false;
-            if (first && !hasAlpha(first)) return false;
-            if (last && !hasAlpha(last)) return false;
             const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
             if (/^(GRAND TOTAL|SUBTOTAL|SUB TOTAL|TOTAL|SUMMARY|ZONE SUMMARY|REGISTRATION RECORDS|NOTES:|BATCH [1-5])/.test(firstCell)) return false;
-            return true;
+            return db.junkReasonOf({ first_name: first, last_name: last }) === null;
         });
         const BATCH_SIZE = 500;
         let inserted = 0;
@@ -1484,17 +1480,19 @@ export const db = {
     },
 
     junkReasonOf: (d: { first_name?: string; last_name?: string }): string | null => {
-        const f = (d.first_name || '').trim().toUpperCase();
-        const l = (d.last_name || '').trim().toUpperCase();
-        const blank = !(d.first_name || '').trim() && !(d.last_name || '').trim();
-        const nonAlphaF = (d.first_name || '').trim() && !/[A-Za-z]/.test(d.first_name || '');
-        const nonAlphaL = (d.last_name || '').trim() && !/[A-Za-z]/.test(d.last_name || '');
+        const f = (d.first_name || '').trim();
+        const l = (d.last_name || '').trim();
+        const blank = !f && !l;
         if (blank) return 'no name';
-        if (nonAlphaF || nonAlphaL) return 'numeric/blank name';
-        const words = new Set(['ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:']);
-        if (words.has(f) || words.has(l)) return 'summary/header word';
-        if (/[<>]/.test(f) || /[<>]/.test(l)) return 'note/summary fragment';
-        if (/^(ZONE SUMMARY|GRAND TOTAL|REGISTRATION RECORDS)/.test(`${f} ${l}`.trim())) return 'summary block row';
+        if ((f && !/[A-Za-z]/.test(f)) || (l && !/[A-Za-z]/.test(l))) return 'numeric/blank name';
+        if (/^\d/.test(f) || /^\d/.test(l)) return 'numeric-leading name (note row)';
+        if (/[=<>]/.test(f) || /[=<>]/.test(l)) return 'note/summary fragment';
+        const fu = f.toUpperCase();
+        const lu = l.toUpperCase();
+        const tokens = ['GRAND TOTAL', 'ZONE SUMMARY', 'REGISTRATION RECORDS', 'SUBTOTAL', 'SOURCE:', 'MARKED AS', 'PER NOTES', 'AS AT', 'DATE OF BIRTH', 'RECORDS', 'NOTES:', 'NAIRA', 'DELIVERABLES', 'SUMMARY', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'CAT='];
+        for (const t of tokens) {
+            if (fu.includes(t) || lu.includes(t)) return `summary/note token: ${t}`;
+        }
         return null;
     },
 
