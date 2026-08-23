@@ -1885,6 +1885,7 @@ export const db = {
         await ensureEventActive(eventId);
         let updated = 0;
         let errors = 0;
+        const wanted = new Map<string, Record<string, string>>();
         for (const r of rows) {
             const updates: Record<string, string> = {};
             if (r.title && r.title.trim()) updates.title = r.title.trim();
@@ -1892,10 +1893,31 @@ export const db = {
             if (r.lastName && r.lastName.trim()) updates.last_name = r.lastName.trim();
             if (r.district && r.district.trim()) updates.district = r.district.trim();
             if (Object.keys(updates).length === 0) continue;
+            wanted.set(r.delegateId, updates);
             const { error } = await supabase.from('delegates').update(updates).eq('delegate_id', r.delegateId).eq('event_id', eventId);
-            if (error) errors++; else updated++;
+            if (error) { errors++; console.error('[repairNamesFromFile] update error', r.delegateId, error.message); }
+            else updated++;
         }
-        return { updated, errors };
+        let verified = 0;
+        if (updated > 0) {
+            const ids = rows.map(r => r.delegateId);
+            for (let i = 0; i < ids.length; i += 900) {
+                const { data } = await supabase.from('delegates')
+                    .select('delegate_id, title, first_name, last_name, district')
+                    .in('delegate_id', ids.slice(i, i + 900))
+                    .limit(1000);
+                for (const d of data || []) {
+                    const want = wanted.get(d.delegate_id);
+                    if (!want) continue;
+                    const ok = (want.title === undefined || (d.title || '') === want.title)
+                        && (want.first_name === undefined || (d.first_name || '') === want.first_name)
+                        && (want.last_name === undefined || (d.last_name || '') === want.last_name)
+                        && (want.district === undefined || (d.district || '') === want.district);
+                    if (ok) verified++;
+                }
+            }
+        }
+        return { updated, errors, verified };
     },
 
     regenerateQrHash: async (delegateId: string): Promise<string> => {

@@ -51,6 +51,8 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
+const IMPORT_BUILD_LABEL = 'v1.19 · col-aware repair';
+
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const role = (user?.role || '').toLowerCase();
@@ -721,11 +723,27 @@ const ImportModule = () => {
 
     const handleRepairApply = async () => {
         if (!activeEventId) return;
-        const actionable = repairItems.filter(i => !i.skip && i.delegate_id);
-        if (actionable.length === 0) return;
         setRepairLoading(true);
         setRepairResult(null);
         try {
+            let actionable = repairItems.filter(i => !i.skip && i.delegate_id);
+            if (actionable.length === 0) {
+                const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
+                if (hasFile) {
+                    const { items } = await analyzeRepairCsv(repairOrder);
+                    actionable = items.filter(i => !i.skip && i.delegate_id);
+                    setRepairItems(items);
+                } else {
+                    const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
+                    actionable = items.filter(i => !i.skip && i.delegate_id);
+                    setRepairItems(items);
+                }
+            }
+            if (actionable.length === 0) {
+                setRepairResult({ type: 'error', count: 0, msg: 'Nothing to repair — no candidate records were found. Load the source CSV (FULL NAME, PHONE) or check the active event.' });
+                return;
+            }
+            handleRepairBackup();
             const rows = actionable.map(i => ({
                 delegateId: i.delegate_id,
                 title: i.after.title,
@@ -735,7 +753,12 @@ const ImportModule = () => {
             }));
             const res = await db.repairNamesFromFile(activeEventId, rows);
             setRepairItems([]);
-            setRepairResult({ type: 'repaired', count: res.updated, msg: `Updated ${res.updated} records in-place${res.errors ? ` (${res.errors} errors)` : ''}. No duplicates created.` });
+            const verified = res.verified ?? res.updated;
+            setRepairResult({
+                type: 'repaired',
+                count: res.updated,
+                msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Refresh the Master List to verify.`
+            });
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
         } finally {
@@ -747,6 +770,13 @@ const ImportModule = () => {
     const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
     const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
 
+    const repairFilePreview = (() => {
+      const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length === 0) return null;
+      const { parsedRows, banner, headerDesc } = extractRepairRows(repairCsv, repairOrder);
+      return { rows: parsedRows.slice(0, 3), banner, headerDesc, total: parsedRows.length };
+    })();
+
     return (
         <div className="max-w-4xl mx-auto space-y-6 pb-20">
             <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-gray-100">
@@ -754,6 +784,7 @@ const ImportModule = () => {
                     <div>
                         <h2 className="text-2xl font-black text-blue-900 uppercase tracking-tighter">Bulk Delegate Import</h2>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Upload multiple records to the Regional Master List</p>
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono text-[8px] font-black uppercase">{IMPORT_BUILD_LABEL}</span>
                     </div>
                     {loading && (
                         <div className="flex flex-col items-end gap-2">
@@ -1064,6 +1095,21 @@ const ImportModule = () => {
                             onChange={e => setRepairDistrict(e.target.value)}
                         />
                     </div>
+                    {repairFilePreview && (
+                        <div className="mt-2 bg-white rounded-xl border border-amber-100 p-2">
+                            <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
+                                {repairFilePreview.headerDesc || 'No header detected — using col0=FULL NAME, col1=PHONE'} · {repairFilePreview.total} rows read{repairFilePreview.banner ? ` · banner/district: ${repairFilePreview.banner}` : ''}
+                            </p>
+                            <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 font-mono text-[8px] text-gray-600">
+                                {repairFilePreview.rows.map((r, i) => (
+                                    <React.Fragment key={i}>
+                                        <span className="truncate">{r.raw}</span>
+                                        <span className="text-amber-700 font-black">{r.phone}</span>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="flex flex-wrap gap-2 mt-3">
                         <button
                             onClick={handleRepairAnalyze}
@@ -1081,10 +1127,10 @@ const ImportModule = () => {
                         </button>
                         <button
                             onClick={handleRepairApply}
-                            disabled={repairLoading || !repairItems.some(i => !i.skip && i.delegate_id)}
+                            disabled={repairLoading || !activeEventId}
                             className="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
-                            {repairLoading ? 'REPAIRING...' : '3. Apply Repairs'}
+                            {repairLoading ? 'REPAIRING...' : '3. Backup & Apply Now'}
                         </button>
                     </div>
                     {repairResult && (
