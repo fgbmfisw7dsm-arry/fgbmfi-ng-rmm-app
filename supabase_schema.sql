@@ -1009,7 +1009,7 @@ BEGIN
           phone, email, rank, office, delegate_type,
           qr_hash, event_id, registration_source, external_id
         ) VALUES (
-          COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'),
+          COALESCE(TRIM(v_item->>'title'), ''),
           TRIM(v_item->>'first_name'),
           TRIM(v_item->>'last_name'),
           TRIM(v_item->>'district'),

@@ -1911,7 +1911,7 @@ export const db = {
         const wanted = new Map<string, Record<string, string>>();
         for (const r of rows) {
             const updates: Record<string, string> = {};
-            if (r.title && r.title.trim()) updates.title = r.title.trim();
+            if (r.title !== undefined && r.title !== null) updates.title = r.title;
             if (r.firstName && r.firstName.trim()) updates.first_name = r.firstName.trim();
             if (r.lastName && r.lastName.trim()) updates.last_name = r.lastName.trim();
             if (r.district && r.district.trim()) updates.district = r.district.trim();

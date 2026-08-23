@@ -87,7 +87,7 @@ export const canonicalTitle = (rawToken: string): string => {
         cmdr: 'Cmdr', adm: 'Adm'
     };
     if (shorthand[cleaned]) return shorthand[cleaned];
-    if (!cleaned) return 'Mr';
+    if (!cleaned) return '';
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
 };
 
@@ -119,7 +119,7 @@ export const tokenizeFullName = (fullName: string): string[] => {
 };
 
 export function parseFullName(fullName: string, order: NameOrder = 'given-first'): { title: string; firstName: string; lastName: string } {
-    const empty = { title: 'Mr', firstName: '', lastName: '' };
+    const empty = { title: '', firstName: '', lastName: '' };
     if (!fullName || !fullName.trim()) return empty;
     const tokens = tokenizeFullName(fullName);
     if (tokens.length === 0) return empty;
@@ -168,11 +168,11 @@ export function parseFullName(fullName: string, order: NameOrder = 'given-first'
     if (order === 'surname-first') {
         const surname = tokens[0];
         const given = tokens.slice(1).join(' ');
-        return { title: 'Mr', firstName: given, lastName: surname };
+        return { title: '', firstName: given, lastName: surname };
     }
     const firstName = tokens[0];
     const lastName = tokens.slice(1).join(' ');
-    return { title: 'Mr', firstName, lastName: lastName || firstName };
+    return { title: '', firstName, lastName: lastName || firstName };
 }
 
 export const downloadJSON = (data: any, filename: string) => {

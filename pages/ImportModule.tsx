@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.21 · auto-apply';
+const IMPORT_BUILD_LABEL = 'v1.22 · blank-title';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -398,7 +398,7 @@ const ImportModule = () => {
       const fieldOrder = buildFieldOrder();
       const sampleRow: Record<string, string> = {
         'RegId': 'CON260806093100193667ef9e',
-        'Title': 'Mr', 'First Name': 'John', 'Last Name': 'Doe',
+        'Title': '', 'First Name': 'John', 'Last Name': 'Doe',
         'District': 'Lagos Central', 'Chapter': 'Ikeja Chapter',
         'Phone': '08012345678', 'Email': 'john@email.com',
         'Rank': 'CP', 'Office': 'OTHER', 'DelegateType': 'Member'
@@ -610,7 +610,11 @@ const ImportModule = () => {
                 items.push({ raw: pr.raw, skip: 'phone matched but surname not found in record' });
                 continue;
             }
-            const needChange = matched.filter(d => !(nameKey(d.first_name) === nameKey(pr.first) && nameKey(d.last_name) === nameKey(pr.last)));
+            const needChange = matched.filter(d => {
+                const sameNames = nameKey(d.first_name) === nameKey(pr.first) && nameKey(d.last_name) === nameKey(pr.last);
+                const sameTitle = nameKey(d.title || '') === nameKey(pr.title || '');
+                return !sameNames || !sameTitle;
+            });
             if (needChange.length > 1) {
                 items.push({ raw: pr.raw, skip: 'ambiguous (multiple records share name + phone)' });
                 continue;
