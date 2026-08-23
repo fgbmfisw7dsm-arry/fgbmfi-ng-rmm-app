@@ -39,31 +39,100 @@ const KNOWN_TITLES = new Set([
   'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
   'barr', 'prof', 'sir', 'lady', 'hon', 'elder', 'deacon', 'deaconess',
   'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
-  'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia'
+  'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia',
+  'arc', 'arch', 'archt', 'comrade', 'evang', 'evng', 'pst', 'eld', 'sen',
+  'esq', 'otunba', 'capt', 'maj', 'lt', 'col', 'cmdr', 'adm'
 ]);
 
-function parseFullName(fullName: string): { title: string; firstName: string; lastName: string } {
-  if (!fullName || !fullName.trim()) return { title: 'Mr', firstName: '', lastName: '' };
-  const parts = fullName.trim().split(/\s+/);
-  let titleEnd = 0;
-  if (parts.length >= 2) {
-    const firstWord = parts[0].toLowerCase().replace(/\.$/, '');
-    const secondWord = parts[1].toLowerCase().replace(/\.$/, '');
-    if (KNOWN_TITLES.has(firstWord) && KNOWN_TITLES.has(secondWord)) {
-      titleEnd = 2;
+type NameOrder = 'given-first' | 'surname-first';
+
+const normalizeTitleToken = (t: string): string => {
+  return (t || '').replace(/^\(|\)$/g, '').trim().toLowerCase().replace(/\.$/, '').trim();
+};
+
+const tokenizeFullName = (fullName: string): string[] => {
+  const cleaned = (fullName || '').trim()
+    .replace(/^[\s.:,;]+/, '')
+    .replace(/\s+/g, ' ');
+  if (!cleaned) return [];
+  const tokens: string[] = [];
+  for (const word of cleaned.split(' ')) {
+    if (!word) continue;
+    const segments = word.split(/[.,;:]/);
+    for (let seg of segments) {
+      seg = (seg || '').trim();
+      if (!seg) continue;
+      if (seg.length === 1) {
+        const prev = tokens.pop();
+        tokens.push((prev ? prev + ' ' : '') + seg);
+      } else {
+        tokens.push(seg);
+      }
     }
   }
-  if (titleEnd === 0 && parts.length >= 1) {
-    const firstWord = parts[0].toLowerCase().replace(/\.$/, '');
-    if (KNOWN_TITLES.has(firstWord)) {
-      titleEnd = 1;
+  return tokens.filter(t => t && t.trim());
+};
+
+function titleForDisplay(rawToken: string): string {
+  const cleaned = (rawToken || '').replace(/^\(|\)$/g, '').replace(/\.$/, '').trim();
+  return cleaned.length > 0 ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase() : 'Mr';
+}
+
+function parseFullName(fullName: string, order: NameOrder = 'given-first'): { title: string; firstName: string; lastName: string } {
+  const empty = { title: 'Mr', firstName: '', lastName: '' };
+  if (!fullName || !fullName.trim()) return empty;
+  const tokens = tokenizeFullName(fullName);
+  if (tokens.length === 0) return empty;
+
+  const titleRuns: Array<{ start: number; end: number }> = [];
+  let i = 0;
+  while (i < tokens.length) {
+    if (KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) {
+      const start = i;
+      while (i < tokens.length && KNOWN_TITLES.has(normalizeTitleToken(tokens[i]))) i++;
+      titleRuns.push({ start, end: i });
+    } else {
+      i++;
     }
   }
-  const title = titleEnd > 0 ? parts.slice(0, titleEnd).join(' ') : 'Mr';
-  const nameParts = parts.slice(titleEnd);
-  const firstName = nameParts[0] || '';
-  const lastName = nameParts.slice(1).join(' ');
-  return { title, firstName, lastName };
+
+  if (titleRuns.length >= 2) {
+    const firstRun = titleRuns[0];
+    const lastRun = titleRuns[titleRuns.length - 1];
+    const title = titleForDisplay(tokens[firstRun.start]);
+    const surname = tokens.slice(firstRun.end, lastRun.start).join(' ') || tokens[0];
+    const given = tokens.slice(lastRun.end).join(' ');
+    return { title, firstName: given, lastName: surname };
+  }
+
+  if (titleRuns.length === 1) {
+    const run = titleRuns[0];
+    const title = titleForDisplay(tokens[run.start]);
+    const before = tokens.slice(0, run.start);
+    const after = tokens.slice(run.end);
+    if (run.start === 0) {
+      const firstName = after[0] || '';
+      const lastName = after.slice(1).join(' ');
+      return { title, firstName, lastName };
+    }
+    if (order === 'surname-first') {
+      const surname = before.join(' ');
+      const given = after.join(' ');
+      return { title, firstName: given, lastName: surname };
+    }
+    const firstName = before[0] || '';
+    const lastName = before.slice(1).concat(after).join(' ');
+    return { title, firstName, lastName: lastName || firstName };
+  }
+
+  if (order === 'surname-first') {
+    const surname = tokens[0];
+    const given = tokens.slice(1).join(' ');
+    return { title: 'Mr', firstName: given, lastName: surname };
+  }
+  const firstName = tokens[0];
+  const lastName = tokens.slice(1).join(' ');
+  return { title: 'Mr', firstName, lastName: lastName || firstName };
 }
 
 function normalizeDelegateType(raw: string): string {
@@ -111,6 +180,7 @@ const ImportModule = () => {
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
     const [bannerDistrict, setBannerDistrict] = useState('');
+    const [nameOrder, setNameOrder] = useState<NameOrder | 'auto'>('auto');
     const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 });
     const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
     const [scrambleSamples, setScrambleSamples] = useState<string[]>([]);
@@ -118,6 +188,11 @@ const ImportModule = () => {
     const [scrambleLoading, setScrambleLoading] = useState(false);
     const [scrambleResult, setScrambleResult] = useState<{ type: 'analyzed' | 'repaired' | 'deleted' | 'error'; count: number; msg?: string } | null>(null);
     const [scrambleShowRepairs, setScrambleShowRepairs] = useState(false);
+    const [repairCsv, setRepairCsv] = useState('');
+    const [repairDistrict, setRepairDistrict] = useState('');
+    const [repairItems, setRepairItems] = useState<any[]>([]);
+    const [repairLoading, setRepairLoading] = useState(false);
+    const [repairResult, setRepairResult] = useState<{ type: 'preview' | 'repaired' | 'error'; count: number; msg?: string } | null>(null);
 
     const KNOWN_FIELDS: Record<string, string> = {
       'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
@@ -186,6 +261,55 @@ const ImportModule = () => {
       }
       return { headerIndex: 0, bannerDistrict: banner, found: false };
     };
+
+    const detectNameOrder = (lines: string[], hi: number, headers: string[], cm: Record<string, boolean>): NameOrder => {
+      const fullNameIdx = headers.findIndex(h => cm[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+      if (fullNameIdx < 0) return 'given-first';
+      let midTitle = 0;
+      let leadTitle = 0;
+      for (let i = hi + 1; i < Math.min(lines.length, hi + 200); i++) {
+        const v = lines[i].split(',')[fullNameIdx] || '';
+        if (!v.trim()) continue;
+        const tokens = tokenizeFullName(v);
+        if (tokens.length === 0) continue;
+        const firstIsTitle = KNOWN_TITLES.has(normalizeTitleToken(tokens[0]));
+        const anyTitle = tokens.some(t => KNOWN_TITLES.has(normalizeTitleToken(t)));
+        if (!anyTitle) continue;
+        if (firstIsTitle && tokens.length >= 2 && !KNOWN_TITLES.has(normalizeTitleToken(tokens[1]))) leadTitle++;
+        else if (firstIsTitle) { if (tokens.filter(t => !KNOWN_TITLES.has(normalizeTitleToken(t))).length >= 2) midTitle++; }
+        else midTitle++;
+      }
+      if (midTitle > leadTitle && midTitle >= 3) return 'surname-first';
+      return 'given-first';
+    };
+
+    const effectiveNameOrder = (): NameOrder => {
+      if (nameOrder !== 'auto') return nameOrder;
+      if (!csv.trim()) return 'given-first';
+      const lines = csv.trim().split('\n');
+      if (lines.length < 2) return 'given-first';
+      const { headerIndex: hi } = detectHeaderRow(lines);
+      const headers = parseHeaders(lines[hi]);
+      return detectNameOrder(lines, hi, headers, columnMap);
+    };
+
+    const namePreview: Array<{ raw: string; title: string; first: string; last: string }> = (() => {
+      if (!csv.trim() || detectedColumns.length === 0) return [];
+      const lines = csv.trim().split('\n');
+      const { headerIndex: hi } = detectHeaderRow(lines);
+      const headers = parseHeaders(lines[hi]);
+      const fullNameIdx = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+      if (fullNameIdx < 0) return [];
+      const order = effectiveNameOrder();
+      const out: Array<{ raw: string; title: string; first: string; last: string }> = [];
+      for (let i = hi + 1; i < lines.length && out.length < 5; i++) {
+        const v = (lines[i].split(',')[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
+        if (!v) continue;
+        const p = parseFullName(v, order);
+        out.push({ raw: v, title: p.title, first: p.firstName, last: p.lastName });
+      }
+      return out;
+    })();
 
     const getEnabledColumnIndices = (headers: string[], fieldName: string): number[] => {
       const result: number[] = [];
@@ -298,6 +422,7 @@ const ImportModule = () => {
 
       const fullNameIdx = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
       const useFullName = fullNameIdx >= 0 && !(hasEnabled('Title') && hasEnabled('First Name') && hasEnabled('Last Name'));
+      const order = effectiveNameOrder();
 
       const phoneLikeIdx = headers.map((_, i) => i).filter(i =>
         columnMap[headers[i]] !== false && KNOWN_FIELDS[normalizeKey(headers[i])] === 'Phone' && !isWhatsappLike(headers[i])
@@ -317,6 +442,7 @@ const ImportModule = () => {
       for (let i = hi + 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
         if (values.every(v => !v)) continue;
+        if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(lines[i])) continue;
         const headerLike = values.filter(v => {
           const k = normalizeKey(v);
           return !!KNOWN_FIELDS[k] && !AMBIGUOUS_VALUE_KEYS.has(k);
@@ -325,7 +451,7 @@ const ImportModule = () => {
 
         const colValues: Record<string, string> = {};
         if (useFullName) {
-          const parsed = parseFullName(values[fullNameIdx] || '');
+          const parsed = parseFullName(values[fullNameIdx] || '', order);
           colValues['Title'] = parsed.title;
           colValues['First Name'] = parsed.firstName;
           colValues['Last Name'] = parsed.lastName;
@@ -335,7 +461,8 @@ const ImportModule = () => {
           colValues['Last Name'] = firstIdx('Last Name') >= 0 ? (values[firstIdx('Last Name')] || '') : '';
         }
 
-        const districtBefore = pickRowValue(values, districtIndices);
+        let districtBefore = pickRowValue(values, districtIndices);
+        if (effectiveBanner && /^(ZONE|AREA)\s*\d+$/i.test(districtBefore)) districtBefore = '';
         if (!districtBefore && effectiveBanner) statsRef.current.bannerUsed++;
         const resolvedDistrict = resolveDistrictShortCode(districtBefore || effectiveBanner);
         if (districtBefore && resolvedDistrict && resolvedDistrict !== stripDistrictSuffix(districtBefore)) statsRef.current.shortCodesResolved++;
@@ -362,7 +489,7 @@ const ImportModule = () => {
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
-    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict]);
+    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder]);
 
     const handleDownloadTemplate = () => {
       const fieldOrder = buildFieldOrder();
@@ -511,6 +638,104 @@ const ImportModule = () => {
         a.href = url; a.download = `scrambled-delegates-backup-${activeEventId?.slice(0, 8) || 'unknown'}.json`;
         a.click();
         URL.revokeObjectURL(url);
+    };
+
+    const nameKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
+
+    const handleRepairAnalyze = async () => {
+        if (!activeEventId) return;
+        const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) return;
+        setRepairLoading(true);
+        setRepairResult(null);
+        setRepairItems([]);
+        try {
+            const order = effectiveNameOrder();
+            const parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; raw: string }> = [];
+            for (const line of lines) {
+                const parts = line.split(',');
+                const fullName = (parts[0] || '').trim().replace(/^["']|["']$/g, '');
+                const phone = normalizePhone((parts[1] || '').trim().replace(/^["']|["']$/g, ''));
+                const district = (parts[2] || '').trim().replace(/^["']|["']$/g, '');
+                if (!fullName || !phone) continue;
+                const p = parseFullName(fullName, order);
+                parsedRows.push({ phone, title: p.title, first: p.firstName, last: p.lastName, district, raw: fullName });
+            }
+            const phones = Array.from(new Set(parsedRows.map(r => r.phone))).filter(Boolean);
+            if (phones.length === 0) throw new Error('No valid phone numbers found in pasted data.');
+            const candidates = await db.getDelegatesByPhones(activeEventId, phones);
+            const items: any[] = [];
+            for (const pr of parsedRows) {
+                const deps = candidates.filter(c => normalizePhone(c.phone) === pr.phone);
+                if (deps.length === 0) { items.push({ raw: pr.raw, skip: 'no delegate with this phone' }); continue; }
+                const match = deps.find(d => nameKey(d.first_name) === nameKey(pr.last));
+                if (!match) {
+                    const alreadyCorrect = deps.find(d => nameKey(d.first_name) === nameKey(pr.first) && nameKey(d.last_name) === nameKey(pr.last));
+                    items.push({ raw: pr.raw, skip: alreadyCorrect ? 'already correct' : 'phone matched but name differs (spouse?)' });
+                    continue;
+                }
+                const zoneLabel = /^(ZONE|AREA)\s*\d+$/i.test(match.district || '');
+                items.push({
+                    delegate_id: match.delegate_id,
+                    raw: pr.raw,
+                    phone: pr.phone,
+                    before: { title: match.title || '', first_name: match.first_name, last_name: match.last_name, district: match.district || '' },
+                    after: {
+                        title: pr.title,
+                        first_name: pr.first,
+                        last_name: pr.last,
+                        district: (repairDistrict || pr.district || (zoneLabel && bannerDistrict ? bannerDistrict : '')) || ''
+                    },
+                    districtReason: (repairDistrict || (zoneLabel && bannerDistrict) ? 'will fix district' : ''),
+                });
+            }
+            const actionable = items.filter(i => !i.skip && i.delegate_id);
+            setRepairItems(items);
+            setRepairResult({
+                type: 'preview',
+                count: actionable.length,
+                msg: `${parsedRows.length} rows parsed; ${actionable.length} repairable; ${items.length - actionable.length} skipped.`
+            });
+        } catch (e: any) {
+            setRepairResult({ type: 'error', count: 0, msg: e.message });
+        } finally {
+            setRepairLoading(false);
+        }
+    };
+
+    const handleRepairBackup = () => {
+        const actionable = repairItems.filter(i => !i.skip && i.delegate_id);
+        if (actionable.length === 0) return;
+        const blob = new Blob([JSON.stringify({ eventId: activeEventId, exportedAt: new Date().toISOString(), records: actionable }, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `name-repair-backup-${activeEventId?.slice(0, 8) || 'unknown'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleRepairApply = async () => {
+        if (!activeEventId) return;
+        const actionable = repairItems.filter(i => !i.skip && i.delegate_id);
+        if (actionable.length === 0) return;
+        setRepairLoading(true);
+        setRepairResult(null);
+        try {
+            const rows = actionable.map(i => ({
+                delegateId: i.delegate_id,
+                title: i.after.title,
+                firstName: i.after.first_name,
+                lastName: i.after.last_name,
+                district: i.after.district || undefined,
+            }));
+            const res = await db.repairNamesFromFile(activeEventId, rows);
+            setRepairItems([]);
+            setRepairResult({ type: 'repaired', count: res.updated, msg: `Updated ${res.updated} records in-place${res.errors ? ` (${res.errors} errors)` : ''}. No duplicates created.` });
+        } catch (e: any) {
+            setRepairResult({ type: 'error', count: 0, msg: e.message });
+        } finally {
+            setRepairLoading(false);
+        }
     };
 
     const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
@@ -770,6 +995,104 @@ const ImportModule = () => {
                 </div>
                 )}
 
+                {isAdmin && (
+                <div className="p-4 mb-6 rounded-2xl border-2 border-amber-200 bg-amber-50">
+                    <div className="flex justify-between items-center mb-2">
+                        <div>
+                            <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-wider">Repair Imported Names</h4>
+                            <p className="text-[8px] font-bold text-amber-600 uppercase mt-0.5">
+                                Fixes records imported from surname-first files (e.g. {'"Achizue Engr Kenneth"'}) that landed with the surname in the First Name field. Matches by phone + surname, backs up, then updates Title / First / Last / District in place — no duplicates, attendance preserved.
+                            </p>
+                        </div>
+                    </div>
+                    <p className="text-[8px] font-bold text-amber-700 uppercase mb-1">
+                        Paste one row per line: FULL NAME, PHONE (optional: , DISTRICT)
+                    </p>
+                    <textarea
+                        className="w-full h-28 p-4 border-2 border-amber-200 rounded-xl bg-white font-mono text-xs focus:ring-4 focus:ring-amber-500/10 outline-none transition-all resize-none"
+                        placeholder={"Achizue Engr Kenneth, 8037958534, North Central 2\nAdemora Mrs Chika, 7064640818"}
+                        value={repairCsv}
+                        onChange={e => setRepairCsv(e.target.value)}
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <label className="text-[8px] font-bold text-amber-700 uppercase">District to apply (optional):</label>
+                        <input
+                            className="px-3 py-2 border-2 border-amber-200 rounded-xl bg-white font-mono text-xs outline-none focus:ring focus:ring-amber-500/10"
+                            placeholder={bannerDistrict || 'e.g. North Central 2'}
+                            value={repairDistrict}
+                            onChange={e => setRepairDistrict(e.target.value)}
+                        />
+                        <span className="text-[8px] font-bold text-amber-600 uppercase">Uses the {'"Name order"'} setting above</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                            onClick={handleRepairAnalyze}
+                            disabled={repairLoading || !activeEventId || !repairCsv.trim()}
+                            className="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            {repairLoading ? 'ANALYZING...' : '1. Analyze'}
+                        </button>
+                        <button
+                            onClick={handleRepairBackup}
+                            disabled={!repairItems.some(i => !i.skip && i.delegate_id)}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            2. Backup JSON
+                        </button>
+                        <button
+                            onClick={handleRepairApply}
+                            disabled={repairLoading || !repairItems.some(i => !i.skip && i.delegate_id)}
+                            className="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            {repairLoading ? 'REPAIRING...' : '3. Apply Repairs'}
+                        </button>
+                    </div>
+                    {repairResult && (
+                        <div className={`p-3 rounded-xl mt-2 ${
+                            repairResult.type === 'error' ? 'bg-red-100 border border-red-200 text-red-800' : 'bg-white border border-amber-200 text-amber-900'
+                        }`}>
+                            <p className="text-[9px] font-black uppercase">{repairResult.msg}</p>
+                        </div>
+                    )}
+                    {repairItems.length > 0 && (
+                        <div className="mt-2 max-h-80 overflow-y-auto bg-white rounded-xl border border-amber-100">
+                            <table className="w-full text-[8px]">
+                                <thead className="sticky top-0 bg-amber-100 text-amber-900 uppercase font-black tracking-wider">
+                                    <tr>
+                                        <th className="p-1.5 text-left w-16">#</th>
+                                        <th className="p-1.5 text-left">Now</th>
+                                        <th className="p-1.5 text-left bg-green-50 text-green-700">{'→'} Repaired</th>
+                                        <th className="p-1.5 text-left">Note</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {repairItems.filter(i => !i.skip && i.delegate_id).slice(0, 100).map((i, idx) => (
+                                        <tr key={i.delegate_id || idx} className="border-b border-gray-100">
+                                            <td className="p-1.5 font-mono text-gray-400">{idx + 1}</td>
+                                            <td className="p-1.5 align-top bg-red-50/50 text-red-700 font-mono leading-relaxed">
+                                                <div>{i.before.first_name} {i.before.last_name}</div>
+                                                <div className="text-[7px] text-gray-400">{i.before.title} · {i.before.district || '—'}</div>
+                                            </td>
+                                            <td className="p-1.5 align-top bg-green-50/50 text-green-700 font-mono leading-relaxed">
+                                                <div>{i.after.first_name} {i.after.last_name}</div>
+                                                <div className="text-[7px] text-gray-400">{i.after.title} · {i.after.district || '—'}</div>
+                                            </td>
+                                            <td className="p-1.5 align-top text-[7px] font-bold text-amber-600 uppercase">{i.districtReason || 'name repair'}</td>
+                                        </tr>
+                                    ))}
+                                    {repairItems.filter(i => i.skip).length > 0 && (
+                                        <tr><td colSpan={4} className="p-2 text-[8px] text-gray-500">
+                                            Skipped: {repairItems.filter(i => i.skip).map(i => `${i.raw} (${i.skip})`).slice(0, 6).join(', ')}
+                                            {repairItems.filter(i => i.skip).length > 6 ? ' …' : ''}
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+                )}
+
                 <div className="space-y-4">
                     <div className="flex justify-between items-end px-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Upload or Paste CSV</label>
@@ -789,7 +1112,7 @@ const ImportModule = () => {
                         </label>
                         {csv && (
 <button
-                                        onClick={() => { setCsv(''); setFileName(''); setShowMapping(false); setDetectedColumns([]); setColumnMap({}); setBannerDistrict(''); setFeedback(null); }}
+                                        onClick={() => { setCsv(''); setFileName(''); setShowMapping(false); setDetectedColumns([]); setColumnMap({}); setBannerDistrict(''); setNameOrder('auto'); setFeedback(null); }}
                                         className="px-4 py-4 bg-red-50 hover:bg-red-100 text-red-600 font-black rounded-2xl text-[10px] uppercase tracking-wider transition-all"
                                     >
                                 Clear
@@ -852,6 +1175,46 @@ const ImportModule = () => {
                                     <p className="text-[8px] font-bold text-purple-700 uppercase">
                                         {'\u2139\uFE0F'} Full Name column detected: will be parsed into Title + FirstName + LastName if separate name columns are missing.
                                     </p>
+                                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                        <span className="text-[8px] font-bold text-purple-700 uppercase">Name order:</span>
+                                        {(['auto', 'surname-first', 'given-first'] as const).map(opt => (
+                                            <button
+                                                key={opt}
+                                                onClick={() => setNameOrder(opt)}
+                                                className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-wide transition-all border ${
+                                                    nameOrder === opt
+                                                        ? 'bg-purple-700 text-white border-purple-700'
+                                                        : 'bg-white text-purple-700 border-purple-200 hover:border-purple-400'
+                                                }`}
+                                            >
+                                                {opt === 'auto' ? 'Auto' : opt === 'surname-first' ? 'Surname First' : 'Given First'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {namePreview.length > 0 && (
+                                        <div className="mt-2 bg-white/70 rounded-xl border border-purple-100 overflow-hidden">
+                                            <table className="w-full text-[8px]">
+                                                <thead className="bg-purple-100 text-purple-900 uppercase font-black tracking-wider">
+                                                    <tr>
+                                                        <th className="p-1.5 text-left">As in file</th>
+                                                        <th className="p-1.5 text-left">Title</th>
+                                                        <th className="p-1.5 text-left">First</th>
+                                                        <th className="p-1.5 text-left">Last</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {namePreview.map((p, i) => (
+                                                        <tr key={i} className="border-b border-purple-100 last:border-0">
+                                                            <td className="p-1.5 font-mono text-purple-900">{p.raw}</td>
+                                                            <td className="p-1.5 text-purple-700">{p.title}</td>
+                                                            <td className="p-1.5">{p.first || <span className="text-purple-300 italic">—</span>}</td>
+                                                            <td className="p-1.5">{p.last || <span className="text-purple-300 italic">—</span>}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {bannerDistrict && (

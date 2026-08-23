@@ -578,6 +578,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Client (`supabaseService.ts`):** `registerDelegate` normalizes phone + pre-checks identity (clear duplicate error); the `importDelegates` fallback path dedupes via `phone_normalized`/email identity; `deduplicateDelegates` (DataModule) now MERGES clusters (re-homing checkins/session_responses/badge_print_logs) instead of delete-only, honoring the title-differentiates-people rule.
 - **Operational runbook:** `RUNBOOK_DELEGATE_DEDUP.md` — migration order (A schema → B cleanup → backstop index), verification queries, duplicate preview query, re-import behavior, and rollback/restore steps.
 
+### 31. Surname-First Full-Name Parsing + Repair Imported Names (v1.14 / Sprint 22)
+- **Problem solved:** district "Formatted" manual-reg files (`Combined_NC2_Registrations_Formatted.csv` etc.) store `FULL NAME` as **surname-first with the title mid-string** (`Achizue Engr Kenneth`, `EZE ARC. DR. JC`, `Mrs. Magaji Mrs. Martha`). The old `parseFullName` only looked for titles at the start (given-first), so `Achizue Engr Kenneth` landed as first=`Achizue`, last=`Engr Kenneth`, title=`Mr`.
+- **`parseFullName(fullName, order)` (ImportModule.tsx):** order-aware (`given-first` | `surname-first`) with **title-anywhere** detection. Tokenizes on whitespace **and** `.`/`,`/`;`/`:` (splits `Mr.Daniel`, `PROF.AYO`, `Engr.Joshua`, `Odinakachukwu: Mrs`), strips leading junk, preserves single-letter initials (`Joy H.`). Handles 2+ title clusters (surname trapped between) and multi-token titles (`PROF MRS`, uses the **first** title token as primary). Title-less rows split by the chosen order.
+- **Name-order control:** per-file `auto` detection in `mappedCsvData` (mid-string title signal vs leading-title signal) + a **Surname First / Given First toggle** and a live 5-row parse preview in the mapping panel. Default `given-first` for portal exports, `surname-first` for manual-reg files.
+- **District zone-label fix:** when a banner district exists and the district cell matches `/^(ZONE|AREA)\s*\d+$/i`, the banner district wins (were importing `ZONE 1` as a district).
+- **Junk-row guard:** skips `NUMBER: 45`-style data rows.
+- **Repair Imported Names (admin, ImportModule):** pastes `FULL NAME, PHONE [, DISTRICT]`, matches existing delegates by `phone_normalized` + current `first_name==file surname`, warns on already-correct/spouse-shared-phone rows, downloads a JSON backup, then updates `title/first_name/last_name/district` **in place** via `db.repairNamesFromFile` (no duplicates, attendance preserved). `db.getDelegatesByPhones` supports the candidate lookup.
+
 ## Code Conventions
 
 ### Naming

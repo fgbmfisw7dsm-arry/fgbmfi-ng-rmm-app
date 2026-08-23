@@ -1825,6 +1825,36 @@ export const db = {
         return merged;
     },
 
+    getDelegatesByPhones: async (eventId: string, phones: string[]) => {
+        const candidates: any[] = [];
+        for (let i = 0; i < phones.length; i += 900) {
+            const { data } = await supabase.from('delegates')
+                .select('delegate_id, title, first_name, last_name, district, phone, phone_normalized')
+                .eq('event_id', eventId)
+                .in('phone_normalized', phones.slice(i, i + 900))
+                .limit(1000);
+            if (data) candidates.push(...data);
+        }
+        return candidates;
+    },
+
+    repairNamesFromFile: async (eventId: string, rows: Array<{ delegateId: string; title?: string; firstName?: string; lastName?: string; district?: string }>) => {
+        await ensureEventActive(eventId);
+        let updated = 0;
+        let errors = 0;
+        for (const r of rows) {
+            const updates: Record<string, string> = {};
+            if (r.title && r.title.trim()) updates.title = r.title.trim();
+            if (r.firstName && r.firstName.trim()) updates.first_name = r.firstName.trim();
+            if (r.lastName && r.lastName.trim()) updates.last_name = r.lastName.trim();
+            if (r.district && r.district.trim()) updates.district = r.district.trim();
+            if (Object.keys(updates).length === 0) continue;
+            const { error } = await supabase.from('delegates').update(updates).eq('delegate_id', r.delegateId).eq('event_id', eventId);
+            if (error) errors++; else updated++;
+        }
+        return { updated, errors };
+    },
+
     regenerateQrHash: async (delegateId: string): Promise<string> => {
         const newHash = generateQrHash();
         const { error } = await supabase.from('delegates').update({ qr_hash: newHash }).eq('delegate_id', delegateId);
