@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.19 · col-aware repair';
+const IMPORT_BUILD_LABEL = 'v1.20 · merge-on-duplicate';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
