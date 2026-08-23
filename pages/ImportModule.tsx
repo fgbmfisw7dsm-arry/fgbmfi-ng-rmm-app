@@ -51,10 +51,10 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.23 · repair guidance';
+const IMPORT_BUILD_LABEL = 'v1.24 · repair event picker';
 
 const ImportModule = () => {
-    const { activeEventId, activeEvent, user } = useContext(AppContext);
+    const { activeEventId, activeEvent, user, events } = useContext(AppContext);
     const role = (user?.role || '').toLowerCase();
     const isAdmin = isAdminRole(role);
     const canAccess = isAdmin || isEventAdminRole(role);
@@ -93,6 +93,7 @@ const ImportModule = () => {
     const [repairCsv, setRepairCsv] = useState('');
     const [repairDistrict, setRepairDistrict] = useState('');
     const [repairOrder, setRepairOrder] = useState<NameOrder>('surname-first');
+    const [repairEventId, setRepairEventId] = useState('');
     const [repairItems, setRepairItems] = useState<any[]>([]);
     const [repairLoading, setRepairLoading] = useState(false);
     const [repairResult, setRepairResult] = useState<{ type: 'preview' | 'repaired' | 'error'; count: number; msg?: string } | null>(null);
@@ -594,13 +595,13 @@ const ImportModule = () => {
         return { parsedRows, banner, headerDesc };
     };
 
-    const analyzeRepairCsv = async (order: NameOrder): Promise<{ items: any[]; parsedCount: number; banner: string; headerDesc: string | null; rowsDroppedNoPhone: number }> => {
+    const analyzeRepairCsv = async (order: NameOrder, eventId: string): Promise<{ items: any[]; parsedCount: number; banner: string; headerDesc: string | null; rowsDroppedNoPhone: number }> => {
         const { parsedRows, banner, headerDesc } = extractRepairRows(repairCsv, order);
         const districtDefault = banner;
         const phones = Array.from(new Set(parsedRows.map(r => r.phone))).filter(Boolean);
         const realParsed = parsedRows.filter(r => r.phone);
         if (phones.length === 0) return { items: [], parsedCount: parsedRows.length, banner: districtDefault, headerDesc, rowsDroppedNoPhone: parsedRows.length };
-        const candidates = await db.getDelegatesByPhones(activeEventId, phones);
+        const candidates = await db.getDelegatesByPhones(eventId, phones);
         const items: any[] = [];
         for (const pr of realParsed) {
             const deps = candidates.filter(c => normalizePhone(c.phone) === pr.phone);
@@ -641,7 +642,7 @@ const ImportModule = () => {
     };
 
     const handleRepairAnalyze = async () => {
-        if (!activeEventId) return;
+        if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
         const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
         if (lines.length === 0) {
             setRepairResult({ type: 'preview', count: 0, msg: 'Paste or upload FULL NAME, PHONE rows first, or use Auto-Detect below.' });
@@ -651,7 +652,7 @@ const ImportModule = () => {
         setRepairResult(null);
         setRepairItems([]);
         try {
-            const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
+            const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder, targetEventId);
             const actionable = items.filter(i => !i.skip && i.delegate_id);
             setRepairItems(items);
             const desc = headerDesc ? ` — ${headerDesc}` : '';
@@ -664,7 +665,7 @@ const ImportModule = () => {
                 setRepairResult({
                     type: 'preview',
                     count: actionable.length,
-                    msg: `${parsedCount} rows parsed (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'})${desc}. ${actionable.length} repairable; ${items.length - actionable.length} skipped${rowsDroppedNoPhone > 0 ? `; ${rowsDroppedNoPhone} rows had no phone` : ''}.`
+                    msg: `${parsedCount} rows parsed (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'})${desc}. ${actionable.length} repairable; ${items.length - actionable.length} skipped${rowsDroppedNoPhone > 0 ? `; ${rowsDroppedNoPhone} rows had no phone` : ''}. Event: ${targetEventName}`
                 });
             }
         } catch (e: any) {
@@ -675,21 +676,21 @@ const ImportModule = () => {
     };
 
     const handleRepairAutoDetect = async () => {
-        if (!activeEventId) return;
+        if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
         setRepairLoading(true);
         setRepairResult(null);
         setRepairItems([]);
         try {
-            const evtName = activeEvent?.name || 'the selected event';
+            const evtName = targetEventName;
             const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
             if (hasFile) {
-                const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
+                const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder, targetEventId);
                 const actionable = items.filter(i => !i.skip && i.delegate_id);
                 setRepairItems(items);
                 if (parsedCount === 0) {
                     setRepairResult({
                         type: 'error', count: 0,
-                        msg: `No rows parsed from the file${headerDesc ? ` — ${headerDesc}` : ''}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is), and that you are on the ${evtName} event.`
+                        msg: `No rows parsed from the file${headerDesc ? ` — ${headerDesc}` : ''}. Confirm the data includes a FULL NAME + phone column, and the repair event is set to ${evtName}.`
                     });
                     return;
                 }
@@ -697,23 +698,23 @@ const ImportModule = () => {
                     const skipped = items.filter(i => i.skip && i.delegate_id).length;
                     setRepairResult({
                         type: 'preview', count: 0,
-                        msg: `File read OK (${parsedCount} rows${rowsDroppedNoPhone ? `, ${rowsDroppedNoPhone} without phone` : ''}) but 0 rows need changes (${skipped} already correct/no-match). Active event: ${evtName}. If titles are still 'Mr', confirm this is the NC2 event and the file phones match its delegates.`
+                        msg: `File read OK (${parsedCount} rows${rowsDroppedNoPhone ? `, ${rowsDroppedNoPhone} without phone` : ''}) but 0 rows need changes (${skipped} already correct/no-match) for event: ${evtName}. If titles are still 'Mr', confirm this dropdown is the NC2 event and the file phones match its delegates.`
                     });
                     return;
                 }
-                await runApply(items);
+                await runApply(items, targetEventId);
             } else {
-                const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
+                const items = await db.autoRepairScannedNames(targetEventId, repairDistrict || bannerDistrict || undefined);
                 const actionable = items.filter(i => !i.skip && i.delegate_id);
                 setRepairItems(items);
                 if (actionable.length === 0) {
                     setRepairResult({
                         type: 'preview', count: 0,
-                        msg: `No trapped-title records found in ${evtName}. To CLEAR the default 'Mr' on title-less rows (incl. ladies), LOAD the source CSV below (FULL NAME, PHONE ...) and run Auto-Detect & Normalize NOW again — the file is required, because a stored 'Mr' cannot be told apart from an explicit one without it.`
+                        msg: `No trapped-title records found in ${evtName}. If the NC2 delegates live in a different event, pick it in the 'Event to repair' dropdown above. To CLEAR the default 'Mr' on title-less rows (incl. ladies), LOAD the source CSV below (FULL NAME, PHONE ...) and run Auto-Detect & Normalize NOW again — the file is required, because a stored 'Mr' cannot be told apart from an explicit one without it.`
                     });
                     return;
                 }
-                await runApply(items);
+                await runApply(items, targetEventId);
             }
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
@@ -722,24 +723,25 @@ const ImportModule = () => {
         }
     };
 
-    const handleRepairBackup = (items?: any[]) => {
+    const handleRepairBackup = (items?: any[], eventId?: string) => {
         const actionable = (items || repairItems).filter(i => !i.skip && i.delegate_id);
         if (actionable.length === 0) return;
-        const blob = new Blob([JSON.stringify({ eventId: activeEventId, exportedAt: new Date().toISOString(), records: actionable }, null, 2)], { type: 'application/json' });
+        const id = eventId || targetEventId;
+        const blob = new Blob([JSON.stringify({ eventId: id, exportedAt: new Date().toISOString(), records: actionable }, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `name-repair-backup-${activeEventId?.slice(0, 8) || 'unknown'}.json`;
+        a.href = url; a.download = `name-repair-backup-${id?.slice(0, 8) || 'unknown'}.json`;
         a.click();
         URL.revokeObjectURL(url);
     };
 
-    const runApply = async (items: any[]) => {
+    const runApply = async (items: any[], eventId: string) => {
         const actionable = items.filter((i: any) => !i.skip && i.delegate_id);
         if (actionable.length === 0) {
-            setRepairResult({ type: 'error', count: 0, msg: 'No records found to repair. Load the source CSV, or check the active event holds the NC2 delegates.' });
+            setRepairResult({ type: 'error', count: 0, msg: 'No records found to repair for this event. Load the source CSV (FULL NAME, PHONE...), or pick the correct event in the dropdown.' });
             return;
         }
-        handleRepairBackup(items);
+        handleRepairBackup(items, eventId);
         const rows = actionable.map((i: any) => ({
             delegateId: i.delegate_id,
             title: i.after.title,
@@ -747,18 +749,18 @@ const ImportModule = () => {
             lastName: i.after.last_name,
             district: i.after.district || undefined,
         }));
-        const res = await db.repairNamesFromFile(activeEventId, rows);
+        const res = await db.repairNamesFromFile(eventId, rows);
         setRepairItems([]);
         const verified = res.verified ?? res.updated;
         setRepairResult({
             type: 'repaired',
             count: res.updated,
-            msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List to verify.`
+            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
         });
     };
 
     const handleRepairApply = async () => {
-        if (!activeEventId) return;
+        if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
         setRepairLoading(true);
         setRepairResult(null);
         try {
@@ -766,15 +768,15 @@ const ImportModule = () => {
             if (!items.some((i: any) => !i.skip && i.delegate_id)) {
                 const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
                 if (hasFile) {
-                    const r = await analyzeRepairCsv(repairOrder);
+                    const r = await analyzeRepairCsv(repairOrder, targetEventId);
                     items = r.items;
                     setRepairItems(items);
                 } else {
-                    items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
+                    items = await db.autoRepairScannedNames(targetEventId, repairDistrict || bannerDistrict || undefined);
                     setRepairItems(items);
                 }
             }
-            await runApply(items);
+            await runApply(items, targetEventId);
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
         } finally {
@@ -785,6 +787,10 @@ const ImportModule = () => {
     const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
     const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
     const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
+
+    const targetEventId = repairEventId || activeEventId || '';
+    const targetEvent = events.find((e: any) => e.event_id === targetEventId) || activeEvent || null;
+    const targetEventName = targetEvent?.name || 'the selected event';
 
     const repairFilePreview = (() => {
       const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
@@ -1057,10 +1063,28 @@ const ImportModule = () => {
                             </p>
                         </div>
                     </div>
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                        <label className="text-[8px] font-bold text-amber-700 uppercase">Event to repair:</label>
+                        <select
+                            className="px-3 py-2 border-2 border-amber-200 rounded-xl bg-white font-mono text-xs outline-none focus:ring focus:ring-amber-500/10 max-w-sm"
+                            value={targetEventId}
+                            onChange={e => { setRepairEventId(e.target.value); setRepairItems([]); setRepairResult(null); }}
+                        >
+                            <option value="">{activeEvent?.name ? `${activeEvent.name} (active)` : '— select event —'}</option>
+                            {events.map((ev: any) => (
+                                ev.event_id !== activeEventId ? (
+                                    <option key={ev.event_id} value={ev.event_id}>{ev.name}</option>
+                                ) : null
+                            ))}
+                        </select>
+                        <span className="text-[7px] font-bold text-amber-600 uppercase">
+                            Applies the repair to this event's delegates (defaults to the active event — the NC2 delegates belong to their own event, not '2026 Lagos National Convention').
+                        </span>
+                    </div>
                     <div className="mb-3">
                         <button
                             onClick={handleRepairAutoDetect}
-                            disabled={repairLoading || !activeEventId}
+                            disabled={repairLoading || !targetEventId}
                             className="px-4 py-2 bg-amber-800 hover:bg-amber-700 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50 shadow"
                         >
                             {repairLoading ? 'SCANNING...' : 'Auto-Detect & Normalize NOW'}
@@ -1129,7 +1153,7 @@ const ImportModule = () => {
                     <div className="flex flex-wrap gap-2 mt-3">
                         <button
                             onClick={handleRepairAnalyze}
-                            disabled={repairLoading || !activeEventId || !repairCsv.trim()}
+                            disabled={repairLoading || !targetEventId || !repairCsv.trim()}
                             className="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
                             {repairLoading ? 'ANALYZING...' : '1. Analyze'}
@@ -1143,7 +1167,7 @@ const ImportModule = () => {
                         </button>
                         <button
                             onClick={handleRepairApply}
-                            disabled={repairLoading || !activeEventId}
+                            disabled={repairLoading || !targetEventId}
                             className="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >
                             {repairLoading ? 'REPAIRING...' : '3. Backup & Apply Now'}
