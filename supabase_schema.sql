@@ -1000,6 +1000,18 @@ BEGIN
         AND NULLIF(email, '') IS NOT NULL
         AND LOWER(TRIM(email)) = v_email_lower
       LIMIT 1;
+    ELSE
+      -- No phone AND no email: dedupe by exact identity alone. Prevents
+      -- repeated imports of contact-less rows multiplying identical records.
+      SELECT delegate_id INTO v_existing_id
+      FROM delegates
+      WHERE event_id = p_event_id
+        AND title_key = v_title_key
+        AND name_first_key = v_first_key
+        AND name_last_key = v_last_key
+        AND NULLIF(phone_normalized, '') IS NULL
+        AND NULLIF(email, '') IS NULL
+      LIMIT 1;
     END IF;
 
     IF v_existing_id IS NULL THEN

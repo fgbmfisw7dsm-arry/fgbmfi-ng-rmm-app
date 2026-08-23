@@ -1009,6 +1009,18 @@ export const db = {
                 normalizePhone(r.phone) === payload.phone
             );
             if (dup) throw new Error('A delegate with this name and phone already exists for this event.');
+        } else if (!(payload.email || '').trim()) {
+            const { data: candidates } = await supabase.from('delegates')
+                .select('delegate_id, title, first_name, last_name, phone, email')
+                .eq('event_id', payload.event_id)
+                .eq('first_name', payload.first_name)
+                .eq('last_name', payload.last_name)
+                .limit(25);
+            const hasDup = (candidates || []).some(r =>
+                normNameKey(r.title) === normNameKey(payload.title || 'Mr') &&
+                !normalizePhone(r.phone) && !(r.email || '').trim()
+            );
+            if (hasDup) throw new Error('A contact-less delegate with this name already exists for this event.');
         }
         const { data, error } = await supabase.from('delegates').insert({
             ...payload,
@@ -1786,61 +1798,83 @@ export const db = {
         }
         if (all.length === 0) return 0;
 
-        const identityKey = (d: any) => {
-            const phoneNorm = normalizePhone(d.phone || '');
-            if (phoneNorm) return `P:${phoneNorm}`;
-            const emailLower = (d.email || '').trim().toLowerCase();
-            return emailLower ? `E:${emailLower}` : '';
-        };
-
-        const groups = new Map<string, any[]>();
-        for (const d of all) {
-            const idKey = identityKey(d);
-            if (!idKey) continue;
-            const key = `${d.event_id}|${normNameKey(d.title || 'Mr')}|${normNameKey(d.first_name)}|${normNameKey(d.last_name)}|${idKey}`;
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key)!.push(d);
-        }
-
         const completeness = (d: any) =>
             [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
                 .filter(v => v && String(v).trim()).length;
 
+        const removed = new Set<string>();
         let merged = 0;
+
+        const mergeInto = async (survivor: any, dup: any) => {
+            if (removed.has(survivor.delegate_id) || removed.has(dup.delegate_id)) return;
+            try {
+                const { data: survCheckins } = await supabase.from('checkins').select('session_id').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
+                const survSessions = new Set((survCheckins || []).map((c: any) => c.session_id ?? '__ARRIVAL__'));
+                const { data: dupCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                for (const c of (dupCheckins || []) as any[]) {
+                    const k = c.session_id ?? '__ARRIVAL__';
+                    if (survSessions.has(k)) await supabase.from('checkins').delete().eq('checkin_id', c.checkin_id);
+                    else await supabase.from('checkins').update({ delegate_id: survivor.delegate_id }).eq('checkin_id', c.checkin_id);
+                }
+                const { data: survResp } = await supabase.from('session_responses').select('session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
+                const survKeys = new Set((survResp || []).map((x: any) => `${x.session_id}|${x.response_type}`));
+                const { data: dupResp } = await supabase.from('session_responses').select('response_id, session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                for (const x of (dupResp || []) as any[]) {
+                    if (survKeys.has(`${x.session_id}|${x.response_type}`)) await supabase.from('session_responses').delete().eq('response_id', x.response_id);
+                    else await supabase.from('session_responses').update({ delegate_id: survivor.delegate_id }).eq('response_id', x.response_id);
+                }
+                await supabase.from('badge_print_logs').update({ delegate_id: survivor.delegate_id }).eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
+                await supabase.from('delegates').delete().eq('delegate_id', dup.delegate_id);
+                removed.add(dup.delegate_id);
+                merged++;
+            } catch (e) {
+                console.error('[deduplicateDelegates] merge failed for', dup.delegate_id, e);
+            }
+        };
+
+        const groups = new Map<string, any[]>();
+        for (const d of all) {
+            const phoneNorm = normalizePhone(d.phone || '');
+            const emailLower = (d.email || '').trim().toLowerCase();
+            const namePart = `${normNameKey(d.title || 'Mr')}|${normNameKey(d.first_name)}|${normNameKey(d.last_name)}`;
+            let key: string;
+            if (phoneNorm) key = `${d.event_id}|P:${phoneNorm}|${namePart}`;
+            else if (emailLower) key = `${d.event_id}|E:${emailLower}|${namePart}`;
+            else key = `${d.event_id}|N:${namePart}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(d);
+        }
         for (const members of groups.values()) {
             if (members.length < 2) continue;
             members.sort((a, b) => (completeness(b) - completeness(a)) || ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
             const survivor = members[0];
-            for (const dup of members.slice(1)) {
-                try {
-                    const { data: survCheckins } = await supabase.from('checkins').select('session_id').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
-                    const survSessions = new Set((survCheckins || []).map(c => c.session_id ?? '__ARRIVAL__'));
-                    const { data: dupCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
-                    for (const c of (dupCheckins || [])) {
-                        const key = c.session_id ?? '__ARRIVAL__';
-                        if (survSessions.has(key)) {
-                            await supabase.from('checkins').delete().eq('checkin_id', c.checkin_id);
-                        } else {
-                            await supabase.from('checkins').update({ delegate_id: survivor.delegate_id }).eq('checkin_id', c.checkin_id);
-                        }
-                    }
+            for (const dup of members.slice(1)) await mergeInto(survivor, dup);
+        }
 
-                    const { data: survResp } = await supabase.from('session_responses').select('session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', survivor.delegate_id);
-                    const survRespKeys = new Set((survResp || []).map(x => `${x.session_id}|${x.response_type}`));
-                    const { data: dupResp } = await supabase.from('session_responses').select('response_id, session_id, response_type').eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
-                    for (const x of (dupResp || [])) {
-                        if (survRespKeys.has(`${x.session_id}|${x.response_type}`)) {
-                            await supabase.from('session_responses').delete().eq('response_id', x.response_id);
-                        } else {
-                            await supabase.from('session_responses').update({ delegate_id: survivor.delegate_id }).eq('response_id', x.response_id);
-                        }
-                    }
-
-                    await supabase.from('badge_print_logs').update({ delegate_id: survivor.delegate_id }).eq('event_id', survivor.event_id).eq('delegate_id', dup.delegate_id);
-                    await supabase.from('delegates').delete().eq('delegate_id', dup.delegate_id);
-                    merged++;
-                } catch (e) {
-                    console.error('[deduplicateDelegates] merge failed for', dup.delegate_id, e);
+        const phoneGroups = new Map<string, any[]>();
+        for (const d of all) {
+            if (removed.has(d.delegate_id)) continue;
+            const p = normalizePhone(d.phone || '');
+            if (!p) continue;
+            if (!phoneGroups.has(p)) phoneGroups.set(p, []);
+            phoneGroups.get(p)!.push(d);
+        }
+        for (const members of phoneGroups.values()) {
+            if (members.length < 2) continue;
+            for (let i = 0; i < members.length; i++) {
+                for (let j = i + 1; j < members.length; j++) {
+                    const a = members[i];
+                    const b = members[j];
+                    if (removed.has(a.delegate_id) || removed.has(b.delegate_id)) continue;
+                    const aT = normNameKey(a.title || 'Mr'), bT = normNameKey(b.title || 'Mr');
+                    const aF = normNameKey(a.first_name), aL = normNameKey(a.last_name);
+                    const bF = normNameKey(b.first_name), bL = normNameKey(b.last_name);
+                    const sameEmail = (a.email || '').trim().toLowerCase() === (b.email || '').trim().toLowerCase();
+                    const transposed = aT === bT && aF === bL && aL === bF && aF !== aL && !!aF && !!aL;
+                    if (!transposed || !sameEmail) continue;
+                    const winner = completeness(a) >= completeness(b) ? a : b;
+                    const loser = winner === a ? b : a;
+                    await mergeInto(winner, loser);
                 }
             }
         }

@@ -51,7 +51,7 @@ function resolveGuestFields(district: string, chapter: string, delegateType: str
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.25 · reuse top file';
+const IMPORT_BUILD_LABEL = 'v1.27 · clear titles + no-contact dedup';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -752,10 +752,11 @@ const ImportModule = () => {
         const res = await db.repairNamesFromFile(eventId, rows);
         setRepairItems([]);
         const verified = res.verified ?? res.updated;
+        const blankedTitles = actionable.filter((i: any) => !i.after.title && (i.before.title || '').trim()).length;
         setRepairResult({
             type: 'repaired',
             count: res.updated,
-            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
+            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${blankedTitles > 0 ? `; ${blankedTitles} default 'Mr' titles CLEARED to blank` : ''}${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
         });
     };
 
@@ -787,6 +788,15 @@ const hasFile = repairHasFile;
     const matchedCount = detectedColumns.filter(c => columnMap[c] !== false).length;
     const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
     const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
+
+    const handleClearDefaultTitles = async () => {
+        if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
+        if (!repairHasFile) {
+            setRepairResult({ type: 'error', count: 0, msg: `No source file is available. Load the NC2 CSV here in the Repair panel — note the Bulk Delegate Import section clears its file after a successful import, so load it here, then retry.` });
+            return;
+        }
+        await handleRepairAutoDetect();
+    };;
 
     const targetEventId = repairEventId || activeEventId || '';
     const targetEvent = events.find((e: any) => e.event_id === targetEventId) || activeEvent || null;
@@ -1092,8 +1102,15 @@ const hasFile = repairHasFile;
                         >
                             {repairLoading ? 'SCANNING...' : 'Auto-Detect & Normalize NOW'}
                         </button>
+                        <button
+                            onClick={handleClearDefaultTitles}
+                            disabled={repairLoading || !targetEventId}
+                            className="ml-2 px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50 shadow"
+                        >
+                            {repairLoading ? 'RUNNING...' : 'Clear Default "Mr" Titles'}
+                        </button>
                         <p className="text-[7px] font-bold text-amber-600 uppercase mt-1">
-                            With a CSV pasted/uploaded below: re-derives every row from the file (full coverage). Without a file: scans existing records and only proposes rows with a real title trapped in the Last Name.
+                            'Clear Default "Mr" Titles' blanks the Title on rows that have no readable title in the source CSV (ladies included). It requires the CSV loaded here — the top Import section clears its file after importing.
                         </p>
                     </div>
                     <div className="mb-2 flex flex-wrap items-center gap-3">
