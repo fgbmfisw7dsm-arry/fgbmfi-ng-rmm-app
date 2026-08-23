@@ -543,23 +543,64 @@ const ImportModule = () => {
 
     const nameKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
 
-    const analyzeRepairCsv = async (order: NameOrder): Promise<{ items: any[]; parsedCount: number }> => {
-        const lines = repairCsv.split('\n').map(l => l.trim()).filter(Boolean);
+    const extractRepairRows = (text: string, order: NameOrder): { parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; raw: string }>; banner: string; headerDesc: string | null } => {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const { headerIndex, bannerDistrict, found } = detectHeaderRow(lines);
+        const banner = bannerDistrict || '';
+        const headers = found ? parseHeaders(lines[headerIndex] || '') : [];
+        const fullNameIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+        const phoneIdxList: number[] = [];
+        const districtIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'District');
+        if (found) {
+            headers.forEach((h, i) => {
+                const k = normalizeKey(h);
+                if (KNOWN_FIELDS[k] === 'Phone' && !WHATSAPP_LIKE_HEADERS.has(k)) phoneIdxList.push(i);
+            });
+        }
+        const pick = (values: string[], indices: number[]): string => {
+            for (const idx of indices) {
+                const v = (values[idx] || '').trim().replace(/^["']|["']$/g, '');
+                if (v) return v;
+            }
+            return '';
+        };
         const parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; raw: string }> = [];
-        for (const line of lines) {
-            const parts = line.split(',');
-            const fullName = ((parts[0] || '').trim().replace(/^["']|["']$/g, '')).replace(/\s+/g, ' ');
-            const phone = normalizePhone((parts[1] || '').trim().replace(/^["']|["']$/g, ''));
-            const district = (parts[2] || '').trim().replace(/^["']|["']$/g, '');
+        const dataStart = found ? headerIndex + 1 : 0;
+        for (let i = dataStart; i < lines.length; i++) {
+            if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(lines[i])) continue;
+            const values = lines[i].split(',');
+            let fullName = '';
+            let phone = '';
+            let district = '';
+            if (found && fullNameIdx >= 0 && phoneIdxList.length > 0) {
+                fullName = (values[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
+                phone = normalizePhone(pick(values, phoneIdxList));
+                district = districtIdx >= 0 ? (values[districtIdx] || '').trim() : '';
+            } else {
+                fullName = (values[0] || '').trim().replace(/^["']|["']$/g, '');
+                phone = normalizePhone((values[1] || '').trim().replace(/^["']|["']$/g, ''));
+                district = (values[2] || '').trim();
+            }
+            fullName = fullName.replace(/\s+/g, ' ').trim();
             if (!fullName || !phone) continue;
             const p = parseFullName(fullName, order);
             parsedRows.push({ phone, title: p.title, first: p.firstName, last: p.lastName, district, raw: fullName });
         }
+        const headerDesc = found
+            ? (fullNameIdx >= 0 && phoneIdxList.length > 0 ? 'columns detected (Full Name + Phone)' : 'header found but no Full Name/Phone columns')
+            : null;
+        return { parsedRows, banner, headerDesc };
+    };
+
+    const analyzeRepairCsv = async (order: NameOrder): Promise<{ items: any[]; parsedCount: number; banner: string; headerDesc: string | null; rowsDroppedNoPhone: number }> => {
+        const { parsedRows, banner, headerDesc } = extractRepairRows(repairCsv, order);
+        const districtDefault = banner;
         const phones = Array.from(new Set(parsedRows.map(r => r.phone))).filter(Boolean);
-        if (phones.length === 0) return { items: [], parsedCount: parsedRows.length };
+        const realParsed = parsedRows.filter(r => r.phone);
+        if (phones.length === 0) return { items: [], parsedCount: parsedRows.length, banner: districtDefault, headerDesc, rowsDroppedNoPhone: parsedRows.length };
         const candidates = await db.getDelegatesByPhones(activeEventId, phones);
         const items: any[] = [];
-        for (const pr of parsedRows) {
+        for (const pr of realParsed) {
             const deps = candidates.filter(c => normalizePhone(c.phone) === pr.phone);
             if (deps.length === 0) { items.push({ raw: pr.raw, skip: 'no delegate with this phone' }); continue; }
             const matched = deps.filter(d => nameKey(d.first_name) === nameKey(pr.last) || nameKey(d.last_name) === nameKey(pr.last));
@@ -574,7 +615,8 @@ const ImportModule = () => {
             const match = matched[0];
             const alreadyCorrect = nameKey(match.first_name) === nameKey(pr.first) && nameKey(match.last_name) === nameKey(pr.last);
             if (alreadyCorrect) { items.push({ raw: pr.raw, skip: 'already correct' }); continue; }
-            const zoneLabel = /^(ZONE|AREA)\s*\d+$/i.test(match.district || '');
+            const zoneLabel = /^(ZONE|AREA)\s*\d+$/i.test(pr.district);
+            let district = repairDistrict || ((pr.district && !zoneLabel) ? pr.district : districtDefault) || '';
             items.push({
                 delegate_id: match.delegate_id,
                 raw: pr.raw,
@@ -584,12 +626,12 @@ const ImportModule = () => {
                     title: pr.title,
                     first_name: pr.first,
                     last_name: pr.last,
-                    district: (repairDistrict || pr.district || (zoneLabel && bannerDistrict ? bannerDistrict : '')) || ''
+                    district
                 },
-                districtReason: (repairDistrict || pr.district || (zoneLabel && bannerDistrict) ? 'will fix district' : ''),
+                districtReason: district && district !== (match.district || '') ? 'will fix district' : '',
             });
         }
-        return { items, parsedCount: parsedRows.length };
+        return { items, parsedCount: parsedRows.length, banner: districtDefault, headerDesc, rowsDroppedNoPhone: parsedRows.length - realParsed.length };
     };
 
     const handleRepairAnalyze = async () => {
@@ -603,14 +645,22 @@ const ImportModule = () => {
         setRepairResult(null);
         setRepairItems([]);
         try {
-            const { items, parsedCount } = await analyzeRepairCsv(repairOrder);
+            const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
             const actionable = items.filter(i => !i.skip && i.delegate_id);
             setRepairItems(items);
-            setRepairResult({
-                type: 'preview',
-                count: actionable.length,
-                msg: `${parsedCount} rows parsed (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'}); ${actionable.length} repairable; ${items.length - actionable.length} skipped.`
-            });
+            const desc = headerDesc ? ` — ${headerDesc}` : '';
+            if (parsedCount === 0) {
+                setRepairResult({
+                    type: 'preview', count: 0,
+                    msg: `No rows could be parsed from the provided data${desc}. Confirm the file/rows include a FULL NAME column and a phone column (for the Formatted district CSVs use its FULL NAME + PHONE NUMBER columns as-is).`
+                });
+            } else {
+                setRepairResult({
+                    type: 'preview',
+                    count: actionable.length,
+                    msg: `${parsedCount} rows parsed (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'})${desc}. ${actionable.length} repairable; ${items.length - actionable.length} skipped${rowsDroppedNoPhone > 0 ? `; ${rowsDroppedNoPhone} rows had no phone` : ''}.`
+                });
+            }
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
         } finally {
@@ -626,14 +676,22 @@ const ImportModule = () => {
         try {
             const hasFile = repairCsv.split('\n').map(l => l.trim()).filter(Boolean).length > 0;
             if (hasFile) {
-                const { items, parsedCount } = await analyzeRepairCsv(repairOrder);
+                const { items, parsedCount, headerDesc, rowsDroppedNoPhone } = await analyzeRepairCsv(repairOrder);
                 const actionable = items.filter(i => !i.skip && i.delegate_id);
                 setRepairItems(items);
-                setRepairResult({
-                    type: 'preview',
-                    count: actionable.length,
-                    msg: `File-based re-derive (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'}): ${parsedCount} rows parsed; ${actionable.length} repairable; ${items.length - actionable.length} skipped.`
-                });
+                const desc = headerDesc ? ` — ${headerDesc}` : '';
+                if (parsedCount === 0) {
+                    setRepairResult({
+                        type: 'preview', count: 0,
+                        msg: `No rows parsed${desc}. Confirm the data includes a FULL NAME + phone column (the Formatted district CSVs work as-is).`
+                    });
+                } else {
+                    setRepairResult({
+                        type: 'preview',
+                        count: actionable.length,
+                        msg: `File-based re-derive (${repairOrder === 'surname-first' ? 'Surname First' : 'Given First'})${desc}: ${parsedCount} rows parsed; ${actionable.length} repairable; ${items.length - actionable.length} skipped${rowsDroppedNoPhone > 0 ? `; ${rowsDroppedNoPhone} rows had no phone` : ''}.`
+                    });
+                }
             } else {
                 const items = await db.autoRepairScannedNames(activeEventId, repairDistrict || bannerDistrict || undefined);
                 setRepairItems(items);
@@ -948,7 +1006,7 @@ const ImportModule = () => {
                         <div>
                             <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-wider">Repair Imported Names</h4>
                             <p className="text-[8px] font-bold text-amber-600 uppercase mt-0.5">
-                                Normalizes records imported from surname-first files (e.g. {'"Achizue Engr Kenneth"'}) that landed with the surname in the First Name field. Supply the source CSV (FULL NAME, PHONE) for full per-row re-derive of Title / First / Last — including title-less rows. Matches by phone + surname, backs up, then updates in place (no duplicates, attendance preserved).
+                                Normalizes records imported from surname-first files (e.g. {'"Achizue Engr Kenneth"'}) that landed with the surname in the First Name field. Supply the source CSV directly — headers are auto-detected (S/N, FULL NAME, PHONE NUMBER, EMAIL, DISTRICT, CHAPTER). Every row is matched by phone + surname and Title / First / Last / District updated in place (no duplicates, attendance preserved).
                             </p>
                         </div>
                     </div>
@@ -993,7 +1051,7 @@ const ImportModule = () => {
                     </div>
                     <textarea
                         className="w-full h-28 p-4 border-2 border-amber-200 rounded-xl bg-white font-mono text-xs focus:ring-4 focus:ring-amber-500/10 outline-none transition-all resize-none"
-                        placeholder={"Achizue Engr Kenneth, 8037958534, North Central 2\nAdemora Mrs Chika, 7064640818"}
+                        placeholder={"Or paste data below (headers optional — S/N, FULL NAME, PHONE NUMBER, ... auto-detected):\nAchizue Engr Kenneth, 8037958534, North Central 2"}
                         value={repairCsv}
                         onChange={e => setRepairCsv(e.target.value)}
                     />
