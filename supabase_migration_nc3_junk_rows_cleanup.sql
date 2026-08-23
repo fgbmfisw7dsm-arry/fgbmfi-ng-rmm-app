@@ -1,81 +1,94 @@
 -- ============================================================
--- NC3 JUNK-ROW CLEANUP — manual run in the Supabase SQL editor
+-- NC3 JUNK-ROW CLEANUP v2 — event-name agnostic (manual run in SQL editor)
 -- ============================================================
--- Problem: importing Combined_NC3_Registrations_Formatted csv pulled in the
--- trailing summary block (`Zone Summary`, `ZONE,Adults,Teens,...`,
--- `UPZ I,78,2,5,...`, `GRAND TOTAL,...`, `Notes:`) as delegates with
--- numeric/blank first/last names. They appear at the TOP of the Master List
--- because digits sort before letters in last_name ordering.
+-- v1 failed to delete the imported junk rows because the NC3 delegates are
+-- hosted in an event whose name does not contain 'NC3' / 'North Central 3',
+-- so the name filter matched zero events and the backup table was empty.
 --
--- This script removes exactly those rows for the NC3 event only. It backs up
--- first, so you can restore with a one-line INSERT if anything looks wrong.
+-- This version does NOT depend on the event name. It locates junk rows by
+-- their DATA signature (blank or purely-numeric first/last names, header-word
+-- names, note-fragment names) across ALL events, so it finds them wherever
+-- they landed. It still backs up first and shows a preview you must review
+-- before Step 4 deletes.
 --
--- HOW TO RUN:
---   1. Run STEP A  and confirm it returns your NC3 event (edit the name
---      pattern if your event is named differently).
---   2. Run STEP B  and REVIEW the candidate list — make sure ONLY junk rows
---      (numeric/blank names) are listed, no real delegates.
---   3. Run STEP C  to delete (dependents first: badge_print_logs,
---      session_responses, checkins, then delegates).
---   4. Run STEP D  sanity checks.
+-- Deleting a delegate cascades to its dependents automatically because the
+-- schema uses ON DELETE CASCADE on checkins, session_responses and
+-- badge_print_logs.delegate_id (verified in the live schema dump).
+--
+-- HOW TO RUN (strictly in order):
+--   1. Step 1 = inspect. Run it and review the list.
+--   2. Step 2 = backup + Step 3 = preview candidate count (run both).
+--   3. Step 4 = DELETE — only after you confirm ONLY junk rows are listed.
+--   4. Step 5 = verify. Should return 0 remaining junk.
 -- ============================================================
 
 -- ---------------------------------------------------------------------------
--- STEP A — resolve the NC3 event id
+-- STEP 1 — see where your districts live + confirm the junk rows are present
 -- ---------------------------------------------------------------------------
-SELECT event_id, name
-FROM events
-WHERE name ILIKE '%NC3%' OR name ILIKE '%North Central 3%'
-ORDER BY created_at DESC;
+-- 1a. Events + delegate counts (find the event hosting the NC3 import):
+SELECT e.event_id, e.name, count(d.delegate_id) AS delegates
+FROM events e
+LEFT JOIN delegates d ON d.event_id = e.event_id
+GROUP BY e.event_id, e.name
+ORDER BY delegates DESC;
+
+-- 1b. Junk candidates across ALL events (blank / pure-numeric / header-word names):
+SELECT e.name AS event, d.delegate_id, d.title, d.first_name, d.last_name,
+       d.district, d.chapter, d.phone, d.email
+FROM delegates d
+JOIN events e ON e.event_id = d.event_id
+WHERE (
+  COALESCE(TRIM(d.first_name), '') = ''
+  OR COALESCE(TRIM(d.last_name), '') = ''
+  OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
+  OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
+  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
+  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
+  OR TRIM(d.first_name) ~ '>'
+  OR TRIM(d.last_name) ~ '>'
+)
+ORDER BY d.last_name NULLS FIRST, d.first_name NULLS FIRST;
 
 -- ---------------------------------------------------------------------------
--- STEP B — backup + preview the candidates (REVIEW BEFORE DELETING)
+-- STEP 2 — back up the candidates
 -- ---------------------------------------------------------------------------
-DROP TABLE IF EXISTS _nc3_junk_backup;
-CREATE TABLE _nc3_junk_backup AS
+DROP TABLE IF EXISTS _junk_backup;
+CREATE TABLE _junk_backup AS
 SELECT d.*
 FROM delegates d
-JOIN events e USING (event_id)
-WHERE (e.name ILIKE '%NC3%' OR e.name ILIKE '%North Central 3%')
-  AND (
-    COALESCE(TRIM(d.first_name), '') = ''
-    OR COALESCE(TRIM(d.last_name), '') = ''
-    OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
-    OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
-    OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-    OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-    OR TRIM(d.first_name) ~ '>'
-    OR TRIM(d.last_name) ~ '>'
-  );
-
-SELECT delegate_id, title, first_name, last_name, district, chapter, phone, email
-FROM _nc3_junk_backup
-ORDER BY last_name NULLS FIRST, first_name NULLS FIRST;
+WHERE (
+  COALESCE(TRIM(d.first_name), '') = ''
+  OR COALESCE(TRIM(d.last_name), '') = ''
+  OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
+  OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
+  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
+  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
+  OR TRIM(d.first_name) ~ '>'
+  OR TRIM(d.last_name) ~ '>'
+);
 
 -- ---------------------------------------------------------------------------
--- STEP C — delete (dependents first, then the delegates)
+-- STEP 3 — preview candidate COUNT (review before deleting)
 -- ---------------------------------------------------------------------------
-DELETE FROM badge_print_logs  WHERE delegate_id IN (SELECT delegate_id FROM _nc3_junk_backup);
-DELETE FROM session_responses WHERE delegate_id IN (SELECT delegate_id FROM _nc3_junk_backup);
-DELETE FROM checkins          WHERE delegate_id IN (SELECT delegate_id FROM _nc3_junk_backup);
-DELETE FROM delegates         WHERE delegate_id IN (SELECT delegate_id FROM _nc3_junk_backup);
+SELECT count(*) AS junk_candidates FROM _junk_backup;
 
 -- ---------------------------------------------------------------------------
--- STEP D — sanity checks (should all be 0)
+-- STEP 4 — DELETE (dependents cascade automatically). Only run after review.
+-- ---------------------------------------------------------------------------
+DELETE FROM delegates WHERE delegate_id IN (SELECT delegate_id FROM _junk_backup);
+
+-- ---------------------------------------------------------------------------
+-- STEP 5 — verify: remaining junk should be 0
 -- ---------------------------------------------------------------------------
 SELECT count(*) AS remaining_junk
 FROM delegates d
-JOIN events e USING (event_id)
-WHERE (e.name ILIKE '%NC3%' OR e.name ILIKE '%North Central 3%')
-  AND (
-    COALESCE(TRIM(d.first_name), '') = ''
-    OR COALESCE(TRIM(d.last_name), '') = ''
-    OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
-    OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
-  );
+WHERE (
+  COALESCE(TRIM(d.first_name), '') = ''
+  OR COALESCE(TRIM(d.last_name), '') = ''
+  OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
+  OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
+);
 
-SELECT count(*) AS backed_up
-FROM _nc3_junk_backup;
-
--- To restore the backup if ever needed:
--- INSERT INTO delegates SELECT * FROM _nc3_junk_backup;
+-- To restore the backup if ever needed ==============================
+-- INSERT INTO delegates (SELECT * FROM _junk_backup);
+-- ===================================================================

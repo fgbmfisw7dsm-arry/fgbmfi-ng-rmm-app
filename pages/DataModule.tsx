@@ -41,6 +41,12 @@ const DataModule = () => {
 
     const [loading, setLoading] = useState(false);
 
+    // State for Junk Row Cleanup
+    const [junkRows, setJunkRows] = useState<Array<any & { junkReason: string }>>([]);
+    const [junkScanning, setJunkScanning] = useState(false);
+    const [junkBackupReady, setJunkBackupReady] = useState(false);
+    const [junkDeleting, setJunkDeleting] = useState(false);
+
     useEffect(() => {
         db.getSettings().then(setSettings);
         db.getEvents().then(setEvents);
@@ -162,6 +168,52 @@ const DataModule = () => {
             alert("Purge failed: " + e.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // --- LOGIC: JUNK ROW CLEANUP (imported summary/header rows) ---
+    const handleJunkScan = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        setJunkScanning(true);
+        setJunkBackupReady(false);
+        try {
+            const { rows } = await db.findJunkDelegates(activeEventId);
+            setJunkRows(rows);
+            if (rows.length === 0) {
+                alert("No junk rows found in the active event. The Master List is clean.");
+            }
+        } catch (e: any) {
+            alert("Scan failed: " + (e.message || "Database connection error."));
+        } finally {
+            setJunkScanning(false);
+        }
+    };
+
+    const handleJunkBackup = async () => {
+        if (junkRows.length === 0) return alert("Scan first.");
+        try {
+            downloadJSON({ event_id: activeEventId, event_name: activeEvent?.name || '', exported_at: new Date().toISOString(), junkRows }, `BACKUP_JUNK_ROWS_${activeEvent?.name || 'EVENT'}_${Date.now()}.json`);
+            setJunkBackupReady(true);
+            alert("BACKUP DOWNLOADED: You can now proceed to delete the junk rows.");
+        } catch (e: any) {
+            alert("Backup failed: " + e.message);
+        }
+    };
+
+    const handleJunkDelete = async () => {
+        if (!junkBackupReady) return alert("Download the backup first.");
+        if (junkRows.length === 0) return alert("Scan first.");
+        if (!window.confirm(`This will permanently delete ${junkRows.length} junk delegate row(s) from ${activeEvent?.name || 'the active event'} (with their check-ins / session responses / badge logs). Continue?`)) return;
+        setJunkDeleting(true);
+        try {
+            const deleted = await db.deleteJunkDelegates(activeEventId!, junkRows.map(r => r.delegate_id));
+            alert(`SUCCESS: Removed ${deleted} junk delegate row(s) from ${activeEvent?.name || 'the active event'}.`);
+            setJunkRows([]);
+            setJunkBackupReady(false);
+        } catch (e: any) {
+            alert("Delete failed: " + e.message);
+        } finally {
+            setJunkDeleting(false);
         }
     };
 
@@ -310,6 +362,95 @@ const DataModule = () => {
                                 {loading ? 'DELETING...' : `PURGE ${selectedDistrict.toUpperCase()}`}
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* MODULE 3: JUNK ROW CLEANUP */}
+            <div className="bg-white rounded-3xl shadow-xl border-t-8 border-amber-500 overflow-hidden">
+                <div className="p-6 bg-amber-50 border-b border-amber-100">
+                    <h3 className="text-lg font-black text-amber-900 uppercase">Junk Row Cleanup</h3>
+                    <p className="text-[10px] font-bold text-amber-700 uppercase">Remove delegates created from CSV header/summary rows (blank, numeric, or header-word names) in the active event</p>
+                </div>
+                <div className="p-8 space-y-6">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-black text-gray-400 uppercase block mb-1">Target Event:</span>
+                        <span className="text-xl font-black text-blue-900 uppercase">{activeEvent?.name || 'NO EVENT SELECTED'}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span>
+                            Scan for Junk Rows
+                        </label>
+                        <button
+                            onClick={handleJunkScan}
+                            disabled={junkScanning || !activeEventId}
+                            className="w-full py-4 bg-amber-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-amber-700 transition-all disabled:opacity-30"
+                        >
+                            {junkScanning ? 'SCANNING...' : (junkRows.length > 0 ? `Scan Again (${junkRows.length} found)` : '🔍 Scan Active Event')}
+                        </button>
+                    </div>
+
+                    {junkRows.length > 0 && (
+                        <div className="bg-amber-50/60 rounded-xl border border-amber-100 overflow-hidden">
+                            <div className="flex items-center justify-between px-4 py-2 bg-amber-100">
+                                <span className="text-[10px] font-black text-amber-900 uppercase">{junkRows.length} Junk Row(s) Detected</span>
+                                <span className="text-[8px] font-bold text-amber-700 uppercase">Check-in / session / badge history will cascade</span>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto">
+                                <table className="w-full text-[10px]">
+                                    <thead className="sticky top-0 bg-amber-100 text-amber-900 uppercase font-black tracking-wider">
+                                        <tr>
+                                            <th className="p-2 text-left w-10">#</th>
+                                            <th className="p-2 text-left">Name</th>
+                                            <th className="p-2 text-left">District</th>
+                                            <th className="p-2 text-left">Chapter</th>
+                                            <th className="p-2 text-left">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {junkRows.map((r, i) => (
+                                            <tr key={r.delegate_id} className="border-b border-amber-100 bg-white">
+                                                <td className="p-2 font-mono text-gray-400">{i + 1}</td>
+                                                <td className="p-2 font-mono text-amber-900">{r.first_name || '—'} {r.last_name || '—'}</td>
+                                                <td className="p-2 font-mono text-gray-600">{r.district || '—'}</td>
+                                                <td className="p-2 font-mono text-gray-600">{r.chapter || '—'}</td>
+                                                <td className="p-2 text-[8px] font-black text-red-600 uppercase">{r.junkReason}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">2</span>
+                            Backup Junk Rows
+                        </label>
+                        <button
+                            onClick={handleJunkBackup}
+                            disabled={junkRows.length === 0}
+                            className="w-full py-4 bg-slate-800 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-30"
+                        >
+                            {junkBackupReady ? '✅ Backup Downloaded' : 'Generate & Download Backup'}
+                        </button>
+                    </div>
+
+                    <div className={`space-y-2 transition-all duration-500 ${junkBackupReady ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
+                        <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
+                            <span className="bg-red-100 w-5 h-5 rounded-full flex items-center justify-center">3</span>
+                            Delete Junk Rows
+                        </label>
+                        <button
+                            onClick={handleJunkDelete}
+                            disabled={junkDeleting || junkRows.length === 0}
+                            className="w-full py-5 bg-red-600 text-white font-black rounded-xl uppercase text-sm tracking-[0.2em] shadow-2xl hover:bg-red-700 disabled:opacity-10"
+                        >
+                            {junkDeleting ? 'DELETING...' : `DELETE ${junkRows.length} JUNK ROW(S)`}
+                        </button>
                     </div>
                 </div>
             </div>

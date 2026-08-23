@@ -1483,6 +1483,64 @@ export const db = {
         return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
     },
 
+    junkReasonOf: (d: { first_name?: string; last_name?: string }): string | null => {
+        const f = (d.first_name || '').trim().toUpperCase();
+        const l = (d.last_name || '').trim().toUpperCase();
+        const blank = !(d.first_name || '').trim() && !(d.last_name || '').trim();
+        const nonAlphaF = (d.first_name || '').trim() && !/[A-Za-z]/.test(d.first_name || '');
+        const nonAlphaL = (d.last_name || '').trim() && !/[A-Za-z]/.test(d.last_name || '');
+        if (blank) return 'no name';
+        if (nonAlphaF || nonAlphaL) return 'numeric/blank name';
+        const words = new Set(['ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:']);
+        if (words.has(f) || words.has(l)) return 'summary/header word';
+        if (/[<>]/.test(f) || /[<>]/.test(l)) return 'note/summary fragment';
+        if (/^(ZONE SUMMARY|GRAND TOTAL|REGISTRATION RECORDS)/.test(`${f} ${l}`.trim())) return 'summary block row';
+        return null;
+    },
+
+    findJunkDelegates: async (eventId: string): Promise<{ rows: Array<Delegate & { junkReason: string }>; total: number }> => {
+        if (!eventId) return { rows: [], total: 0 };
+        const rows: Array<Delegate & { junkReason: string }> = [];
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('delegates')
+                .select('delegate_id, title, first_name, last_name, district, chapter, phone, email, rank, office, delegate_type, external_id, event_id, qr_hash')
+                .eq('event_id', eventId)
+                .order('last_name', { ascending: true })
+                .order('first_name', { ascending: true })
+                .range(from, from + 999);
+            if (error) {
+                console.error('[findJunkDelegates] fetch error:', error);
+                break;
+            }
+            if (!data || data.length === 0) break;
+            for (const d of data) {
+                const reason = db.junkReasonOf(d);
+                if (reason) rows.push({ ...(d as Delegate), junkReason: reason });
+            }
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        console.log(`[findJunkDelegates] event ${eventId}: found ${rows.length} junk row(s)`);
+        return { rows, total: rows.length };
+    },
+
+    deleteJunkDelegates: async (eventId: string, ids: string[]): Promise<number> => {
+        if (!eventId || ids.length === 0) return 0;
+        await ensureEventActive(eventId);
+        await supabase.from('checkins').delete().in('delegate_id', ids);
+        await supabase.from('session_responses').delete().in('delegate_id', ids);
+        await supabase.from('badge_print_logs').delete().in('delegate_id', ids);
+        const { error: delErr } = await supabase.from('delegates').delete().in('delegate_id', ids);
+        if (delErr) {
+            console.error('[deleteJunkDelegates] delete error:', delErr);
+            throw delErr;
+        }
+        console.log(`[deleteJunkDelegates] Deleted ${ids.length} junk delegate(s) from event ${eventId}`);
+        return ids.length;
+    },
+
     /** A–D: Multi-field anomaly detection + confidence scoring. Returns full analysis with proposed repairs. */
     analyzeScrambledDelegates: async (eventId: string): Promise<{
         analyses: Array<{
