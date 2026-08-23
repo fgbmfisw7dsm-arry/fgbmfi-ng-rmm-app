@@ -99,6 +99,28 @@ const ensureEventActive = async (eventId: string) => {
     }
 };
 
+const normKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
+
+const rehomeAndDeleteDelegate = async (eventId: string, dupId: string, survivorId: string) => {
+    const { data: survCheckins } = await supabase.from('checkins').select('session_id').eq('event_id', eventId).eq('delegate_id', survivorId);
+    const survSessions = new Set((survCheckins || []).map((c: any) => c.session_id ?? '__ARRIVAL__'));
+    const { data: dupCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', eventId).eq('delegate_id', dupId);
+    for (const c of (dupCheckins || []) as any[]) {
+        const k = c.session_id ?? '__ARRIVAL__';
+        if (survSessions.has(k)) await supabase.from('checkins').delete().eq('checkin_id', c.checkin_id);
+        else await supabase.from('checkins').update({ delegate_id: survivorId }).eq('checkin_id', c.checkin_id);
+    }
+    const { data: survResp } = await supabase.from('session_responses').select('session_id, response_type').eq('event_id', eventId).eq('delegate_id', survivorId);
+    const survKeys = new Set((survResp || []).map((x: any) => `${x.session_id}|${x.response_type}`));
+    const { data: dupResp } = await supabase.from('session_responses').select('response_id, session_id, response_type').eq('event_id', eventId).eq('delegate_id', dupId);
+    for (const x of (dupResp || []) as any[]) {
+        if (survKeys.has(`${x.session_id}|${x.response_type}`)) await supabase.from('session_responses').delete().eq('response_id', x.response_id);
+        else await supabase.from('session_responses').update({ delegate_id: survivorId }).eq('response_id', x.response_id);
+    }
+    await supabase.from('badge_print_logs').update({ delegate_id: survivorId }).eq('event_id', eventId).eq('delegate_id', dupId);
+    await supabase.from('delegates').delete().eq('delegate_id', dupId);
+};
+
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
         let profile: any = null;
@@ -1885,6 +1907,7 @@ export const db = {
         await ensureEventActive(eventId);
         let updated = 0;
         let errors = 0;
+        let merged = 0;
         const wanted = new Map<string, Record<string, string>>();
         for (const r of rows) {
             const updates: Record<string, string> = {};
@@ -1895,8 +1918,35 @@ export const db = {
             if (Object.keys(updates).length === 0) continue;
             wanted.set(r.delegateId, updates);
             const { error } = await supabase.from('delegates').update(updates).eq('delegate_id', r.delegateId).eq('event_id', eventId);
-            if (error) { errors++; console.error('[repairNamesFromFile] update error', r.delegateId, error.message); }
-            else updated++;
+            if (!error) { updated++; continue; }
+            if (error.code === '23505' || error.message?.includes('duplicate')) {
+                const { data: before } = await supabase.from('delegates')
+                    .select('event_id, phone_normalized, title, first_name, last_name')
+                    .eq('delegate_id', r.delegateId).eq('event_id', eventId).maybeSingle();
+                const phoneNorm = before?.phone_normalized;
+                let siblingId: string | undefined;
+                if (phoneNorm) {
+                    const { data: sib } = await supabase.from('delegates')
+                        .select('delegate_id, title, first_name, last_name').eq('event_id', eventId)
+                        .eq('phone_normalized', phoneNorm).limit(20);
+                    const target = { title: updates.title || 'Mr', first: updates.first_name || '', last: updates.last_name || '' };
+                    siblingId = (sib || []).find((s: any) =>
+                        s.delegate_id !== r.delegateId &&
+                        normKey(s.title) === normKey(target.title) &&
+                        normKey(s.first_name) === normKey(target.first) &&
+                        normKey(s.last_name) === normKey(target.last))?.delegate_id;
+                }
+                if (siblingId) {
+                    await rehomeAndDeleteDelegate(eventId, r.delegateId, siblingId);
+                    merged++;
+                } else {
+                    errors++;
+                    console.error('[repairNamesFromFile] duplicate not reconcilable', r.delegateId, error.message);
+                }
+            } else {
+                errors++;
+                console.error('[repairNamesFromFile] update error', r.delegateId, error.message);
+            }
         }
         let verified = 0;
         if (updated > 0) {
@@ -1917,7 +1967,7 @@ export const db = {
                 }
             }
         }
-        return { updated, errors, verified };
+        return { updated, errors, merged, verified };
     },
 
     regenerateQrHash: async (delegateId: string): Promise<string> => {

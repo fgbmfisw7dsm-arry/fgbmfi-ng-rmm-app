@@ -610,13 +610,13 @@ const ImportModule = () => {
                 items.push({ raw: pr.raw, skip: 'phone matched but surname not found in record' });
                 continue;
             }
-            if (matched.length > 1) {
+            const needChange = matched.filter(d => !(nameKey(d.first_name) === nameKey(pr.first) && nameKey(d.last_name) === nameKey(pr.last)));
+            if (needChange.length > 1) {
                 items.push({ raw: pr.raw, skip: 'ambiguous (multiple records share name + phone)' });
                 continue;
             }
-            const match = matched[0];
-            const alreadyCorrect = nameKey(match.first_name) === nameKey(pr.first) && nameKey(match.last_name) === nameKey(pr.last);
-            if (alreadyCorrect) { items.push({ raw: pr.raw, skip: 'already correct' }); continue; }
+            const match = needChange[0] || matched[0];
+            if (!needChange.length) { items.push({ raw: pr.raw, skip: 'already correct' }); continue; }
             const zoneLabel = /^(ZONE|AREA)\s*\d+$/i.test(pr.district);
             let district = repairDistrict || ((pr.district && !zoneLabel) ? pr.district : districtDefault) || '';
             items.push({
@@ -757,7 +757,7 @@ const ImportModule = () => {
             setRepairResult({
                 type: 'repaired',
                 count: res.updated,
-                msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Refresh the Master List to verify.`
+                msg: `Updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Refresh the Master List to verify.`
             });
         } catch (e: any) {
             setRepairResult({ type: 'error', count: 0, msg: e.message });
