@@ -513,6 +513,7 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Mode-aware loading guard:** `!selectedDistrict && !searchTerm ? districtListLoading : loading` — prevents spinner hang on initial "All Districts" load.
 - **Client-side sort guarantee:** `getPaginatedDelegates` always sorts the returned array by `last_name → first_name` (case-insensitive) after both RPC and fallback paths. Spouses with matching surnames appear consecutively regardless of database state.
 - **Service functions:** `getDistrictsWithDelegates(eventId)`, `fetchAllDelegatesForExport(eventId, district?, search?)`.
+- **v1.35 fix — `getDistrictsWithDelegates` paginated:** the All Official Districts list did a single `.select('district')` with no `.range()`. Supabase returns at most 1,000 rows per request, so as soon as an event exceeded 1,000 delegates (SE1 hit 1,273 in the unified 2026 Lagos event), districts whose rows fell in the tail (e.g., `North Central 1`) never made the district list — the section vanished from "All Districts" while the specific-district dropdown (built from `system_settings`) still found it. Now paginated 1,000/page ordered by `delegate_id`, counts merged client-side.
 
 ### 22. Full-Dataset PDF & CSV Export (v1.7)
 

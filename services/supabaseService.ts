@@ -826,17 +826,25 @@ export const db = {
     },
 
     getDistrictsWithDelegates: async (eventId: string): Promise<{ district: string; count: number }[]> => {
-        const { data, error } = await supabase
-            .from('delegates')
-            .select('district')
-            .eq('event_id', eventId)
-            .not('district', 'is', null)
-            .neq('district', '');
-        if (error || !data) return [];
+        if (!eventId) return [];
         const counts = new Map<string, number>();
-        for (const d of data) {
-            const key = normalize(d.district).toUpperCase();
-            counts.set(key, (counts.get(key) || 0) + 1);
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('delegates')
+                .select('district')
+                .eq('event_id', eventId)
+                .not('district', 'is', null)
+                .neq('district', '')
+                .order('delegate_id')
+                .range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            for (const d of data) {
+                const key = normalize(d.district).toUpperCase();
+                counts.set(key, (counts.get(key) || 0) + 1);
+            }
+            if (data.length < 1000) break;
+            from += 1000;
         }
         return Array.from(counts.entries())
             .map(([district, count]) => ({ district, count }))
