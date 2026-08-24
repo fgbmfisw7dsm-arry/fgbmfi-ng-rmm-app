@@ -214,12 +214,16 @@ const ImportModule = () => {
     };
 
     const detectNameOrder = (lines: string[], hi: number, headers: string[], cm: Record<string, boolean>): NameOrder => {
-      const fullNameIdx = headers.findIndex(h => cm[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
-      if (fullNameIdx < 0) return 'given-first';
+      const findNameIdx = (f: string) => headers.findIndex(h => cm[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === f);
+      const fullNameIdx = findNameIdx('Full Name');
+      const hasLast = findNameIdx('Last Name') >= 0;
+      const firstNameIdx = findNameIdx('First Name');
+      const nameIdx = fullNameIdx >= 0 ? fullNameIdx : (!hasLast && firstNameIdx >= 0 ? firstNameIdx : -1);
+      if (nameIdx < 0) return 'given-first';
       let midTitle = 0;
       let leadTitle = 0;
       for (let i = hi + 1; i < Math.min(lines.length, hi + 200); i++) {
-        const v = parseCsvLine(lines[i])[fullNameIdx] || '';
+        const v = parseCsvLine(lines[i])[nameIdx] || '';
         if (!v.trim()) continue;
         const tokens = tokenizeFullName(v);
         if (tokens.length === 0) continue;
@@ -249,12 +253,16 @@ const ImportModule = () => {
       const lines = csv.trim().split('\n');
       const { headerIndex: hi } = detectHeaderRow(lines);
       const headers = parseHeaders(lines[hi]);
-      const fullNameIdx = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
-      if (fullNameIdx < 0) return [];
+      const findN = (f: string) => headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === f);
+      const fullNameIdx = findN('Full Name');
+      const hasLast = findN('Last Name') >= 0;
+      const firstNameIdx = findN('First Name');
+      const nameSrc = fullNameIdx >= 0 ? fullNameIdx : (!hasLast && firstNameIdx >= 0 ? firstNameIdx : -1);
+      if (nameSrc < 0) return [];
       const order = effectiveNameOrder();
       const out: Array<{ raw: string; title: string; first: string; last: string }> = [];
       for (let i = hi + 1; i < lines.length && out.length < 5; i++) {
-        const v = (parseCsvLine(lines[i])[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
+        const v = (parseCsvLine(lines[i])[nameSrc] || '').trim().replace(/^["']|["']$/g, '');
         if (!v) continue;
         const p = parseFullName(v, order);
         out.push({ raw: v, title: p.title, first: p.firstName, last: p.lastName });
@@ -370,9 +378,23 @@ const ImportModule = () => {
         return (k.startsWith('district') || k.includes('short code') || k.includes('chaptercode')) ? 0 : 1;
       };
       const districtIndices = [...(fieldIndices.get('District') || [])].sort((a, b) => districtPriority(a) - districtPriority(b));
+      // A genuine DISTRICT column (not just ZONE/REGION mapped to District) exists only
+      // when a district-named header is present. Without one, a banner district (e.g.
+      // "South East 2") applies to every row instead of the Zone value being read as the district.
+      const hasExplicitDistrict = districtIndices.some(i => {
+        const k = normalizeKey(headers[i]);
+        return k.startsWith('district') || k.includes('short code') || k.includes('chaptercode');
+      });
 
       const fullNameIdx = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
-      const useFullName = fullNameIdx >= 0 && !(hasEnabled('Title') && hasEnabled('First Name') && hasEnabled('Last Name'));
+      // A "Name"/"First Name" column with NO separate Last Name column is treated
+      // as a combined full name (e.g. SE district Formatted files) and parsed into
+      // First/Last so records are not created with blank surnames.
+      const hasLastNameCol = hasEnabled('Last Name');
+      const nameSourceIdx = fullNameIdx >= 0
+        ? fullNameIdx
+        : !hasLastNameCol && firstIdx('First Name') >= 0 ? firstIdx('First Name') : -1;
+      const useFullName = nameSourceIdx >= 0 && !(hasEnabled('Title') && hasEnabled('First Name') && hasEnabled('Last Name'));
       const order = effectiveNameOrder();
 
       const phoneLikeIdx = headers.map((_, i) => i).filter(i =>
@@ -402,8 +424,8 @@ const ImportModule = () => {
 
         const colValues: Record<string, string> = {};
         if (useFullName) {
-          const parsed = parseFullName(values[fullNameIdx] || '', order);
-          colValues['Title'] = parsed.title;
+          const parsed = parseFullName(values[nameSourceIdx] || '', order);
+          colValues['Title'] = parsed.title || (firstIdx('Title') >= 0 ? (values[firstIdx('Title')] || '') : '');
           colValues['First Name'] = parsed.firstName;
           colValues['Last Name'] = parsed.lastName;
         } else {
@@ -416,6 +438,7 @@ const ImportModule = () => {
         if (isJunkDataRow(values, colValues['First Name'], colValues['Last Name'])) continue;
 
         let districtBefore = pickRowValue(values, districtIndices);
+        if (!hasExplicitDistrict && effectiveBanner) districtBefore = '';
         if (effectiveBanner && /^(?:ZONE|AREA)\s*\d+$/i.test(districtBefore)) districtBefore = '';
         else if (effectiveBanner && /^\d+$/i.test(districtBefore)) districtBefore = '';
         else if (effectiveBanner && /^[A-Z]{2}\d+(?:-\d+)?$/i.test(districtBefore)) districtBefore = '';
@@ -458,7 +481,11 @@ const ImportModule = () => {
       const firstIdxP = (field: string) => (fieldIndices.get(field) || [])[0] ?? -1;
       const hasEnabledP = (field: string) => (fieldIndices.get(field) || []).length > 0;
       const fullNameIdxP = headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
-      const useFullNameP = fullNameIdxP >= 0 && !(hasEnabledP('Title') && hasEnabledP('First Name') && hasEnabledP('Last Name'));
+      const hasLastNameColP = hasEnabledP('Last Name');
+      const nameSourceIdxP = fullNameIdxP >= 0
+        ? fullNameIdxP
+        : !hasLastNameColP && firstIdxP('First Name') >= 0 ? firstIdxP('First Name') : -1;
+      const useFullNameP = nameSourceIdxP >= 0 && !(hasEnabledP('Title') && hasEnabledP('First Name') && hasEnabledP('Last Name'));
       const orderP = effectiveNameOrder();
 
       const kept: Array<{ first: string; last: string; raw: string }> = [];
@@ -485,7 +512,7 @@ const ImportModule = () => {
         let first = '';
         let last = '';
         if (useFullNameP) {
-          const parsed = parseFullName(values[fullNameIdxP] || '', orderP);
+          const parsed = parseFullName(values[nameSourceIdxP] || '', orderP);
           first = parsed.firstName;
           last = parsed.lastName;
         } else {
