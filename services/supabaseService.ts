@@ -26,6 +26,12 @@ const cleanDistrict = (raw: string): string => {
   return trimmed;
 };
 
+const COUNTRY_NAMES = new Set([
+    'NIGERIA', 'GHANA', 'CAMEROON', 'BENIN', 'TOGO', 'NIGER', 'LIBERIA', 'SIERRA LEONE',
+    'COTE D IVOIRE', 'IVORYCOAST', 'SOUTH AFRICA', 'KENYA', 'USA', 'UK', 'UNITED KINGDOM',
+    'CANADA', 'UAE', 'CHINA', 'INDIA', 'GERMANY', 'FRANCE', 'SPAIN', 'ITALY', 'BRAZIL',
+]);
+
 const resolveBadgeFileName = (batch: { batch_id: string; pdf_url?: string | null }): string => {
     if (batch.pdf_url) {
         try {
@@ -1480,7 +1486,7 @@ export const db = {
         return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
     },
 
-    junkReasonOf: (d: { first_name?: string; last_name?: string }): string | null => {
+    junkReasonOf: (d: { first_name?: string; last_name?: string; district?: string; chapter?: string }): string | null => {
         const f = (d.first_name || '').trim();
         const l = (d.last_name || '').trim();
         const blank = !f && !l;
@@ -1494,6 +1500,11 @@ export const db = {
         for (const t of tokens) {
             if (fu.includes(t) || lu.includes(t)) return `summary/note token: ${t}`;
         }
+        if (fu === 'MALE' || fu === 'FEMALE' || lu === 'MALE' || lu === 'FEMALE') return 'gender-as-name (mangled column shift)';
+        const dist = ((d.district || '') as string).trim().toUpperCase();
+        const chapt = ((d.chapter || '') as string).trim().toUpperCase();
+        if (dist && COUNTRY_NAMES.has(dist)) return 'country-as-district (mangled column shift)';
+        if (chapt && (/^[A-Z]{2}D?\d+$/.test(chapt) || COUNTRY_NAMES.has(chapt))) return 'district-code-as-chapter (mangled column shift)';
         return null;
     },
 

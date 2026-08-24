@@ -85,6 +85,7 @@ const junkRowReason = (first?: string, last?: string): string | null => {
   for (const t of tokens) {
     if (fu.includes(t) || lu.includes(t)) return `summary/note token: ${t}`;
   }
+  if (fu === 'MALE' || fu === 'FEMALE' || lu === 'MALE' || lu === 'FEMALE') return 'gender-as-name (mangled column shift)';
   return null;
 };
 
@@ -97,7 +98,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.33 · repair flow chapter correction';
+const IMPORT_BUILD_LABEL = 'v1.34 · junk cleanup catches mangled column-shift rows';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);

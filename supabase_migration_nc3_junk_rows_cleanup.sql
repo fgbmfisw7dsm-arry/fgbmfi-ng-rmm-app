@@ -1,14 +1,15 @@
 -- ============================================================
--- NC3 JUNK-ROW CLEANUP v2 — event-name agnostic (manual run in SQL editor)
+-- NC3 JUNK-ROW CLEANUP v3 — event-name agnostic (manual run in SQL editor)
 -- ============================================================
--- v1 failed to delete the imported junk rows because the NC3 delegates are
--- hosted in an event whose name does not contain 'NC3' / 'North Central 3',
--- so the name filter matched zero events and the backup table was empty.
+-- v1 filtered by event name ILIKE and matched zero events; v2 became
+-- event-name agnostic. This v3 also catches MANGLED COLUMN-SHIFT rows
+-- (legacy comma-splitter artifacts): gender-as-name (first/last = MALE/FEMALE),
+-- country-as-district (district = NIGERIA etc.), and district-code-as-chapter
+-- (chapter matches ^[A-Z]{2}D?<n>$ like 'SED1').
 --
 -- This version does NOT depend on the event name. It locates junk rows by
--- their DATA signature (blank or purely-numeric first/last names, header-word
--- names, note-fragment names) across ALL events, so it finds them wherever
--- they landed. It still backs up first and shows a preview you must review
+-- their DATA signature across ALL events, so it finds them wherever they
+-- landed. It still backs up first and shows a preview you must review
 -- before Step 4 deletes.
 --
 -- Deleting a delegate cascades to its dependents automatically because the
@@ -25,14 +26,15 @@
 -- ---------------------------------------------------------------------------
 -- STEP 1 — see where your districts live + confirm the junk rows are present
 -- ---------------------------------------------------------------------------
--- 1a. Events + delegate counts (find the event hosting the NC3 import):
+-- 1a. Events + delegate counts (find the event hosting the NC3/SE1 import):
 SELECT e.event_id, e.name, count(d.delegate_id) AS delegates
 FROM events e
 LEFT JOIN delegates d ON d.event_id = e.event_id
 GROUP BY e.event_id, e.name
 ORDER BY delegates DESC;
 
--- 1b. Junk candidates across ALL events (blank / pure-numeric / header-word names):
+-- 1b. Junk candidates across ALL events (blank / pure-numeric / header-word /
+--     note-fragment / mangled-shift names):
 SELECT e.name AS event, d.delegate_id, d.title, d.first_name, d.last_name,
        d.district, d.chapter, d.phone, d.email
 FROM delegates d
@@ -42,10 +44,18 @@ WHERE (
   OR COALESCE(TRIM(d.last_name), '') = ''
   OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
   OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
-  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-  OR TRIM(d.first_name) ~ '>'
-  OR TRIM(d.last_name) ~ '>'
+  OR TRIM(d.first_name) ~ '^\d'
+  OR TRIM(d.last_name) ~ '^\d'
+  OR TRIM(d.first_name) ~ '[=<>]'
+  OR TRIM(d.last_name) ~ '[=<>]'
+  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:', 'MALE', 'FEMALE')
+  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:', 'MALE', 'FEMALE')
+  OR UPPER(TRIM(d.first_name)) LIKE '%RECORDS%'
+  OR UPPER(TRIM(d.first_name)) LIKE '%SOURCE:%'
+  OR UPPER(TRIM(d.last_name)) LIKE '%RECORDS%'
+  OR UPPER(TRIM(d.last_name)) LIKE '%SOURCE:%'
+  OR UPPER(TRIM(d.district)) IN ('NIGERIA', 'GHANA', 'CAMEROON', 'BENIN', 'TOGO', 'NIGER', 'LIBERIA', 'SIERRA LEONE', 'SOUTH AFRICA', 'KENYA', 'USA', 'UK', 'UNITED KINGDOM', 'CANADA', 'UAE', 'CHINA', 'INDIA')
+  OR TRIM(d.chapter) ~ '^[A-Z]{2}D?[0-9]+$'
 )
 ORDER BY d.last_name NULLS FIRST, d.first_name NULLS FIRST;
 
@@ -61,10 +71,18 @@ WHERE (
   OR COALESCE(TRIM(d.last_name), '') = ''
   OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
   OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
-  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:')
-  OR TRIM(d.first_name) ~ '>'
-  OR TRIM(d.last_name) ~ '>'
+  OR TRIM(d.first_name) ~ '^\d'
+  OR TRIM(d.last_name) ~ '^\d'
+  OR TRIM(d.first_name) ~ '[=<>]'
+  OR TRIM(d.last_name) ~ '[=<>]'
+  OR UPPER(TRIM(d.first_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:', 'MALE', 'FEMALE')
+  OR UPPER(TRIM(d.last_name)) IN ('ZONE', 'CAT', 'ADULTS', 'TEENS', 'CHILDREN', 'TOTAL', 'SUBTOTAL', 'GRAND TOTAL', 'SUMMARY', 'ZONE SUMMARY', 'NOTES:', 'MALE', 'FEMALE')
+  OR UPPER(TRIM(d.first_name)) LIKE '%RECORDS%'
+  OR UPPER(TRIM(d.first_name)) LIKE '%SOURCE:%'
+  OR UPPER(TRIM(d.last_name)) LIKE '%RECORDS%'
+  OR UPPER(TRIM(d.last_name)) LIKE '%SOURCE:%'
+  OR UPPER(TRIM(d.district)) IN ('NIGERIA', 'GHANA', 'CAMEROON', 'BENIN', 'TOGO', 'NIGER', 'LIBERIA', 'SIERRA LEONE', 'SOUTH AFRICA', 'KENYA', 'USA', 'UK', 'UNITED KINGDOM', 'CANADA', 'UAE', 'CHINA', 'INDIA')
+  OR TRIM(d.chapter) ~ '^[A-Z]{2}D?[0-9]+$'
 );
 
 -- ---------------------------------------------------------------------------
@@ -87,6 +105,10 @@ WHERE (
   OR COALESCE(TRIM(d.last_name), '') = ''
   OR (TRIM(d.first_name) <> '' AND TRIM(d.first_name) !~ '[A-Za-z]')
   OR (TRIM(d.last_name) <> '' AND TRIM(d.last_name) !~ '[A-Za-z]')
+  OR UPPER(TRIM(d.first_name)) IN ('MALE', 'FEMALE')
+  OR UPPER(TRIM(d.last_name)) IN ('MALE', 'FEMALE')
+  OR UPPER(TRIM(d.district)) IN ('NIGERIA', 'GHANA', 'CAMEROON', 'BENIN', 'TOGO', 'NIGER', 'LIBERIA', 'SIERRA LEONE', 'SOUTH AFRICA', 'KENYA', 'USA', 'UK', 'UNITED KINGDOM', 'CANADA', 'UAE', 'CHINA', 'INDIA')
+  OR TRIM(d.chapter) ~ '^[A-Z]{2}D?[0-9]+$'
 );
 
 -- To restore the backup if ever needed ==============================
