@@ -35,6 +35,11 @@ export const REGION_PREFIXES: Record<string, string> = {
     'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
 };
 
+export const FULL_REGION_PREFIXES: Record<string, string> = {
+    'NORTHCENTRAL': 'North Central', 'NORTHEAST': 'North East', 'NORTHWEST': 'North West',
+    'SOUTHEAST': 'South East', 'SOUTHSOUTH': 'South South', 'SOUTHWEST': 'South West',
+};
+
 export const districtAliasKey = (v?: string | null): string =>
     (v || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
 
@@ -45,13 +50,16 @@ export const DISTRICT_ALIASES: Record<string, string> = {
 };
 
 // Resolves a district value to its official name. Handles the region short
-// codes (NC1, SW 2, ...) INCLUDING the 'D' variant used in some manual-reg
-// files (SED 1 -> South East 1), plus explicit aliases (Anambra -> South East 1).
+// codes (NC1, SW 2, ...), the 'D' variant (SED 1), and the full
+// 'REGION DISTRICT N' spelling (SOUTH EAST DISTRICT 1), plus explicit aliases
+// (Anambra -> South East 1).
 export const resolveDistrictAlias = (raw?: string | null): string | null => {
     const key = districtAliasKey(raw || '');
     if (!key) return null;
-    const match = key.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
-    if (match) return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+    const short = key.match(/^(NC|NE|NW|SE|SS|SW)D?(?:DISTRICT)?(\d+)$/);
+    if (short) return `${REGION_PREFIXES[short[1]]} ${short[2].replace(/^0+/, '')}`;
+    const full = key.match(/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)(?:DISTRICT)?(\d+)$/);
+    if (full) return `${FULL_REGION_PREFIXES[full[1]]} ${full[2].replace(/^0+/, '')}`;
     return DISTRICT_ALIASES[key] || null;
 };
 
@@ -64,12 +72,7 @@ export const resolveDistrictShortCode = (raw?: string | null): string => {
         const suffix = v.substring(dashIdx + 1);
         if (/^\d+$/.test(suffix) && /^[A-Z]{2}\d+$/i.test(prefix)) v = prefix.toUpperCase();
     }
-    const cleaned = v.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
-    if (match) return `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
-    const alias = DISTRICT_ALIASES[districtAliasKey(trimmed)];
-    if (alias) return alias;
-    return trimmed;
+    return resolveDistrictAlias(v || trimmed) || trimmed;
 };
 
 export const normalizePhone = (raw?: string | null): string => {
@@ -80,6 +83,41 @@ export const normalizePhone = (raw?: string | null): string => {
     if (digits.length === 11 && digits.startsWith('0')) return digits;
     if (digits.length === 10 && digits.charAt(0) !== '0') return `0${digits}`;
     return digits;
+};
+
+// Proper CSV line parser: respects double-quoted fields (fields may contain
+// commas, e.g. DOB "7th June,1958"). Returns trimmed, unquoted fields.
+// Falls back gracefully on malformed input (stray quotes treated literally).
+export const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    const s = (line || '') as string;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (s[i + 1] === '"') { cur += '"'; i++; }
+                else inQuotes = false;
+            } else cur += ch;
+        } else if (ch === '"') {
+            inQuotes = true;
+        } else if (ch === ',') {
+            fields.push(cur.trim());
+            cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    fields.push(cur.trim());
+    return fields;
+};
+
+// Escapes a field for the mapped-CSV output so commas/quotes survive a round-trip.
+export const csvEscape = (field: string): string => {
+    const s = (field ?? '').trim();
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
 };
 
 // ---------- Full-name parser (Sprint 22/23) ----------

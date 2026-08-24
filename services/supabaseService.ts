@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -1105,7 +1105,7 @@ export const db = {
 
     importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
-        const lines = csv.trim().split('\n').map(l => l.split(',').map(p => p.trim())).filter(p => p.length >= 3).filter(p => {
+        const lines = csv.trim().split('\n').map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
             const last = (p[3] || '').trim();
             const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -1444,7 +1444,7 @@ export const db = {
           if (!d) return false;
           if (officialDistricts.has(d)) return true;
           const abbr = d.replace(/[^A-Z0-9]/g, '');
-          if (/^(NC|NE|NW|SE|SS|SW)D?\d+$/.test(abbr)) return true;
+          if (/^(NC|NE|NW|SE|SS|SW)D?(?:DISTRICT)?\d+$/.test(abbr)) return true;
           if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
           if (resolveDistrictAlias(dist)) return true;
           return false;
@@ -1589,7 +1589,7 @@ export const db = {
             if (!d) return false;
             if (officialDistricts.has(d)) return true;
             const abbr = d.replace(/[^A-Z0-9]/g, '');
-            if (/^(NC|NE|NW|SE|SS|SW)D?\d+$/.test(abbr)) return true;
+            if (/^(NC|NE|NW|SE|SS|SW)D?(?:DISTRICT)?\d+$/.test(abbr)) return true;
             if (/^(NORTHCENTRAL|NORTHEAST|NORTHWEST|SOUTHEAST|SOUTHSOUTH|SOUTHWEST)\d+$/.test(abbr)) return true;
             if (resolveDistrictAlias(dist)) return true;
             return false;
@@ -1714,23 +1714,17 @@ export const db = {
         if (repairedIds.length > 0) {
             const { data: settings } = await supabase.from('system_settings').select('districts').limit(1).maybeSingle();
             if (settings?.districts && Array.isArray(settings.districts)) {
-                const REGION_PREFIXES: Record<string, string> = {
-                    'NC': 'North Central', 'NE': 'North East', 'NW': 'North West',
-                    'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
-                };
                 const official = settings.districts.map((d: string) => normalize(d));
                 const { data: patched } = await supabase.from('delegates')
                     .select('delegate_id, district').in('delegate_id', repairedIds);
                 for (const d of (patched || [])) {
                     const raw = cleanDistrict((d.district || '').replace(/\s+/g, ' ').trim());
                     if (!raw) continue;
-                    const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                    const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
-                    if (!match) continue;
-                    const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+                    const fullName = resolveDistrictAlias(raw);
+                    if (!fullName) continue;
                     let resolved = official.find((o: string) => o.toUpperCase() === fullName.toUpperCase());
                     if (!resolved) resolved = official.find((o: string) => o.replace(/[^A-Z0-9]/g, '').toUpperCase() === fullName.replace(/[^A-Z0-9]/g, '').toUpperCase());
-                    if (!resolved) resolved = official.find((o: string) => o.toUpperCase() === cleaned);
+                    if (!resolved) resolved = official.find((o: string) => o.toUpperCase() === raw.toUpperCase());
                     if (resolved && resolved !== raw) {
                         await supabase.from('delegates').update({ district: resolved }).eq('delegate_id', d.delegate_id);
                         harmonized++;
@@ -1765,15 +1759,10 @@ export const db = {
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
     
     harmonizeDistricts: async (eventId?: string) => {
-        const REGION_PREFIXES: Record<string, string> = {
-            'NC': 'North Central', 'NE': 'North East', 'NW': 'North West',
-            'SE': 'South East', 'SS': 'South South', 'SW': 'South West',
-        };
         const resolveAbbreviation = (abbreviated: string, officialList: string[]): string | null => {
             const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
-            if (!match) return null;
-            const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+            const fullName = resolveDistrictAlias(abbreviated);
+            if (!fullName) return null;
             const exact = officialList.find(o => o.toUpperCase() === fullName.toUpperCase());
             if (exact) return exact;
             const fuzzy = officialList.find(o => o.replace(/[^A-Z0-9]/g, '').toUpperCase() === fullName.replace(/[^A-Z0-9]/g, '').toUpperCase());
@@ -1819,10 +1808,8 @@ export const db = {
                 }
                 return alias;
             }
-            const cleaned = abbreviated.toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9]/g, '');
-            const match = cleaned.match(/^(NC|NE|NW|SE|SS|SW)D?(\d+)$/);
-            if (!match) return null;
-            const fullName = `${REGION_PREFIXES[match[1]]} ${match[2].replace(/^0+/, '')}`;
+            const fullName = resolveDistrictAlias(abbreviated);
+            if (!fullName) return null;
             if (!autoRegistered.has(fullName)) {
                 official.push(fullName);
                 autoRegistered.add(fullName);

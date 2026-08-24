@@ -4,7 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, type NameOrder } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -97,7 +97,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.31 · district aliases (SED 1 / Anambra → South East 1)';
+const IMPORT_BUILD_LABEL = 'v1.32 · quoted-field CSV parser + district DISTRICT variant';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -171,7 +171,7 @@ const ImportModule = () => {
     const normalizeKey = (h: string) => h.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9\s]/g, '').trim();
 
     const parseHeaders = (headerLine: string): string[] => {
-      return headerLine.split(',').map(h => h.trim().replace(/^["']|["']$/g, '')).filter(h => h.length > 0);
+      return parseCsvLine(headerLine).filter(h => h.length > 0);
     };
 
     const matchColumns = (headers: string[]) => {
@@ -218,7 +218,7 @@ const ImportModule = () => {
       let midTitle = 0;
       let leadTitle = 0;
       for (let i = hi + 1; i < Math.min(lines.length, hi + 200); i++) {
-        const v = lines[i].split(',')[fullNameIdx] || '';
+        const v = parseCsvLine(lines[i])[fullNameIdx] || '';
         if (!v.trim()) continue;
         const tokens = tokenizeFullName(v);
         if (tokens.length === 0) continue;
@@ -253,7 +253,7 @@ const ImportModule = () => {
       const order = effectiveNameOrder();
       const out: Array<{ raw: string; title: string; first: string; last: string }> = [];
       for (let i = hi + 1; i < lines.length && out.length < 5; i++) {
-        const v = (lines[i].split(',')[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
+        const v = (parseCsvLine(lines[i])[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
         if (!v) continue;
         const p = parseFullName(v, order);
         out.push({ raw: v, title: p.title, first: p.firstName, last: p.lastName });
@@ -390,7 +390,7 @@ const ImportModule = () => {
 
       const resultLines: string[] = [];
       for (let i = hi + 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+        const values = parseCsvLine(lines[i]).map(v => v.trim().replace(/^["']|["']$/g, ''));
         if (values.every(v => !v)) continue;
         if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(lines[i])) continue;
         const headerLike = values.filter(v => {
@@ -440,7 +440,7 @@ const ImportModule = () => {
         colValues['Chapter'] = guest.chapter;
         colValues['DelegateType'] = guest.delegateType;
 
-        const row = OUTPUT_FIELDS.map(f => colValues[f] ?? '').join(',');
+        const row = OUTPUT_FIELDS.map(f => csvEscape(colValues[f] ?? '')).join(',');
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
@@ -465,7 +465,7 @@ const ImportModule = () => {
       for (let i = hi + 1; i < lines.length; i++) {
         const raw = (lines[i] || '').trim();
         if (!raw) continue;
-        const values = raw.split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+        const values = parseCsvLine(raw).map(v => v.trim().replace(/^["']|["']$/g, ''));
         if (values.every(v => !v)) continue;
         if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(raw)) continue;
         const headerLike = values.filter(v => {
@@ -679,7 +679,7 @@ const ImportModule = () => {
         const dataStart = found ? headerIndex + 1 : 0;
         for (let i = dataStart; i < lines.length; i++) {
             if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(lines[i])) continue;
-            const values = lines[i].split(',');
+            const values = parseCsvLine(lines[i]);
             let fullName = '';
             let phone = '';
             let district = '';
