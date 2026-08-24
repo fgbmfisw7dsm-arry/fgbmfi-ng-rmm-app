@@ -172,7 +172,7 @@ const ImportModule = () => {
     const normalizeKey = (h: string) => h.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9\s]/g, '').trim();
 
     const parseHeaders = (headerLine: string): string[] => {
-      return parseCsvLine(headerLine).filter(h => h.length > 0);
+      return parseCsvLine(headerLine);
     };
 
     const matchColumns = (headers: string[]) => {
@@ -305,7 +305,7 @@ const ImportModule = () => {
           const headers = parseHeaders(lines[headerIndex]);
           setBannerDistrict(bd || '');
           if (found && headers.length > 1) {
-            setDetectedColumns(headers);
+            setDetectedColumns(headers.filter(h => h.length > 0));
             const map = matchColumns(headers);
             setColumnMap(map);
             setShowMapping(true);
