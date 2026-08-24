@@ -97,7 +97,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.32 · quoted-field CSV parser + district DISTRICT variant';
+const IMPORT_BUILD_LABEL = 'v1.33 · repair flow chapter correction';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -654,14 +654,19 @@ const ImportModule = () => {
 
     const nameKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
 
-    const extractRepairRows = (text: string, order: NameOrder): { parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; raw: string }>; banner: string; headerDesc: string | null } => {
+    const extractRepairRows = (text: string, order: NameOrder): { parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; chapter: string; zone: string; raw: string }>; banner: string; headerDesc: string | null } => {
         const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
         const { headerIndex, bannerDistrict, found } = detectHeaderRow(lines);
         const banner = bannerDistrict || '';
         const headers = found ? parseHeaders(lines[headerIndex] || '') : [];
         const fullNameIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Full Name');
+        const firstIdxR = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'First Name');
+        const lastIdxR = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Last Name');
+        const titleIdxR = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Title');
         const phoneIdxList: number[] = [];
         const districtIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'District');
+        const chapterIdx = headers.findIndex(h => KNOWN_FIELDS[normalizeKey(h)] === 'Chapter');
+        const zoneIdx = headers.findIndex(h => (normalizeKey(h) || '').includes('zone'));
         if (found) {
             headers.forEach((h, i) => {
                 const k = normalizeKey(h);
@@ -675,7 +680,7 @@ const ImportModule = () => {
             }
             return '';
         };
-        const parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; raw: string }> = [];
+        const parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; chapter: string; zone: string; raw: string }> = [];
         const dataStart = found ? headerIndex + 1 : 0;
         for (let i = dataStart; i < lines.length; i++) {
             if (/(^|,)\s*NUMBER\s*:\s*\d+\s*(,|$)/i.test(lines[i])) continue;
@@ -683,10 +688,26 @@ const ImportModule = () => {
             let fullName = '';
             let phone = '';
             let district = '';
+            let chapter = '';
+            let zone = '';
+            let first = '';
+            let last = '';
+            let title = '';
             if (found && fullNameIdx >= 0 && phoneIdxList.length > 0) {
                 fullName = (values[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
                 phone = normalizePhone(pick(values, phoneIdxList));
                 district = districtIdx >= 0 ? (values[districtIdx] || '').trim() : '';
+                chapter = chapterIdx >= 0 ? (values[chapterIdx] || '').trim() : '';
+                zone = zoneIdx >= 0 ? (values[zoneIdx] || '').trim() : '';
+            } else if (found && firstIdxR >= 0 && lastIdxR >= 0 && phoneIdxList.length > 0) {
+                first = (values[firstIdxR] || '').trim().replace(/^["']|["']$/g, '');
+                last = (values[lastIdxR] || '').trim().replace(/^["']|["']$/g, '');
+                title = titleIdxR >= 0 ? (values[titleIdxR] || '').trim().replace(/^["']|["']$/g, '') : '';
+                fullName = `${first} ${last}`.trim();
+                phone = normalizePhone(pick(values, phoneIdxList));
+                district = districtIdx >= 0 ? (values[districtIdx] || '').trim() : '';
+                chapter = chapterIdx >= 0 ? (values[chapterIdx] || '').trim() : '';
+                zone = zoneIdx >= 0 ? (values[zoneIdx] || '').trim() : '';
             } else {
                 fullName = (values[0] || '').trim().replace(/^["']|["']$/g, '');
                 phone = normalizePhone((values[1] || '').trim().replace(/^["']|["']$/g, ''));
@@ -696,8 +717,9 @@ const ImportModule = () => {
             if (!fullName || !phone) continue;
             if (isRepeatedHeaderRow(values)) continue;
             if (!hasAlpha(fullName)) continue;
-            const p = parseFullName(fullName, order);
-            parsedRows.push({ phone, title: p.title, first: p.firstName, last: p.lastName, district, raw: fullName });
+            let p = { title: '', firstName: first, lastName: last };
+            if (fullNameIdx >= 0) p = parseFullName(fullName, order);
+            parsedRows.push({ phone, title: p.title || title, first: p.firstName || first, last: p.lastName || last, district, chapter, zone, raw: fullName });
         }
         const headerDesc = found
             ? (fullNameIdx >= 0 && phoneIdxList.length > 0 ? 'columns detected (Full Name + Phone)' : 'header found but no Full Name/Phone columns')
@@ -721,10 +743,17 @@ const ImportModule = () => {
                 items.push({ raw: pr.raw, skip: 'phone matched but surname not found in record' });
                 continue;
             }
+            const chapterBad = (d: any): boolean => {
+                if (!pr.chapter) return false;
+                const stored = nameKey(d.chapter || '');
+                if (!stored) return true;
+                if (pr.zone && stored === nameKey(pr.zone)) return true;
+                return false;
+            };
             const needChange = matched.filter(d => {
                 const sameNames = nameKey(d.first_name) === nameKey(pr.first) && nameKey(d.last_name) === nameKey(pr.last);
                 const sameTitle = nameKey(d.title || '') === nameKey(pr.title || '');
-                return !sameNames || !sameTitle;
+                return !sameNames || !sameTitle || chapterBad(d);
             });
             if (needChange.length > 1) {
                 items.push({ raw: pr.raw, skip: 'ambiguous (multiple records share name + phone)' });
@@ -734,18 +763,21 @@ const ImportModule = () => {
             if (!needChange.length) { items.push({ raw: pr.raw, skip: 'already correct' }); continue; }
             const zoneLabel = /^(ZONE|AREA)\s*\d+$/i.test(pr.district);
             let district = repairDistrict || ((pr.district && !zoneLabel) ? pr.district : districtDefault) || '';
+            const fixChapter = chapterBad(match) && !!pr.chapter;
             items.push({
                 delegate_id: match.delegate_id,
                 raw: pr.raw,
                 phone: pr.phone,
-                before: { title: match.title || '', first_name: match.first_name, last_name: match.last_name, district: match.district || '' },
+                before: { title: match.title || '', first_name: match.first_name, last_name: match.last_name, district: match.district || '', chapter: match.chapter || '' },
                 after: {
                     title: pr.title,
                     first_name: pr.first,
                     last_name: pr.last,
-                    district
+                    district,
+                    chapter: fixChapter ? pr.chapter : (match.chapter || '')
                 },
                 districtReason: district && district !== (match.district || '') ? 'will fix district' : '',
+                chapterReason: fixChapter ? 'will fix chapter' : '',
             });
         }
         return { items, parsedCount: parsedRows.length, banner: districtDefault, headerDesc, rowsDroppedNoPhone: parsedRows.length - realParsed.length };
@@ -858,15 +890,17 @@ const ImportModule = () => {
             firstName: i.after.first_name,
             lastName: i.after.last_name,
             district: i.after.district || undefined,
+            chapter: i.chapterReason ? (i.after.chapter || undefined) : undefined,
         }));
         const res = await db.repairNamesFromFile(eventId, rows);
         setRepairItems([]);
         const verified = res.verified ?? res.updated;
         const blankedTitles = actionable.filter((i: any) => !i.after.title && (i.before.title || '').trim()).length;
+        const fixedChapters = actionable.filter((i: any) => i.chapterReason).length;
         setRepairResult({
             type: 'repaired',
             count: res.updated,
-            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${blankedTitles > 0 ? `; ${blankedTitles} default 'Mr' titles CLEARED to blank` : ''}${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
+            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${blankedTitles > 0 ? `; ${blankedTitles} default 'Mr' titles CLEARED to blank` : ''}${fixedChapters > 0 ? `; ${fixedChapters} chapters corrected from the file` : ''}${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
         });
     };
 
@@ -1334,13 +1368,13 @@ const hasFile = repairHasFile;
                                             <td className="p-1.5 font-mono text-gray-400">{idx + 1}</td>
                                             <td className="p-1.5 align-top bg-red-50/50 text-red-700 font-mono leading-relaxed">
                                                 <div>{i.before.first_name} {i.before.last_name}</div>
-                                                <div className="text-[7px] text-gray-400">{i.before.title} · {i.before.district || '—'}</div>
+                                                <div className="text-[7px] text-gray-400">{i.before.title} · {i.before.district || '—'}{i.before.chapter ? ` · ${i.before.chapter}` : ''}</div>
                                             </td>
                                             <td className="p-1.5 align-top bg-green-50/50 text-green-700 font-mono leading-relaxed">
                                                 <div>{i.after.first_name} {i.after.last_name}</div>
-                                                <div className="text-[7px] text-gray-400">{i.after.title} · {i.after.district || '—'}</div>
+                                                <div className="text-[7px] text-gray-400">{i.after.title} · {i.after.district || '—'}{i.after.chapter ? ` · ${i.after.chapter}` : ''}</div>
                                             </td>
-                                            <td className="p-1.5 align-top text-[7px] font-bold text-amber-600 uppercase">{i.districtReason || 'name repair'}</td>
+                                            <td className="p-1.5 align-top text-[7px] font-bold text-amber-600 uppercase">{i.districtReason || i.chapterReason || 'name repair'}</td>
                                         </tr>
                                     ))}
                                     {repairItems.filter(i => i.skip).length > 0 && (

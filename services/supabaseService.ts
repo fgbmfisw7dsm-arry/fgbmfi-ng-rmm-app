@@ -1992,7 +1992,7 @@ export const db = {
         const candidates: any[] = [];
         for (let i = 0; i < phones.length; i += 900) {
             const { data } = await supabase.from('delegates')
-                .select('delegate_id, title, first_name, last_name, district, phone, phone_normalized')
+                .select('delegate_id, title, first_name, last_name, district, chapter, phone, phone_normalized')
                 .eq('event_id', eventId)
                 .in('phone_normalized', phones.slice(i, i + 900))
                 .limit(1000);
@@ -2001,7 +2001,7 @@ export const db = {
         return candidates;
     },
 
-    repairNamesFromFile: async (eventId: string, rows: Array<{ delegateId: string; title?: string; firstName?: string; lastName?: string; district?: string }>) => {
+    repairNamesFromFile: async (eventId: string, rows: Array<{ delegateId: string; title?: string; firstName?: string; lastName?: string; district?: string; chapter?: string }>) => {
         await ensureEventActive(eventId);
         let updated = 0;
         let errors = 0;
@@ -2013,6 +2013,7 @@ export const db = {
             if (r.firstName && r.firstName.trim()) updates.first_name = r.firstName.trim();
             if (r.lastName && r.lastName.trim()) updates.last_name = r.lastName.trim();
             if (r.district && r.district.trim()) updates.district = r.district.trim();
+            if (r.chapter && r.chapter.trim()) updates.chapter = r.chapter.trim();
             if (Object.keys(updates).length === 0) continue;
             wanted.set(r.delegateId, updates);
             const { error } = await supabase.from('delegates').update(updates).eq('delegate_id', r.delegateId).eq('event_id', eventId);
@@ -2051,7 +2052,7 @@ export const db = {
             const ids = rows.map(r => r.delegateId);
             for (let i = 0; i < ids.length; i += 900) {
                 const { data } = await supabase.from('delegates')
-                    .select('delegate_id, title, first_name, last_name, district')
+                    .select('delegate_id, title, first_name, last_name, district, chapter')
                     .in('delegate_id', ids.slice(i, i + 900))
                     .limit(1000);
                 for (const d of data || []) {
@@ -2060,7 +2061,8 @@ export const db = {
                     const ok = (want.title === undefined || (d.title || '') === want.title)
                         && (want.first_name === undefined || (d.first_name || '') === want.first_name)
                         && (want.last_name === undefined || (d.last_name || '') === want.last_name)
-                        && (want.district === undefined || (d.district || '') === want.district);
+                        && (want.district === undefined || (d.district || '') === want.district)
+                        && (want.chapter === undefined || (d.chapter || '') === want.chapter);
                     if (ok) verified++;
                 }
             }
