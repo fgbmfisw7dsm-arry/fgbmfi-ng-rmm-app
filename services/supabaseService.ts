@@ -1239,6 +1239,50 @@ export const db = {
         return { inserted, updated, skipped };
     },
 
+    reconcileDistrictPortal: async (csv: string, eventId?: string, dryRun: boolean = true): Promise<{ inserted: number; updated: number; skipped: number; total: number }> => {
+        if (!eventId) throw new Error('reconcileDistrictPortal requires eventId');
+        const lines = csv.trim().split('\n').map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
+            const first = (p[2] || '').trim();
+            const last = (p[3] || '').trim();
+            const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (/^(GRAND TOTAL|SUBTOTAL|SUB TOTAL|TOTAL|SUMMARY|ZONE SUMMARY|REGISTRATION RECORDS|NOTES:|BATCH [1-5])/.test(firstCell)) return false;
+            return db.junkReasonOf({ first_name: first, last_name: last }) === null;
+        });
+        const BATCH_SIZE = 500;
+        let inserted = 0;
+        let updated = 0;
+        let skipped = 0;
+
+        for (let i = 0; i < lines.length; i += BATCH_SIZE) {
+            const batch = lines.slice(i, i + BATCH_SIZE);
+            const payload = batch.map(p => ({
+                title: p[1] || '',
+                first_name: p[2],
+                last_name: p[3],
+                district: cleanDistrict(p[4]),
+                chapter: p[5],
+                phone: p[6],
+                email: p[7],
+                rank: p[8] || 'CP',
+                office: p[9] || 'OTHER',
+                delegate_type: p[10] || 'Member',
+                registration_source: 'reconcile'
+            }));
+
+            const { data, error } = await supabase.rpc('reconcile_delegate_matches', {
+                p_delegates: JSON.parse(JSON.stringify(payload)),
+                p_event_id: eventId,
+                p_dry_run: dryRun
+            });
+            if (error) throw error;
+            inserted += data?.inserted || 0;
+            updated += data?.updated || 0;
+            skipped += data?.skipped || 0;
+        }
+
+        return { inserted, updated, skipped, total: inserted + updated + skipped };
+    },
+
     getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {
         if (!eventId) {
             console.warn('[getStats] BLOCKED: no eventId provided, returning empty stats');

@@ -4,7 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, type NameOrder } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -98,7 +98,7 @@ const isJunkDataRow = (values: string[], firstName?: string, lastName?: string):
 
 const OUTPUT_FIELDS = ['RegId', 'Title', 'First Name', 'Last Name', 'District', 'Chapter', 'Phone', 'Email', 'Rank', 'Office', 'DelegateType'];
 
-const IMPORT_BUILD_LABEL = 'v1.34 · junk cleanup catches mangled column-shift rows';
+const IMPORT_BUILD_LABEL = 'v1.37 · district portal CSV reconcile (Delegates→Type, gap-fill)';
 
 const ImportModule = () => {
     const { activeEventId, activeEvent, user, events } = useContext(AppContext);
@@ -145,6 +145,10 @@ const ImportModule = () => {
     const [repairLoading, setRepairLoading] = useState(false);
     const [repairResult, setRepairResult] = useState<{ type: 'preview' | 'repaired' | 'error'; count: number; msg?: string } | null>(null);
 
+    const [reconcileEventId, setReconcileEventId] = useState('');
+    const [reconcileLoading, setReconcileLoading] = useState(false);
+    const [reconcileResult, setReconcileResult] = useState<{ type: 'preview' | 'applied' | 'error'; inserted?: number; updated?: number; skipped?: number; msg?: string } | null>(null);
+
     const KNOWN_FIELDS: Record<string, string> = {
       'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
       'title': 'Title', 'title.': 'Title', 'honorific': 'Title', 'prefix': 'Title', 'mr': 'Title',
@@ -162,6 +166,7 @@ const ImportModule = () => {
       'rank': 'Rank', 'level': 'Rank', 'grade': 'Rank',
       'office': 'Office', 'position': 'Office', 'role': 'Office', 'post': 'Office',
       'delegate_type': 'DelegateType', 'delegate type': 'DelegateType', 'delegatetype': 'DelegateType', 'type': 'DelegateType', 'category': 'DelegateType',
+      'delegates': 'DelegateType', 'membership': 'DelegateType', 'delegate membership': 'DelegateType', 'membership type': 'DelegateType',
     };
 
     const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
@@ -584,6 +589,52 @@ const ImportModule = () => {
         } finally {
             setLoading(false);
             setProgress(null);
+        }
+    };
+
+    const isPortalCsv = (() => {
+        if (!csv.trim() || !showMapping || detectedColumns.length === 0) return false;
+        const headers = detectedColumns.map(h => normalizeKey(h));
+        const hasFullName = headers.includes('full_name') || headers.includes('full name');
+        const hasPhone = headers.some(h => KNOWN_FIELDS[h] === 'Phone');
+        const hasEmail = headers.some(h => KNOWN_FIELDS[h] === 'Email');
+        const hasChapter = headers.some(h => KNOWN_FIELDS[h] === 'Chapter');
+        return hasFullName && hasPhone && hasEmail && hasChapter;
+    })();
+
+    const targetsEventName = events.find((e: any) => e.event_id === (reconcileEventId || activeEventId))?.name || 'the selected event';
+
+    const handleReconcilePreview = async () => {
+        const target = reconcileEventId || activeEventId;
+        if (!target) { setReconcileResult({ type: 'error', msg: 'Select an event to reconcile against first.' }); return; }
+        if (!mappedCsvData.trim()) { setReconcileResult({ type: 'error', msg: 'Upload or paste a district portal CSV first.' }); return; }
+        setReconcileLoading(true);
+        setReconcileResult(null);
+        try {
+            const res = await db.reconcileDistrictPortal(mappedCsvData, target, true);
+            setReconcileResult({ type: 'preview', inserted: res.inserted, updated: res.updated, skipped: res.skipped, msg: '' });
+        } catch (e: any) {
+            setReconcileResult({ type: 'error', msg: e.message });
+        } finally {
+            setReconcileLoading(false);
+        }
+    };
+
+    const handleReconcileApply = async () => {
+        const target = reconcileEventId || activeEventId;
+        if (!target) { setReconcileResult({ type: 'error', msg: 'Select an event to reconcile against first.' }); return; }
+        if (!mappedCsvData.trim()) { setReconcileResult({ type: 'error', msg: 'Upload or paste a district portal CSV first.' }); return; }
+        const backup = { eventId: target, exportedAt: new Date().toISOString(), mappedCsv: mappedCsvData };
+        downloadJSON(backup, `reconcile-backup-${(target || '').slice(0, 8)}.json`);
+        setReconcileLoading(true);
+        setReconcileResult(null);
+        try {
+            const res = await db.reconcileDistrictPortal(mappedCsvData, target, false);
+            setReconcileResult({ type: 'applied', inserted: res.inserted, updated: res.updated, skipped: res.skipped, msg: `Event: ${targetsEventName}` });
+        } catch (e: any) {
+            setReconcileResult({ type: 'error', msg: e.message });
+        } finally {
+            setReconcileLoading(false);
         }
     };
 
@@ -1413,6 +1464,78 @@ const hasFile = repairHasFile;
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+                </div>
+                )}
+
+                {isAdmin && isPortalCsv && (
+                <div className="p-4 mb-6 rounded-2xl border-2 border-indigo-200 bg-indigo-50">
+                    <div className="flex justify-between items-center mb-2">
+                        <div>
+                            <h4 className="text-[10px] font-black text-indigo-800 uppercase tracking-wider">Reconcile District Portal CSV</h4>
+                            <p className="text-[8px] font-bold text-indigo-600 uppercase mt-0.5">
+                                Detected a portal file with a combined Full Name. Matches existing delegates by phone (then full name, then email) — fills ONLY missing phone/email/chapter/district; never overwrites existing data. Inserts genuinely new people. Ideal for updating district delegates and filling gaps.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                        <label className="text-[8px] font-bold text-indigo-700 uppercase">Reconcile into event:</label>
+                        <select
+                            className="px-3 py-2 border-2 border-indigo-200 rounded-xl bg-white font-mono text-xs outline-none focus:ring focus:ring-indigo-500/10 max-w-sm"
+                            value={reconcileEventId || activeEventId}
+                            onChange={e => setReconcileEventId(e.target.value)}
+                        >
+                            <option value="">{activeEvent?.name ? `${activeEvent.name} (active)` : '— select event —'}</option>
+                            {events.map((ev: any) => (
+                                ev.event_id !== activeEventId ? (
+                                    <option key={ev.event_id} value={ev.event_id}>{ev.name}</option>
+                                ) : null
+                            ))}
+                        </select>
+                        <span className="text-[7px] font-bold text-indigo-600 uppercase">
+                            Target event must hold the existing district delegates (defaults to the active event). Matching and gap-fills run only within this event.
+                        </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={handleReconcilePreview}
+                            disabled={reconcileLoading || !(reconcileEventId || activeEventId) || !mappedCsvData.trim()}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                        >
+                            {reconcileLoading ? 'ANALYZING...' : '1. Preview (dry run)'}
+                        </button>
+                        <button
+                            onClick={handleReconcileApply}
+                            disabled={reconcileLoading || !(reconcileEventId || activeEventId) || !mappedCsvData.trim()}
+                            className="px-4 py-2 bg-green-700 hover:bg-green-600 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                            title="Downloads a JSON backup, then applies gap-fills + inserts"
+                        >
+                            {reconcileLoading ? 'APPLYING...' : '2. Backup & Apply'}
+                        </button>
+                    </div>
+                    {reconcileResult && (
+                        <div className={`p-3 rounded-xl mt-2 ${
+                            reconcileResult.type === 'error' ? 'bg-red-100 border border-red-200 text-red-800' : 'bg-white border border-indigo-200 text-indigo-900'
+                        }`}>
+                            <p className="text-[9px] font-black uppercase">Reconcile {reconcileResult.type}{reconcileResult.msg ? ` — ${reconcileResult.msg}` : ''}</p>
+                            {reconcileResult.inserted !== undefined && (
+                                <div className="mt-1 space-y-0.5 text-[8px] font-bold uppercase">
+                                    <p className="text-blue-700">{'\u2795'} {reconcileResult.inserted} new people to insert</p>
+                                    <p className="text-green-700">{'\uD83D\uDD04'} {reconcileResult.updated} existing records with gaps filled</p>
+                                    <p className="text-amber-700">{'\u23EC\uFE0F'} {reconcileResult.skipped} complete / unmatched-skipped</p>
+                                </div>
+                            )}
+                            {reconcileResult.type === 'preview' && (
+                                <p className="text-[8px] font-bold text-indigo-700 uppercase mt-1">
+                                    {'\u26A0\uFE0F'} Preview only — NO writes made. Review counts, then use {'"2. Backup & Apply"'}.
+                                </p>
+                            )}
+                            {reconcileResult.type === 'applied' && (
+                                <p className="text-[8px] font-bold text-green-700 uppercase mt-1">
+                                    Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
