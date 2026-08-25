@@ -2014,6 +2014,7 @@ export const db = {
             family: string;
             autoMerge: boolean;
             dependantInvolved: boolean;
+            differentPhone: boolean;
             members: Array<{
                 delegate_id: string;
                 title: string;
@@ -2049,7 +2050,9 @@ export const db = {
 
         const groups = new Map<string, any[]>();
         for (const d of all) {
-            const key = familyAwareNameKey(d.title, d.first_name, d.last_name);
+            // DISTRICT-SCOPED clustering: same name in different districts is
+            // never the same person (event hosts all districts).
+            const key = `${normKey(d.district)}|${familyAwareNameKey(d.title, d.first_name, d.last_name)}`;
             if (!key || key.endsWith('|')) continue;
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key)!.push(d);
@@ -2061,6 +2064,8 @@ export const db = {
             const family = key.split('|')[0];
             const dependantInvolved = family === 'DEP';
             const contactBearing = members.filter((m: any) => (m.phone || m.email || '').trim()).length;
+            const distinctPhones = new Set(members.map((m: any) => normalizePhone(m.phone || '')).filter((p: string) => p));
+            const differentPhone = distinctPhones.size > 1;
             const enriched = members.map((m: any) => ({
                 delegate_id: m.delegate_id,
                 title: m.title,
@@ -2075,11 +2080,18 @@ export const db = {
                 created_at: m.created_at,
             }));
             enriched.sort((a: any, b: any) => (b.completeness - a.completeness) || ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
-            const autoMerge = !dependantInvolved && contactBearing <= 1;
-            clusters.push({ key, family, autoMerge, dependantInvolved, members: enriched });
+            // Auto-merge ONLY when: not a dependant, at most one contact-bearing
+            // member, AND no phone conflict (members share zero or one phone).
+            const autoMerge = !dependantInvolved && !differentPhone && contactBearing <= 1;
+            clusters.push({ key, family, autoMerge, dependantInvolved, differentPhone, members: enriched });
         }
 
-        clusters.sort((a, b) => (a.dependantInvolved === b.dependantInvolved ? 0 : a.dependantInvolved ? 1 : -1));
+        // Non-auto first? Sort: auto-mergeable clusters first, then differ-phone,
+        // then dependants (manual review) last.
+        clusters.sort((a: any, b: any) => {
+            const rank = (c: any) => (c.autoMerge ? 0 : c.differentPhone ? 1 : 2);
+            return rank(a) - rank(b);
+        });
         const duplicateRows = clusters.reduce((sum, c) => sum + c.members.length, 0) - clusters.length;
         return { clusters, duplicateRows };
     },
@@ -2089,6 +2101,7 @@ export const db = {
         family: string;
         autoMerge: boolean;
         dependantInvolved: boolean;
+        differentPhone: boolean;
         members: Array<{
             delegate_id: string;
             title: string;
@@ -2107,7 +2120,9 @@ export const db = {
         let skipped = 0;
 
         for (const cluster of clusters) {
-            const shouldMerge = cluster.autoMerge || (cluster.dependantInvolved && approvedKeys.has(cluster.key));
+            // DIFFERENT PHONE clusters are never merged — two contact-bearing
+            // members with distinct numbers are presumed different people.
+            const shouldMerge = !cluster.differentPhone && (cluster.autoMerge || (cluster.dependantInvolved && approvedKeys.has(cluster.key)));
             if (!shouldMerge) { skipped += cluster.members.length - 1; continue; }
 
             const [survivor, ...losers] = cluster.members;

@@ -1,5 +1,5 @@
 -- ============================================================================
--- Reconcile Title Variants — DEPENDANT-AWARE NAME KEY (v1.37d)
+-- Reconcile Title Variants — DEPENDANT-AWARE NAME KEY (v1.37d) + DISTRICT SCOPING (v1.37e)
 -- ----------------------------------------------------------------------------
 -- WHY: the reconcile name key `canonical_name_key` stripped only whitespace and
 -- hyphen-order, so double titles trapped in the name field
@@ -14,6 +14,10 @@
 -- parent. So name matching MUST be family-gated: never match/merge a DEP row
 -- (master/mst/mstr/miss) with an adult row (Mr/Mrs/professional) of the same
 -- name, and never merge Mr vs Mrs (couples).
+--
+-- v1.37e: name-key and email fallbacks are now DISTRICT-SCOPED (case-insensitive
+-- district match) so a single-district portal file (e.g. SW7) never reconciles
+-- into a same-name delegate from a different district in the host event.
 --
 -- FIX (family-prefixed match key, used by index + RPC + dedup):
 --   canonical_name_key(fn,ln)  → punctuation+title-stripped, word-sorted name
@@ -156,6 +160,7 @@ DECLARE
   v_name_key TEXT;
   v_first TEXT;
   v_last TEXT;
+  v_district TEXT;
 BEGIN
   IF NOT (is_admin_user() OR is_event_admin_user()) THEN
     RAISE EXCEPTION 'FORBIDDEN: administrator or event administrator privileges required';
@@ -192,22 +197,27 @@ BEGIN
       LIMIT 1;
     END IF;
 
-    -- 2) Name-key fallback (family-aware, order/title/punctuation-insensitive)
+    -- 2) Name-key fallback (family-aware, order/title/punctuation-insensitive,
+    --    DISTRICT-SCOPED so a portal row never reconciles into a same-name
+    --    delegate from a different district).
+    v_district := TRIM(COALESCE(v_item->>'district', ''));
     IF v_existing_id IS NULL AND v_name_key <> '|' THEN
       SELECT delegate_id INTO v_existing_id
       FROM delegates
       WHERE event_id = p_event_id
         AND name_key = v_name_key
+        AND (v_district = '' OR lower(btrim(coalesce(delegates.district, ''))) = lower(btrim(v_district)))
       LIMIT 1;
     END IF;
 
-    -- 3) Email fallback (only when still unmatched)
+    -- 3) Email fallback (only when still unmatched, DISTRICT-SCOPED too)
     IF v_existing_id IS NULL AND v_email_lower <> '' THEN
       SELECT delegate_id INTO v_existing_id
       FROM delegates
       WHERE event_id = p_event_id
         AND NULLIF(TRIM(email), '') IS NOT NULL
         AND LOWER(TRIM(email)) = v_email_lower
+        AND (v_district = '' OR lower(btrim(coalesce(delegates.district, ''))) = lower(btrim(v_district)))
       LIMIT 1;
     END IF;
 

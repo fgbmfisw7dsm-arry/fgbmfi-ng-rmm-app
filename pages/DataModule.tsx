@@ -110,7 +110,8 @@ const DataModule = () => {
             } else {
                 const auto = res.clusters.filter((c: any) => c.autoMerge).length;
                 const deps = res.clusters.filter((c: any) => c.dependantInvolved).length;
-                alert(`Reconcile Scan complete.\n\nFound ${res.clusters.length} duplicate clusters (${res.duplicateRows} excess rows).\n- Auto-merge (professional/job-title variants): ${auto}\n- Dependant clusters (Master/Mst/Miss — require manual approval, default SKIP): ${deps}\n\nReview the table below, then Backup & Apply.`);
+                const diffPh = res.clusters.filter((c: any) => c.differentPhone).length;
+                alert(`Reconcile Scan complete.\n\nFound ${res.clusters.length} duplicate clusters across the event (${res.duplicateRows} excess rows).\n- Auto-merge (professional/job-title variants, same district): ${auto}\n- Dependant clusters (Master/Mst/Miss — require manual approval, default SKIP): ${deps}\n- Different-phone (same name, different numbers — likely different people, auto-SKIPPED): ${diffPh}\n\nReview the table below, then Backup & Apply.`);
             }
         } catch (e: any) {
             console.error("UI: Title Variant scan failed:", e);
@@ -328,8 +329,9 @@ const DataModule = () => {
             <div className="bg-indigo-900 p-8 rounded-3xl shadow-xl text-white border-4 border-indigo-700 mt-8">
                 <h3 className="text-xl font-black uppercase tracking-tight">Reconcile Title Variants</h3>
                 <p className="text-[11px] font-bold text-indigo-300 mt-1 mb-6 leading-relaxed">
-                    Merges same-person duplicates created by double/job titles trapped in the name field (e.g. <span className="text-white">Dr. (Mrs) Cefort Ige</span> vs <span className="text-white">Dr Cefort Ige</span>; <span className="text-white">Esv Benjamin Chika</span> vs <span className="text-white">Benjamin Chika</span>; swapped <span className="text-white">Jair Uto-Dieu</span> / <span className="text-white">Uto-Dieu Jair</span>). Keeps the most-complete record, re-homes attendance/history, deletes the extra duplicate — <span className="text-white">no data loss</span>. <br/>
-                    <span className="text-amber-300">Dependant guard:</span> clusters whose name carries <span className="text-white">Master/Mst/Miss</span> (typically a son/daughter who may share a parent's name) are surfaced separately and default to <span className="text-white">SKIP</span> — approve each only if you confirm it's the same dependant recorded twice, never a child + parent.
+                    Merges same-person duplicates created by double/job titles trapped in the name field (e.g. <span className="text-white">Dr. (Mrs) Cefort Ige</span> vs <span className="text-white">Dr Cefort Ige</span>; <span className="text-white">Esv Benjamin Chika</span> vs <span className="text-white">Benjamin Chika</span>; swapped <span className="text-white">Jair Uto-Dieu</span> / <span className="text-white">Uto-Dieu Jair</span>). Keeps the most-complete record, re-homes attendance/history, deletes the extra duplicate — <span className="text-white">no data loss</span>. Matching is <span className="text-white">per-district</span> — a name in two different districts is never treated as the same person. <br/>
+                    <span className="text-amber-300">Dependant guard:</span> clusters whose name carries <span className="text-white">Master/Mst/Miss</span> (typically a son/daughter who may share a parent's name) are surfaced separately and default to <span className="text-white">SKIP</span> — approve each only if you confirm it's the same dependant recorded twice, never a child + parent. <br/>
+                    <span className="text-slate-300">Different-phone guard:</span> same name with <span className="text-white">different phone numbers</span> are auto-<span className="text-white">SKIPPED</span> — likely different people.
                 </p>
                 <div className="flex flex-wrap gap-4">
                     <button onClick={handleTitleVariantAnalyze} disabled={tvScanning || tvMerging}
@@ -353,14 +355,17 @@ const DataModule = () => {
                 {tvClusters.length > 0 && (
                     <div className="mt-6 space-y-4">
                         {tvClusters.map((c) => (
-                            <div key={c.key} className={`rounded-2xl border-2 p-5 ${c.dependantInvolved ? 'bg-amber-950 border-amber-500' : 'bg-indigo-950 border-indigo-600'}`}>
+                            <div key={c.key} className={`rounded-2xl border-2 p-5 ${c.differentPhone ? 'bg-slate-900 border-slate-500' : c.dependantInvolved ? 'bg-amber-950 border-amber-500' : 'bg-indigo-950 border-indigo-600'}`}>
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase mr-2 ${c.family === 'DEP' ? 'bg-amber-500 text-amber-950' : 'bg-indigo-500 text-white'}`}>{c.family}</span>
                                         <span className="text-sm font-black text-white">{c.key.replace(/^[^|]*\|/, '')}</span>
                                         <span className="text-[10px] font-bold text-indigo-300 uppercase ml-2">({c.members.length} rows, {c.members.length - 1} excess)</span>
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Dist: {(c.members[0]?.district || '?')}</span>
                                     </div>
-                                    {c.dependantInvolved ? (
+                                    {c.differentPhone ? (
+                                        <span className="text-[10px] font-black text-slate-400 uppercase border border-slate-500 rounded-lg px-2 py-1">DIFFERENT PHONE — SKIPPED (likely different people)</span>
+                                    ) : c.dependantInvolved ? (
                                         <label className="flex items-center gap-2 text-[10px] font-black text-amber-300 uppercase cursor-pointer">
                                             <input type="checkbox" className="accent-amber-400 w-4 h-4"
                                                 checked={tvApproved.has(c.key)}
