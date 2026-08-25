@@ -26,30 +26,29 @@ GROUP BY d.district;
 WITH sw AS (
   SELECT d.delegate_id, d.title, d.first_name, d.last_name,
          coalesce(d.phone_normalized,'') AS phone,
-         lower(coalesce(d.email,'')) AS email
+         lower(coalesce(d.email,'')) AS email,
+         array_to_string(ARRAY(SELECT w FROM regexp_split_to_table(
+             regexp_replace(lower(coalesce(d.first_name,'')||' '||coalesce(d.last_name,'')),
+                            '[^a-z0-9 ]', ' ', 'g'), ' ') w
+           WHERE length(w) > 0
+             AND w NOT IN ('mr','mrs','ms','miss','dr','chief','pastor','rev','engr','barr',
+                           'prof','sir','lady','hon','elder','deacon','deaconess','bishop','apostle',
+                           'evangelist','ven','snr','bro','sis','prince','princess','oba','alhaji',
+                           'alhaja','mallam','hajia','arch','archt','comrade','evang','evng','pst',
+                           'eld','sen','esq','otunba','capt','maj','lt','col','cmdr','adm','amb',
+                           'ambassador','master','mst','mstr','esv','pharm','drs','supt')
+           ORDER BY w), ' ') AS base_name_key
   FROM delegates d JOIN events e ON e.event_id = d.event_id
   WHERE e.name = '2026 Lagos National Convention' AND d.district ILIKE '%South West 7%'
 )
-SELECT
-  array_to_string(ARRAY(SELECT w FROM regexp_split_to_table(
-      regexp_replace(lower(coalesce(sw.first_name,'')||' '||coalesce(sw.last_name,'')),
-                     '[^a-z0-9 ]', ' ', 'g'), ' ') w
-    WHERE length(w) > 0
-      AND w NOT IN ('mr','mrs','ms','miss','dr','chief','pastor','rev','engr','barr',
-                    'prof','sir','lady','hon','elder','deacon','deaconess','bishop','apostle',
-                    'evangelist','ven','snr','bro','sis','prince','princess','oba','alhaji',
-                    'alhaja','mallam','hajia','arch','archt','comrade','evang','evng','pst',
-                    'eld','sen','esq','otunba','capt','maj','lt','col','cmdr','adm','amb',
-                    'ambassador','master','mst','mstr','esv','pharm','drs','supt')
-    ORDER BY w), ' ') AS base_name_key,
-  sw.phone,
+SELECT base_name_key, phone,
   count(*) AS n_rows,
-  array_agg(sw.delegate_id) AS ids,
-  array_agg(sw.title||'|'||sw.first_name||' '||sw.last_name) AS stored
+  array_agg(delegate_id) AS ids,
+  array_agg(title||'|'||first_name||' '||last_name) AS stored
 FROM sw
-GROUP BY base_name_key, sw.phone
+GROUP BY base_name_key, phone
 HAVING base_name_key <> '' AND count(*) > 1
-ORDER BY n_rows DESC, base_name_key;
+ORDER BY count(*) DESC, base_name_key;
 -- EXPECT: 0 rows. Any row here is a residual same-phone duplicate.
 
 -- ---------------------------------------------------------------------------
