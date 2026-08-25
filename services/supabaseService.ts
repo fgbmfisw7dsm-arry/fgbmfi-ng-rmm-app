@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -2006,6 +2006,150 @@ export const db = {
             }
         }
         return merged;
+    },
+
+    analyzeTitleVariants: async (eventId: string): Promise<{
+        clusters: Array<{
+            key: string;
+            family: string;
+            autoMerge: boolean;
+            dependantInvolved: boolean;
+            members: Array<{
+                delegate_id: string;
+                title: string;
+                first_name: string;
+                last_name: string;
+                district: string;
+                chapter: string;
+                phone: string;
+                email: string;
+                hasContact: boolean;
+                completeness: number;
+                created_at: string;
+            }>;
+        }>;
+        duplicateRows: number;
+    }> => {
+        if (!eventId) return { clusters: [], duplicateRows: 0 };
+        const all: any[] = [];
+        let from = 0;
+        while (true) {
+            const q = supabase.from('delegates').select('*').order('delegate_id').range(from, from + 999).eq('event_id', eventId);
+            const { data } = await q;
+            if (!data || data.length === 0) break;
+            all.push(...data);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        if (all.length === 0) return { clusters: [], duplicateRows: 0 };
+
+        const completeness = (d: any) =>
+            [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
+                .filter(v => v && String(v).trim()).length;
+
+        const groups = new Map<string, any[]>();
+        for (const d of all) {
+            const key = familyAwareNameKey(d.title, d.first_name, d.last_name);
+            if (!key || key.endsWith('|')) continue;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(d);
+        }
+
+        const clusters: any[] = [];
+        for (const [key, members] of groups) {
+            if (members.length < 2) continue;
+            const family = key.split('|')[0];
+            const dependantInvolved = family === 'DEP';
+            const contactBearing = members.filter((m: any) => (m.phone || m.email || '').trim()).length;
+            const enriched = members.map((m: any) => ({
+                delegate_id: m.delegate_id,
+                title: m.title,
+                first_name: m.first_name,
+                last_name: m.last_name,
+                district: m.district,
+                chapter: m.chapter,
+                phone: m.phone || '',
+                email: m.email || '',
+                hasContact: !!(m.phone || m.email || '').trim(),
+                completeness: completeness(m),
+                created_at: m.created_at,
+            }));
+            enriched.sort((a: any, b: any) => (b.completeness - a.completeness) || ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
+            const autoMerge = !dependantInvolved && contactBearing <= 1;
+            clusters.push({ key, family, autoMerge, dependantInvolved, members: enriched });
+        }
+
+        clusters.sort((a, b) => (a.dependantInvolved === b.dependantInvolved ? 0 : a.dependantInvolved ? 1 : -1));
+        const duplicateRows = clusters.reduce((sum, c) => sum + c.members.length, 0) - clusters.length;
+        return { clusters, duplicateRows };
+    },
+
+    mergeTitleVariants: async (eventId: string, clusters: Array<{
+        key: string;
+        family: string;
+        autoMerge: boolean;
+        dependantInvolved: boolean;
+        members: Array<{
+            delegate_id: string;
+            title: string;
+            first_name: string;
+            last_name: string;
+            district: string;
+            chapter: string;
+            phone: string;
+            email: string;
+            hasContact: boolean;
+            completeness: number;
+            created_at: string;
+        }>;
+    }>, approvedKeys: Set<string>): Promise<{ merged: number; skipped: number }> => {
+        let merged = 0;
+        let skipped = 0;
+
+        for (const cluster of clusters) {
+            const shouldMerge = cluster.autoMerge || (cluster.dependantInvolved && approvedKeys.has(cluster.key));
+            if (!shouldMerge) { skipped += cluster.members.length - 1; continue; }
+
+            const [survivor, ...losers] = cluster.members;
+            for (const loser of losers) {
+                try {
+                    const survivorRow: any = (await supabase.from('delegates').select('*').eq('delegate_id', survivor.delegate_id).single())?.data;
+                    if (!survivorRow) { skipped++; continue; }
+                    const survCheckins = (await supabase.from('checkins').select('session_id').eq('event_id', eventId).eq('delegate_id', survivor.delegate_id))?.data || [];
+                    const survSessions = new Set(survCheckins.map((c: any) => c.session_id ?? '__ARRIVAL__'));
+                    const dupCheckins = (await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', eventId).eq('delegate_id', loser.delegate_id))?.data || [];
+                    for (const c of dupCheckins) {
+                        const k = c.session_id ?? '__ARRIVAL__';
+                        if (survSessions.has(k)) { await supabase.from('checkins').delete().eq('checkin_id', c.checkin_id); }
+                        else { await supabase.from('checkins').update({ delegate_id: survivor.delegate_id }).eq('checkin_id', c.checkin_id); }
+                    }
+                    const survResp = (await supabase.from('session_responses').select('session_id, response_type').eq('event_id', eventId).eq('delegate_id', survivor.delegate_id))?.data || [];
+                    const survKeys = new Set(survResp.map((x: any) => `${x.session_id}|${x.response_type}`));
+                    const dupResp = (await supabase.from('session_responses').select('response_id, session_id, response_type').eq('event_id', eventId).eq('delegate_id', loser.delegate_id))?.data || [];
+                    for (const x of dupResp) {
+                        if (survKeys.has(`${x.session_id}|${x.response_type}`)) { await supabase.from('session_responses').delete().eq('response_id', x.response_id); }
+                        else { await supabase.from('session_responses').update({ delegate_id: survivor.delegate_id }).eq('response_id', x.response_id); }
+                    }
+                    await supabase.from('badge_print_logs').update({ delegate_id: survivor.delegate_id }).eq('event_id', eventId).eq('delegate_id', loser.delegate_id);
+
+                    // Repair survivor name split (trapped title token) using the cleanest member parse.
+                    const mergedFirst = survivor.first_name || loser.first_name;
+                    const mergedLast = survivor.last_name || loser.last_name;
+                    const mergedTitle = survivor.title || loser.title;
+                    await supabase.from('delegates').update({
+                        title: mergedTitle,
+                        first_name: mergedFirst,
+                        last_name: mergedLast,
+                    }).eq('delegate_id', survivor.delegate_id);
+                    await supabase.from('delegates').delete().eq('delegate_id', loser.delegate_id);
+                    merged++;
+                } catch (e) {
+                    console.error('[mergeTitleVariants] merge failed for', loser.delegate_id, e);
+                    skipped++;
+                }
+            }
+        }
+        return { merged, skipped };
     },
 
     autoRepairScannedNames: async (eventId: string, districtOverride?: string) => {

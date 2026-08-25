@@ -47,6 +47,13 @@ const DataModule = () => {
     const [junkBackupReady, setJunkBackupReady] = useState(false);
     const [junkDeleting, setJunkDeleting] = useState(false);
 
+    // State for Reconcile Title Variants
+    const [tvClusters, setTvClusters] = useState<any[]>([]);
+    const [tvScanning, setTvScanning] = useState(false);
+    const [tvMerging, setTvMerging] = useState(false);
+    const [tvApproved, setTvApproved] = useState<Set<string>>(new Set());
+    const [tvResult, setTvResult] = useState<{ merged: number; skipped: number } | null>(null);
+
     useEffect(() => {
         db.getSettings().then(setSettings);
         db.getEvents().then(setEvents);
@@ -83,6 +90,68 @@ const DataModule = () => {
             alert("TASK FAILED: " + (e.message || "Database connection error."));
         } finally {
             setLoading(false);
+        }
+    };
+
+    // --- LOGIC: RECONCILE TITLE VARIANTS (dependant-aware) ---
+    const handleTitleVariantAnalyze = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        setTvScanning(true);
+        setTvClusters([]);
+        setTvApproved(new Set());
+        setTvResult(null);
+        try {
+            const res = await db.analyzeTitleVariants(activeEventId);
+            setTvClusters(res.clusters);
+            // Auto-merge clusters are applied by default; dependant clusters need manual approval (default Skip).
+            setTvApproved(new Set(res.clusters.filter((c: any) => c.autoMerge).map((c: any) => c.key)));
+            if (res.clusters.length === 0) {
+                alert("No title-variant duplicate clusters found in the active event.");
+            } else {
+                const auto = res.clusters.filter((c: any) => c.autoMerge).length;
+                const deps = res.clusters.filter((c: any) => c.dependantInvolved).length;
+                alert(`Reconcile Scan complete.\n\nFound ${res.clusters.length} duplicate clusters (${res.duplicateRows} excess rows).\n- Auto-merge (professional/job-title variants): ${auto}\n- Dependant clusters (Master/Mst/Miss — require manual approval, default SKIP): ${deps}\n\nReview the table below, then Backup & Apply.`);
+            }
+        } catch (e: any) {
+            console.error("UI: Title Variant scan failed:", e);
+            alert("TASK FAILED: " + (e.message || "Database error."));
+        } finally {
+            setTvScanning(false);
+        }
+    };
+
+    const handleTitleVariantBackup = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        if (tvClusters.length === 0) return alert("Run a scan first.");
+        setTvScanning(true);
+        try {
+            const allData = await db.getAllDelegates(activeEventId);
+            downloadJSON({ event: activeEventId, exportedAt: new Date().toISOString(), clusters: tvClusters, delegates: allData }, `TITLE_VARIANT_BACKUP_${activeEvent?.name || 'EVENT'}_${Date.now()}.json`);
+            alert("BACKUP DOWNLOADED: Review the clusters, then click Apply.");
+        } catch (e: any) {
+            alert("Backup failed: " + e.message);
+        } finally {
+            setTvScanning(false);
+        }
+    };
+
+    const handleTitleVariantApply = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        if (tvClusters.length === 0) return alert("Run a scan first.");
+        if (!tvApproved.size) return alert("No clusters approved to merge.");
+        if (!window.confirm("This will merge the approved title-variant duplicates (keep most-complete record, re-home attendance/history, delete the extra duplicate). Dependant clusters show separately — only those you explicitly approved will be merged. Continue?")) return;
+
+        setTvMerging(true);
+        setTvResult(null);
+        try {
+            const res = await db.mergeTitleVariants(activeEventId, tvClusters, tvApproved);
+            setTvResult(res);
+            alert(`SUCCESS: Title Variant Reconciliation complete.\n\nMerged ${res.merged} duplicate record(s).\nSkipped ${res.skipped}.`);
+        } catch (e: any) {
+            console.error("UI: Title Variant merge failed:", e);
+            alert("TASK FAILED: " + (e.message || "Database error."));
+        } finally {
+            setTvMerging(false);
         }
     };
 
@@ -253,6 +322,68 @@ const DataModule = () => {
                         {loading ? 'ANALYZING RECORDS...' : '📂 Clean Master List Duplicates'}
                     </button>
                 </div>
+            </div>
+
+            {/* RECONCILE TITLE VARIANTS (dependant-aware) */}
+            <div className="bg-indigo-900 p-8 rounded-3xl shadow-xl text-white border-4 border-indigo-700 mt-8">
+                <h3 className="text-xl font-black uppercase tracking-tight">Reconcile Title Variants</h3>
+                <p className="text-[11px] font-bold text-indigo-300 mt-1 mb-6 leading-relaxed">
+                    Merges same-person duplicates created by double/job titles trapped in the name field (e.g. <span className="text-white">Dr. (Mrs) Cefort Ige</span> vs <span className="text-white">Dr Cefort Ige</span>; <span className="text-white">Esv Benjamin Chika</span> vs <span className="text-white">Benjamin Chika</span>; swapped <span className="text-white">Jair Uto-Dieu</span> / <span className="text-white">Uto-Dieu Jair</span>). Keeps the most-complete record, re-homes attendance/history, deletes the extra duplicate — <span className="text-white">no data loss</span>. <br/>
+                    <span className="text-amber-300">Dependant guard:</span> clusters whose name carries <span className="text-white">Master/Mst/Miss</span> (typically a son/daughter who may share a parent's name) are surfaced separately and default to <span className="text-white">SKIP</span> — approve each only if you confirm it's the same dependant recorded twice, never a child + parent.
+                </p>
+                <div className="flex flex-wrap gap-4">
+                    <button onClick={handleTitleVariantAnalyze} disabled={tvScanning || tvMerging}
+                        className="px-6 py-3 bg-white text-indigo-900 font-black rounded-xl uppercase text-xs tracking-widest shadow-xl hover:bg-indigo-50 transition-all disabled:opacity-50">
+                        {tvScanning ? 'SCANNING...' : '1. Scan Title Variants'}
+                    </button>
+                    <button onClick={handleTitleVariantBackup} disabled={tvScanning || tvMerging || tvClusters.length === 0}
+                        className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl uppercase text-xs tracking-widest shadow-xl hover:bg-indigo-500 transition-all disabled:opacity-50">
+                        2. Backup JSON
+                    </button>
+                    <button onClick={handleTitleVariantApply} disabled={tvScanning || tvMerging || tvClusters.length === 0 || tvApproved.size === 0}
+                        className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl uppercase text-xs tracking-widest shadow-xl hover:bg-emerald-500 transition-all disabled:opacity-50">
+                        {tvMerging ? 'MERGING...' : '3. Apply Merges'}
+                    </button>
+                    {tvResult && (
+                        <span className="text-[11px] font-black text-emerald-300 uppercase self-center">
+                            Done — merged {tvResult.merged}, skipped {tvResult.skipped}. Hard-refresh Master List to verify.
+                        </span>
+                    )}
+                </div>
+                {tvClusters.length > 0 && (
+                    <div className="mt-6 space-y-4">
+                        {tvClusters.map((c) => (
+                            <div key={c.key} className={`rounded-2xl border-2 p-5 ${c.dependantInvolved ? 'bg-amber-950 border-amber-500' : 'bg-indigo-950 border-indigo-600'}`}>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase mr-2 ${c.family === 'DEP' ? 'bg-amber-500 text-amber-950' : 'bg-indigo-500 text-white'}`}>{c.family}</span>
+                                        <span className="text-sm font-black text-white">{c.key.replace(/^[^|]*\|/, '')}</span>
+                                        <span className="text-[10px] font-bold text-indigo-300 uppercase ml-2">({c.members.length} rows, {c.members.length - 1} excess)</span>
+                                    </div>
+                                    {c.dependantInvolved ? (
+                                        <label className="flex items-center gap-2 text-[10px] font-black text-amber-300 uppercase cursor-pointer">
+                                            <input type="checkbox" className="accent-amber-400 w-4 h-4"
+                                                checked={tvApproved.has(c.key)}
+                                                onChange={e => setTvApproved(prev => { const n = new Set(prev); e.target.checked ? n.add(c.key) : n.delete(c.key); return n; })} />
+                                            Approve merge (dependant — confirm same child, not child+parent)
+                                        </label>
+                                    ) : (
+                                        <span className="text-[10px] font-bold text-emerald-300 uppercase">AUTO-MERGE</span>
+                                    )}
+                                </div>
+                                <div className="mt-3 grid gap-2">
+                                    {c.members.map((m: any, i: number) => (
+                                        <div key={m.delegate_id} className={`flex items-center gap-3 rounded-xl px-3 py-2 text-xs ${i === 0 ? 'bg-white/10 font-bold' : 'bg-white/5'}`}>
+                                            <span className="font-mono text-indigo-300">{i === 0 ? 'KEEP' : 'DEL'}</span>
+                                            <span className="text-white min-w-[120px]">{m.title || '-'}|{m.first_name} {m.last_name}</span>
+                                            <span className="ml-auto text-indigo-300">{m.hasContact ? `${m.phone || ''} ${m.email || ''}`.trim() : 'NO-PHONE/NO-EMAIL'}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

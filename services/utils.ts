@@ -127,7 +127,8 @@ export const KNOWN_TITLES = new Set([
     'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis', 'prince',
     'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia',
     'arc', 'arch', 'archt', 'comrade', 'evang', 'evng', 'pst', 'eld', 'sen',
-    'esq', 'otunba', 'capt', 'maj', 'lt', 'col', 'cmdr', 'adm'
+    'esq', 'otunba', 'capt', 'maj', 'lt', 'col', 'cmdr', 'adm',
+    'amb', 'ambassador', 'master', 'mst', 'mstr', 'esv', 'pharm', 'drs', 'supt'
 ]);
 
 export type NameOrder = 'given-first' | 'surname-first';
@@ -144,7 +145,9 @@ export const canonicalTitle = (rawToken: string): string => {
         oba: 'Oba', alhaji: 'Alhaji', alhaja: 'Alhaja', mallam: 'Mallam', hajia: 'Hajia',
         arc: 'Arch', arch: 'Arch', archt: 'Arch', comrade: 'Comrade', sen: 'Sen',
         esq: 'Esq', otunba: 'Otunba', capt: 'Capt', maj: 'Maj', lt: 'Lt', col: 'Col',
-        cmdr: 'Cmdr', adm: 'Adm'
+        cmdr: 'Cmdr', adm: 'Adm',
+        amb: 'Ambassador', ambassador: 'Ambassador', master: 'Master', mst: 'Master', mstr: 'Master',
+        esv: 'Esv', pharm: 'Pharm', drs: 'Drs', supt: 'Supt'
     };
     if (shorthand[cleaned]) return shorthand[cleaned];
     if (!cleaned) return '';
@@ -154,6 +157,47 @@ export const canonicalTitle = (rawToken: string): string => {
 export const normalizeTitleToken = (t: string): string => {
     return (t || '').replace(/^\(|\)$/g, '').trim().toLowerCase().replace(/\.$/, '').trim();
 };
+
+// --- Dependant-aware identity family helpers (v1.37d) -------------------------
+// `Master`/`Mst`/`Miss` denote a DEPENDANT (son/daughter) who may legitimately
+// share a parent's full name, so name matching is gated by an identity family:
+//   DEP  dependant markers (master/mst/mstr/miss) — never match adults
+//   PRO  professional title present (dr/engr/prof/barr/pastor/rev/evang/esv/...)
+//   M    male honorific (mr)      F    female honorific (mrs/ms)
+//   P    no title signal
+// These mirror the SQL helpers in supabase_migration_reconcile_dependant_family.sql.
+const FAMILY_PRO_TITLES = new Set([
+    'dr', 'chief', 'pastor', 'rev', 'engr', 'barr', 'prof', 'sir', 'lady', 'hon', 'elder',
+    'deacon', 'deaconess', 'bishop', 'apostle', 'evangelist', 'ven', 'snr', 'bro', 'sis',
+    'prince', 'princess', 'oba', 'alhaji', 'alhaja', 'mallam', 'hajia',
+    'arc', 'arch', 'archt', 'comrade', 'evang', 'evng', 'pst', 'eld', 'sen', 'esq', 'otunba',
+    'capt', 'maj', 'lt', 'col', 'cmdr', 'adm', 'amb', 'ambassador', 'esv', 'pharm', 'drs', 'supt'
+]);
+const FAMILY_DEP_TITLES = new Set(['master', 'mst', 'mstr', 'miss']);
+
+export const familyOfName = (title?: string, firstName?: string, lastName?: string): string => {
+    const tokens: string[] = [
+        ...(title || '').toLowerCase().split(/[^a-z0-9]+/),
+        ...(firstName || '').toLowerCase().split(/[^a-z0-9]+/),
+        ...(lastName || '').toLowerCase().split(/[^a-z0-9]+/)
+    ].filter(Boolean);
+    if (tokens.some(t => FAMILY_DEP_TITLES.has(t))) return 'DEP';
+    if (tokens.some(t => FAMILY_PRO_TITLES.has(t))) return 'PRO';
+    if (tokens.includes('mr')) return 'M';
+    if (tokens.includes('mrs') || tokens.includes('ms')) return 'F';
+    return 'P';
+};
+
+export const canonicalNameKeyStr = (firstName?: string, lastName?: string): string => {
+    const tokens = [...(firstName || '').toLowerCase().split(/[^a-z0-9]+/),
+                    ...(lastName || '').toLowerCase().split(/[^a-z0-9]+/)]
+        .filter(Boolean)
+        .filter(t => !KNOWN_TITLES.has(t));
+    return [...new Set(tokens)].sort().join(' ');
+};
+
+export const familyAwareNameKey = (title?: string, firstName?: string, lastName?: string): string =>
+    `${familyOfName(title, firstName, lastName)}|${canonicalNameKeyStr(firstName, lastName)}`;
 
 export const tokenizeFullName = (fullName: string): string[] => {
     const cleaned = (fullName || '').trim()
