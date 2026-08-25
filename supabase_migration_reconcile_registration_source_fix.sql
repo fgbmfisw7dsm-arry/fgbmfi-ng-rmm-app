@@ -1,74 +1,18 @@
 -- ============================================================================
--- Reconcile District Portal CSV — TIMEOUT + PERFORMANCE FIX (v1.37b)
+-- Reconcile registration_source CHECK fix (v1.37c)
 -- ----------------------------------------------------------------------------
--- WHY: the v1 release of `reconcile_delegate_matches` matched the name fallback
--- via `WHERE canonical_name_key(first_name, last_name) = v_name_key`, which
--- computes the key expression on EVERY row of the target event for EVERY input
--- row (an unindexed full scan). With ~605 portal rows against a large event
--- table, that exceeded Supabase's default `statement_timeout` →
--- "canceling statement due to statement timeout".
+-- WHY: reconcile inserts used registration_source='reconcile', which violates
+-- the delegates CHECK constraint
+--   CHECK (registration_source IN ('import', 'manual', 'qr_scan'))
+-- → "new row for relation delegates violates check constraint
+--    delegates_registration_source_check" on Apply (dry-run Preview doesn't
+--    insert, so it passed).
 --
--- FIX (two layers):
---   1. Persist the word-sorted name key as `delegates.name_key`, populated by
---      the existing identity trigger, and index `(event_id, name_key)` so the
---      fallback becomes an index probe instead of a full scan.
---   2. Raise the per-call `statement_timeout` inside the RPC (session-local via
---      set_config) so large reconcile batches complete instead of being killed.
---
--- Deployment: idempotent. Creates the column/trigger-backfill/index, then
--- CREATE OR REPLACEs the RPC. Requires `pg_trgm` only if not already present
--- (the name_key btree index does not depend on pg_trgm).
+-- FIX: use the existing allowed value 'import' for reconcile inserts (matches
+-- the bulk import path; no constraint change needed).
+-- Idempotent: just re-creates the RPC.
 -- ============================================================================
 
--- ---------------------------------------------------------------------------
--- 1. Canonical word-sorted name key function (order/title-insensitive identity)
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION canonical_name_key(fn TEXT, ln TEXT)
-RETURNS TEXT
-LANGUAGE sql
-IMMUTABLE
-PARALLEL SAFE
-AS $f$
-  SELECT COALESCE(string_agg(w, ' '), '')
-  FROM (
-    SELECT w
-    FROM regexp_split_to_table(lower(COALESCE(fn,'') || ' ' || COALESCE(ln,'')), '\s+') AS w
-    WHERE length(w) > 0
-    ORDER BY w
-  ) t;
-$f$;
-
--- ---------------------------------------------------------------------------
--- 2. Add delegates.name_key + index + trigger hook
--- ---------------------------------------------------------------------------
-ALTER TABLE delegates ADD COLUMN IF NOT EXISTS name_key TEXT;
-
--- Backfill existing rows (safe: recomputed from stored first/last)
-UPDATE delegates SET name_key = canonical_name_key(first_name, last_name)
-WHERE name_key IS NULL OR name_key = '';
-
--- Populate on insert/update of name fields
-CREATE OR REPLACE FUNCTION delegates_name_key_trigger()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $fn$
-BEGIN
-  NEW.name_key := canonical_name_key(NEW.first_name, NEW.last_name);
-  RETURN NEW;
-END;
-$fn$;
-
-DROP TRIGGER IF EXISTS trg_delegates_name_key ON delegates;
-CREATE TRIGGER trg_delegates_name_key
-BEFORE INSERT OR UPDATE OF first_name, last_name ON delegates
-FOR EACH ROW EXECUTE FUNCTION delegates_name_key_trigger();
-
-CREATE INDEX IF NOT EXISTS idx_delegates_event_name_key
-  ON delegates(event_id, name_key);
-
--- ---------------------------------------------------------------------------
--- 3. Rewrite reconcile_delegate_matches (indexed + longer statement timeout)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION reconcile_delegate_matches(
   p_delegates JSONB,
   p_event_id UUID,
@@ -96,7 +40,6 @@ BEGIN
     RAISE EXCEPTION 'FORBIDDEN: administrator or event administrator privileges required';
   END IF;
 
-  -- Surpass the default (pooler) statement_timeout for large reconcile batches.
   PERFORM set_config('statement_timeout', '120000', true);
 
   IF COALESCE(p_event_id, '00000000-0000-0000-0000-000000000000'::UUID) = '00000000-0000-0000-0000-000000000000'::UUID THEN
@@ -170,7 +113,7 @@ BEGIN
           COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), 'Member'),
           COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
           p_event_id,
-          COALESCE(v_item->>'registration_source', 'import'),
+          'import',
           COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), gen_random_uuid()::TEXT)
         );
         v_inserted := v_inserted + 1;

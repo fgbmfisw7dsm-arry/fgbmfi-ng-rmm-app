@@ -141,7 +141,7 @@ BEGIN
           COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), 'Member'),
           COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
           p_event_id,
-          COALESCE(v_item->>'registration_source', 'reconcile'),
+          COALESCE(v_item->>'registration_source', 'import'),
           COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), gen_random_uuid()::TEXT)
         );
         v_inserted := v_inserted + 1;

@@ -1266,7 +1266,7 @@ export const db = {
                 rank: p[8] || 'CP',
                 office: p[9] || 'OTHER',
                 delegate_type: p[10] || 'Member',
-                registration_source: 'reconcile'
+                registration_source: 'import'
             }));
 
             const { data, error } = await supabase.rpc('reconcile_delegate_matches', {
