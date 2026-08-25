@@ -655,6 +655,8 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Trailer block:** the existing junk guard (empty `Full Name` → `'no name'`) already drops the portal export `Total` row and the quoted multi-line `Applied filters / Event Status / IsActive / ...` trailer block — no new guard was needed.
 - **RPC:** `reconcile_delegate_matches(p_delegates JSONB, p_event_id UUID, p_dry_run BOOLEAN DEFAULT FALSE)` — SECURITY DEFINER, admin/event_admin gate only, strict `event_id` scoping, per-record SELECT-then-gap-fill (never blanket overwrite, mirrors §35 lesson). Client wrapper `db.reconcileDistrictPortal(csv, eventId, dryRun)` batches 500 rows.
 - **Deploy note:** apply `supabase_migration_reconcile_delegate_fill.sql` (idempotent `CREATE OR REPLACE`) before using the panel.
+- **v1.37b timeout fix (`supabase_migration_reconcile_timeout_fix.sql`):** the v1 RPC's name fallback did `WHERE canonical_name_key(first_name, last_name) = v_name_key` — an unindexed full scan over the event for every input row → **"canceling statement due to statement timeout"** on large reconcile runs. Fix: persist the word-sorted key as `delegates.name_key` (extended the identity trigger + one-time backfill) with `idx_delegates_event_name_key(event_id, name_key)` so the fallback is an index probe, and raise the in-RPC `statement_timeout` to 120s via `set_config` so big batches complete. Re-apply this migration before retrying Preview/Apply.
+- **Q: run "Proceed with Bulk Import" before Preview?** No — the Reconcile panel operates on the same mapped CSV data (`mappedCsvData`) the Bulk Import button uses, so run Preview/Apply directly; a prior bulk import is not required.
 
 ## Code Conventions
 
