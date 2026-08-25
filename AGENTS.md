@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.38 (Registrar Free Guest Restriction: per-event toggle in Events & Config; UI + service + RLS enforcement)
+- **Current Version:** 1.39 (Free Guest field lock: District='National/External', Chapter='Guest', locked for registrar restrictions; client + service + RLS)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -690,6 +690,7 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Roles restricted:** registrar-tier via `isRegistrarRole()` + the SQL set (incl. `executive_admin`). **Admins and `event_admin` are exempt** (unchanged writes).
 - **Open paths (intentional):** the QR-scan check-in submission path (`registerDelegateFromQR`, `registration_source='qr_scan'`) stays open so door officers can still store pre-badged delegates not yet in the DB (existing/legit types like `Member`), and bulk import remains admin/event_admin-only. Discriminator = `registration_source` (already stored, no migration of data needed).
 - **Deploy:** apply `supabase_migration_v1.38_registrar_free_guest.sql` (idempotent: `CREATE OR REPLACE FUNCTION is_registrar_user()` + `DROP POLICY IF EXISTS / CREATE POLICY delegates_insert_scoped`). `supabase_schema.sql` reconciled (helper + policy block in §12g).
+- **v1.39 Free Guest field lock:** Free Guest records are always filed under **District = `National/External`** and **Chapter = `Guest`**. When `freeGuestLocked`, `NewDelegatePage` locks both fields to those values (amber chips, label "District (Free Guest)"), forces them on submit and reset, and the service `registerDelegate` force-sets `delegate_type/district/chapter` for restricted registrars (defense-in-depth). **RLS implication:** the v1.38 policy still required district-scoped registrars to insert into their own district, which would reject `National/External`. `supabase_migration_v1.39_free_guest_field_lock.sql` rewrites `delegates_insert_scoped` so that on a restricted event, register‑role **manual** inserts succeed ONLY as `FREE GUEST` + district `National/External` (the district-scoped manual path is disabled entirely on restricted events; QR/import sources keep normal district scoping — every scenario verified below). Apply v1.39 (supersedes v1.38's policy; v1.38 file kept as history).
 
 ## Code Conventions
 

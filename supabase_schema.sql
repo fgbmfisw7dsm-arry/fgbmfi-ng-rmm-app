@@ -1420,12 +1420,13 @@ DROP POLICY IF EXISTS "delegates_insert_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
 CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
--- v1.38: registrar-tier manual inserts on restricted events (event_config.restrict_registrar_to_free_guest) must be 'Free Guest'
+-- v1.39: restricted events (event_config.restrict_registrar_to_free_guest) allow registrar MANUAL
+-- inserts ONLY as 'Free Guest' + district='National/External'; district-scoped manual inserts are
+-- disabled on restricted events. QR-scan/import sources remain under normal district scoping.
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR (
-    (district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)
-    AND NOT (
+    NOT (
       is_registrar_user()
       AND EXISTS (
         SELECT 1 FROM events e
@@ -1433,8 +1434,19 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
           AND COALESCE(e.event_config->>'restrict_registrar_to_free_guest', 'false') = 'true'
       )
       AND COALESCE(delegates.registration_source, 'manual') = 'manual'
-      AND UPPER(COALESCE(delegates.delegate_type, '')) <> 'FREE GUEST'
     )
+    AND (district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)
+  )
+  OR (
+    is_registrar_user()
+    AND EXISTS (
+      SELECT 1 FROM events e
+      WHERE e.event_id = delegates.event_id
+        AND COALESCE(e.event_config->>'restrict_registrar_to_free_guest', 'false') = 'true'
+    )
+    AND COALESCE(delegates.registration_source, 'manual') = 'manual'
+    AND UPPER(COALESCE(delegates.delegate_type, '')) = 'FREE GUEST'
+    AND delegates.district = 'National/External'
   ));
 CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()

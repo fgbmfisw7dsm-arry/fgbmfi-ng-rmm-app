@@ -6,6 +6,8 @@ import { AppContext } from '../context/AppContext';
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
+const FREE_GUEST_DISTRICT = 'National/External';
+const FREE_GUEST_CHAPTER = 'Guest';
 
 const NewDelegatePage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -44,14 +46,14 @@ const NewDelegatePage = () => {
   } | null>(null);
 
   useEffect(() => {
-    if (isDistrictScoped) {
+    if (isDistrictScoped && !freeGuestLocked) {
         setForm(prev => ({ ...prev, district: user?.district }));
     }
-  }, [user]);
+  }, [user, isDistrictScoped, freeGuestLocked]);
 
   useEffect(() => {
     if (freeGuestLocked) {
-        setForm(prev => ({ ...prev, delegate_type: 'Free Guest' }));
+        setForm(prev => ({ ...prev, delegate_type: 'Free Guest', district: FREE_GUEST_DISTRICT, chapter: FREE_GUEST_CHAPTER }));
     }
   }, [freeGuestLocked]);
 
@@ -96,8 +98,12 @@ const NewDelegatePage = () => {
     setLoading(true);
     try {
         const payload = { ...form, event_id: activeEventId };
-        if (freeGuestLocked) payload.delegate_type = 'Free Guest';
-        if (isDistrictScoped) payload.district = user.district;
+        if (freeGuestLocked) {
+            payload.delegate_type = 'Free Guest';
+            payload.district = FREE_GUEST_DISTRICT;
+            payload.chapter = FREE_GUEST_CHAPTER;
+        }
+        if (isDistrictScoped && !freeGuestLocked) payload.district = user.district;
 
         const newDelegate = await db.registerDelegate(payload);
         if (!newDelegate || !newDelegate.delegate_id) throw new Error("Database persistence failure.");
@@ -129,7 +135,7 @@ const NewDelegatePage = () => {
 
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-            district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
+            district: freeGuestLocked ? FREE_GUEST_DISTRICT : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
         });
         
     } catch (e: any) { 
@@ -249,9 +255,14 @@ const NewDelegatePage = () => {
 
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                    {isDistrictScoped ? 'District (Auto-Assigned)' : 'District *'}
+                    {freeGuestLocked ? 'District (Free Guest)' : (isDistrictScoped ? 'District (Auto-Assigned)' : 'District *')}
                     </label>
-                    {isDistrictScoped ? (
+                    {freeGuestLocked ? (
+                    <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
+                        <span className="font-black text-amber-800 uppercase">{FREE_GUEST_DISTRICT}</span>
+                        <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
+                    </div>
+                    ) : isDistrictScoped ? (
                     <div className="w-full p-4 border-2 border-blue-50 rounded-2xl bg-blue-50 flex items-center justify-between">
                         <span className="font-black text-blue-900 uppercase">{user?.district}</span>
                         <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
@@ -265,7 +276,12 @@ const NewDelegatePage = () => {
                 </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Chapter</label>
-                    {chapters.length > 0 ? (
+                    {freeGuestLocked ? (
+                        <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
+                            <span className="font-black text-amber-800 uppercase">{FREE_GUEST_CHAPTER}</span>
+                            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
+                        </div>
+                    ) : chapters.length > 0 ? (
                         <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})}>
                             <option value="">-- SELECT CHAPTER --</option>
                             {chapters.map(c => <option key={c.chapter_id} value={c.chapter_name}>{c.chapter_name}</option>)}

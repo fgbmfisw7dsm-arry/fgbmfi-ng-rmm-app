@@ -1024,10 +1024,16 @@ export const db = {
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
         if (!delegate.event_id) throw new Error('registerDelegate requires event_id');
-        if (normalize(delegate.delegate_type || '').toUpperCase() !== 'FREE GUEST' && await isRegistrarFreeGuestRestricted(delegate.event_id)) {
+        const restricted = await isRegistrarFreeGuestRestricted(delegate.event_id);
+        if (restricted && normalize(delegate.delegate_type || '').toUpperCase() !== 'FREE GUEST') {
             throw new Error('PERMISSION: Registrar role restricted to Free Guest registrations for this event.');
         }
-        const payload = { ...delegate, phone: normalizePhone(delegate.phone || '') };
+        const payload: Partial<Delegate> = { ...delegate, phone: normalizePhone(delegate.phone || '') };
+        if (restricted) {
+            payload.delegate_type = 'Free Guest';
+            payload.district = 'National/External';
+            payload.chapter = 'Guest';
+        }
         if (payload.phone) {
             const { data: candidates } = await supabase.from('delegates')
                 .select('delegate_id, title, first_name, last_name, phone')
