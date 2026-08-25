@@ -102,3 +102,22 @@ HAVING count(*) > 1 AND count(DISTINCT phone) > 1
 ORDER BY n_rows DESC;
 -- Multi-distinct phones within one name key = likely DIFFERENT people (father/
 -- mother/child or two adults sharing a name), deliberately NOT merged (v1.37e).
+
+-- ---------------------------------------------------------------------------
+-- 3A. Inspect a specific same-name diff-phone pair in full, to decide
+--     MERGE vs KEEP. Edit <base_key> to the base_key from query 3 output
+--     (e.g. 'lanre taiwo'). Read-only.
+-- ---------------------------------------------------------------------------
+SELECT d.delegate_id, d.title, d.first_name, d.last_name,
+       coalesce(d.phone_normalized,'') AS phone,
+       lower(coalesce(d.email,'')) AS email,
+       d.chapter, d.registration_source,
+       d.created_at::date,
+       (SELECT count(*) FROM checkins c WHERE c.delegate_id = d.delegate_id) AS checkins
+FROM delegates d JOIN events e ON e.event_id = d.event_id
+WHERE e.name = '2026 Lagos National Convention'
+  AND d.district ILIKE '%South West 3%'
+  AND split_part(d.name_key, '|', 2) = '<base_key>'
+ORDER BY coalesce(d.phone_normalized,''), d.created_at;
+-- Decide: if email or chapter matches across the pair → SAME person (mergable);
+-- if a scan/badge history suggests two people or emails differ → KEEP separate.
