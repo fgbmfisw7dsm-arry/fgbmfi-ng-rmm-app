@@ -20,6 +20,7 @@ const NewDelegatePage = () => {
   const showRank = eventConfig.show_rank !== false;
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
+  const freeGuestLocked = isRegistrarRole(role) && eventConfig.restrict_registrar_to_free_guest === true;
 
   const [form, setForm] = useState<Partial<Delegate>>({ 
     title: 'Mr', first_name: '', last_name: '', phone: '', email: '', 
@@ -47,6 +48,12 @@ const NewDelegatePage = () => {
         setForm(prev => ({ ...prev, district: user?.district }));
     }
   }, [user]);
+
+  useEffect(() => {
+    if (freeGuestLocked) {
+        setForm(prev => ({ ...prev, delegate_type: 'Free Guest' }));
+    }
+  }, [freeGuestLocked]);
 
   useEffect(() => { 
     db.getSettings().then(data => {
@@ -89,6 +96,7 @@ const NewDelegatePage = () => {
     setLoading(true);
     try {
         const payload = { ...form, event_id: activeEventId };
+        if (freeGuestLocked) payload.delegate_type = 'Free Guest';
         if (isDistrictScoped) payload.district = user.district;
 
         const newDelegate = await db.registerDelegate(payload);
@@ -121,7 +129,7 @@ const NewDelegatePage = () => {
 
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-            district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member'
+            district: isDistrictScoped ? user?.district : '', chapter: '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
         });
         
     } catch (e: any) { 
@@ -210,6 +218,13 @@ const NewDelegatePage = () => {
             </div>
         )}
 
+        {freeGuestLocked && (
+            <div className="bg-amber-500 text-white p-4 rounded-3xl flex items-center justify-center gap-3 shadow-xl border-2 border-amber-600">
+                <span className="text-xl">🎟️</span>
+                <span className="text-xs font-black uppercase tracking-widest">Registrar Access: Delegate type locked to Free Guest per event configuration</span>
+            </div>
+        )}
+
         <div className="bg-white p-10 md:p-14 rounded-[3rem] shadow-2xl border border-gray-50">
             <div className="text-center mb-12">
             <h2 className="text-4xl font-black text-blue-900 tracking-tighter uppercase leading-none">New Delegate Entry</h2>
@@ -287,9 +302,16 @@ const NewDelegatePage = () => {
                 {showDelegateType && (
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Delegate Type</label>
-                    <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.delegate_type} onChange={e => setForm({...form, delegate_type: e.target.value})}>
-                        {availableDelegateTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
-                    </select>
+                    {freeGuestLocked ? (
+                        <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
+                            <span className="font-black text-amber-800 uppercase">Free Guest</span>
+                            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
+                        </div>
+                    ) : (
+                        <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.delegate_type} onChange={e => setForm({...form, delegate_type: e.target.value})}>
+                            {availableDelegateTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                        </select>
+                    )}
                 </div>
                 )}
 

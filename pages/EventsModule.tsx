@@ -285,6 +285,26 @@ const EventsModule = () => {
                         })}
                     </div>
 
+                    <div className="space-y-2 p-4 bg-amber-50/50 rounded-xl border border-amber-100">
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Registrar Restrictions</label>
+                        {(() => {
+                            const config = (form.event_config || {}) as EventConfig;
+                            const restricted = config.restrict_registrar_to_free_guest === true;
+                            return (
+                                <label className="flex items-center justify-between cursor-pointer py-1">
+                                    <span className="text-[10px] font-bold text-gray-600 uppercase">Restrict Registrar registrations to Free Guest only</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={restricted}
+                                        onChange={e => setForm({...form, event_config: {...config, restrict_registrar_to_free_guest: e.target.checked}})}
+                                        className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                </label>
+                            );
+                        })()}
+                        <p className="text-[9px] text-amber-700/70 font-bold uppercase pt-1">Applies to registrar roles (national / regional / district registrar). Admins and event-admin are unaffected. QR check-in submissions for pre-badged delegates remain open.</p>
+                    </div>
+
                     <div className="space-y-2 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
                         <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Pledge Names (per-event categories)</label>
                         <div className="flex gap-2">

@@ -1142,6 +1142,19 @@ AS $func$
   LIMIT 1;
 $func$;
 
+-- 8b.1 Helper: Is current user registrar-tier (for Free Guest restriction; v1.38)
+CREATE OR REPLACE FUNCTION is_registrar_user()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM app_users
+    WHERE id = auth.uid()
+      AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
+      AND (is_active IS NULL OR is_active = true)
+  );
+$func$;
+
 -- 8c. Enable RLS on all tables
 ALTER TABLE events           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE delegates        ENABLE ROW LEVEL SECURITY;
@@ -1407,9 +1420,22 @@ DROP POLICY IF EXISTS "delegates_insert_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
 CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
+-- v1.38: registrar-tier manual inserts on restricted events (event_config.restrict_registrar_to_free_guest) must be 'Free Guest'
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
-  OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)));
+  OR (
+    (district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)
+    AND NOT (
+      is_registrar_user()
+      AND EXISTS (
+        SELECT 1 FROM events e
+        WHERE e.event_id = delegates.event_id
+          AND COALESCE(e.event_config->>'restrict_registrar_to_free_guest', 'false') = 'true'
+      )
+      AND COALESCE(delegates.registration_source, 'manual') = 'manual'
+      AND UPPER(COALESCE(delegates.delegate_type, '')) <> 'FREE GUEST'
+    )
+  ));
 CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()
   OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)))

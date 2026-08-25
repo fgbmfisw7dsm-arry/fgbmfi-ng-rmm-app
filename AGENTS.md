@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.37e (Title-Variant Reconcile: dependant-aware family guard + district scoping + different-phone skip)
+- **Current Version:** 1.38 (Registrar Free Guest Restriction: per-event toggle in Events & Config; UI + service + RLS enforcement)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -678,6 +678,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Title Variants review:** DataModule **Reconcile Title Variants** scan listed sensible KEEP/DEL cross-channel pairs (same person registered via both portal and manual). **Decision: apply the merge** to collapse cross-channel pairs (keeps most-complete portal copy + phone/email, re-homes history). Expected post-merge SW3 ≈ 714.
 - **Intentional skip (different-phone guard):** `Esv Lanre Taiwo` exists twice with identical title+name but **different phones** (08026…127110 vs 08036…127110 — same trailing 7 digits, differing only in the 08/03 network-prefix digit) and different email/chapter. This is a **documented intentional double-registration** (the delegate paid twice, registered with two emails/chapters). Per the v1.37e different-phone rule it is **not auto-merged** and is deliberately **SKIPPED** — **any similar different-phone same-name cluster is also skipped by design**. Rule: two records for a double-paying intentional registration is defensible; merging on ambiguous phone/email evidence is not (§35). If a skipped pair is later confirmed the same person, resolve via a manual Master List edit+delete (rows have 0 checkins → clean) — never via the title-variant merge.
 - **Close-out:** run `supabase_diagnostic_sw3_residual_dupcheck.sql` — Q0 expect `South West 3 | ~714` (or 724 if merge not applied), Q1 = 0 rows (no same-phone dupes), Q2 = 0 rows (clean), Q3 informational (families + the skipped intentional pair). Query 3A (`base_key = 'lanre taiwo'`) confirms the skipped pair's full detail.
+
+## 39. Registrar Free Guest Restriction (v1.38)
+
+- **Problem solved:** registrars previously could register *any* delegate type on the New Delegate form; district officers needed a per-event control to limit registrar-created records to `Free Guest` (walk-ins / uncharged visitors) while keeping full control to admins.
+- **Config:** new per-event flag `events.event_config.restrict_registrar_to_free_guest` (boolean, default absent/false). Toggled in **Events & Config** → new **"Registrar Restrictions"** box (amber) next to "Delegate Form Fields". Existing `event_config` JSONB used — **no new column**. Persisted/audited through the existing `createEvent`/`updateEvent` flow.
+- **Scope (three layers, defense-in-depth):**
+  1. **UI (`NewDelegatePage.tsx`):** when `freeGuestLocked` (caller is `isRegistrarRole` **and** flag on) the Delegate Type dropdown is replaced by a locked "FREE GUEST" chip, the stored value is force-set on submit, the post-success reset defaults to `Free Guest`, and an amber banner explains the restriction. Applies even when `show_delegate_type` is OFF (no silent `Member` defaults).
+  2. **Service (`supabaseService.ts`):** `registerDelegate` rejects non-`Free Guest` payloads from a restricted registrar with a clear `PERMISSION:` error. Guard helper `isRegistrarFreeGuestRestricted(eventId)` reads `events.event_config` + caller role (`supabase.auth.getUser()` → `app_users.role`).
+  3. **RLS (`delegates_insert_scoped`):** new `is_registrar_user()` SQL helper (roles `national_registrar`/`regional_registrar`/`district_registrar`/`registrar`/`executive_admin`, `is_active`-guarded, SECURITY DEFINER like `is_admin_user`); policy blocks a manual insert (`registration_source = 'manual'`) with a non-`Free Guest` type on a restricted event — un-bypassable even from a hacked client.
+- **Roles restricted:** registrar-tier via `isRegistrarRole()` + the SQL set (incl. `executive_admin`). **Admins and `event_admin` are exempt** (unchanged writes).
+- **Open paths (intentional):** the QR-scan check-in submission path (`registerDelegateFromQR`, `registration_source='qr_scan'`) stays open so door officers can still store pre-badged delegates not yet in the DB (existing/legit types like `Member`), and bulk import remains admin/event_admin-only. Discriminator = `registration_source` (already stored, no migration of data needed).
+- **Deploy:** apply `supabase_migration_v1.38_registrar_free_guest.sql` (idempotent: `CREATE OR REPLACE FUNCTION is_registrar_user()` + `DROP POLICY IF EXISTS / CREATE POLICY delegates_insert_scoped`). `supabase_schema.sql` reconciled (helper + policy block in §12g).
 
 ## Code Conventions
 

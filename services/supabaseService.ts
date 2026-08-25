@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
@@ -103,6 +103,20 @@ const ensureEventActive = async (eventId: string) => {
     if (data && data.is_active === false) {
         throw new Error("EVENT_LOCKED: This event is currently inactive (Read-Only).");
     }
+};
+
+// Registrar restriction guard: when an event config has restrict_registrar_to_free_guest,
+// registrar-tier (non-admin, non-event-admin) callers may only persist manual Free Guest rows.
+const isRegistrarFreeGuestRestricted = async (eventId: string): Promise<boolean> => {
+    if (!eventId) return false;
+    const { data: ev } = await supabase.from('events').select('event_config').eq('event_id', eventId).maybeSingle();
+    const config = ev?.event_config as Record<string, unknown> | undefined;
+    if (!config || config.restrict_registrar_to_free_guest !== true) return false;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    const { data: profile } = await supabase.from('app_users').select('role').eq('id', user.id).maybeSingle();
+    const role = profile?.role || '';
+    return isRegistrarRole(role) && !isAdminRole(role);
 };
 
 const normKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
@@ -1010,6 +1024,9 @@ export const db = {
 
     registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
         if (!delegate.event_id) throw new Error('registerDelegate requires event_id');
+        if (normalize(delegate.delegate_type || '').toUpperCase() !== 'FREE GUEST' && await isRegistrarFreeGuestRestricted(delegate.event_id)) {
+            throw new Error('PERMISSION: Registrar role restricted to Free Guest registrations for this event.');
+        }
         const payload = { ...delegate, phone: normalizePhone(delegate.phone || '') };
         if (payload.phone) {
             const { data: candidates } = await supabase.from('delegates')
