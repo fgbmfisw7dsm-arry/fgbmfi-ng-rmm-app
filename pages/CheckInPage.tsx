@@ -275,9 +275,9 @@ const CheckInPage = () => {
     const ctx = canvas.getContext('2d')!;
     ctx.scale(scale, scale);
 
-    const headerH = bh * 0.17;
-    const bodyH = bh * 0.70;
-    const bandH = bh * 0.13;
+    const headerH = bh * 0.29;
+    const bodyH = bh * 0.64;
+    const bandH = bh * 0.07;
     const bandTop = headerH + bodyH;
 
     if (bannerDataUrl) {
@@ -317,7 +317,7 @@ const CheckInPage = () => {
           img.onerror = reject;
           img.src = qrDataUrl;
         });
-        const qrSize = Math.min(bw * 0.48, bodyH * 0.55);
+        const qrSize = Math.min(bw * 0.48, bh * 0.385);
         const qrX = (bw - qrSize) / 2;
         const qrY = bodyTop + 8;
         ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
@@ -825,7 +825,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                     {badgeBannerDataUrl && (
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `url(${badgeBannerDataUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
                     )}
-                     <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '70%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
+                     <div style={{ position: 'absolute', top: '29%', left: 0, right: 0, height: '64%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
                        <div style={{ width: '30mm', height: '30mm', margin: '0 auto' }}>
                          {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
                        </div>
@@ -848,7 +848,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                           )}
                        </div>
                      </div>
-                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '13%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '7%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                        <span className="text-white font-black uppercase tracking-wider drop-shadow" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
                      </div>
                   </div>

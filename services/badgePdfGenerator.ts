@@ -26,9 +26,9 @@ const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
 };
 
 const ZONES = {
-  headerFraction: 0.17,
-  bodyFraction: 0.70,
-  bandFraction: 0.13,
+  headerFraction: 0.29,
+  bodyFraction: 0.64,
+  bandFraction: 0.07,
 };
 
 const BAND_COLORS: Record<string, readonly [number, number, number]> = {
@@ -263,7 +263,7 @@ function drawBadge(
     const bodyBottom = badgeBottom + bandH;
 
     if (isPortrait) {
-      const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
+      const qrSize = Math.min(bw * 0.55, bh * 0.385);
       const qrX = badgeLeft + (bw - qrSize) / 2;
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
@@ -302,7 +302,7 @@ function drawBadge(
         textY -= fieldSize * fieldSpacing;
       }
     } else {
-      const qrSize = Math.min(bodyH * 0.83, mmToPt(30));
+      const qrSize = Math.min(bh * 0.581, mmToPt(30));
       const qrX = badgeLeft + mmToPt(3);
       const qrY = badgeBottom + bandH + (bodyH - qrSize) / 2;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
