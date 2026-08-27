@@ -237,7 +237,7 @@ const CheckInPage = () => {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const resp = await fetch(encodeURI('/fgbmfi badge banner-2.png'), { signal: controller.signal });
+        const resp = await fetch(encodeURI('/badge-design.png'), { signal: controller.signal });
         clearTimeout(timeoutId);
         if (resp.ok) {
           const blob = await resp.blob();
@@ -276,29 +276,36 @@ const CheckInPage = () => {
     ctx.scale(scale, scale);
 
     const headerH = bh * 0.17;
-    ctx.fillStyle = '#3a0007';
-    ctx.fillRect(0, 0, bw, headerH);
+    const bodyH = bh * 0.70;
+    const bandH = bh * 0.13;
+    const bandTop = headerH + bodyH;
 
     if (bannerDataUrl) {
       try {
-        const banner = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const design = await new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image();
           img.onload = () => resolve(img);
           img.onerror = reject;
           img.src = bannerDataUrl;
         });
-        const bannerAspect = banner.width / banner.height;
-        const bannerRenderH = bw / bannerAspect;
-        const padY = Math.max(0, (headerH - bannerRenderH) / 2);
-        ctx.drawImage(banner, 0, padY, bw, Math.min(bannerRenderH, headerH));
+        const cardAspect = design.width / design.height;
+        const badgeAspect = bw / bh;
+        let imgW: number;
+        let imgH: number;
+        if (cardAspect > badgeAspect) {
+          imgH = bh;
+          imgW = bh * cardAspect;
+        } else {
+          imgW = bw;
+          imgH = bw / cardAspect;
+        }
+        const ix = (bw - imgW) / 2;
+        const iy = (bh - imgH) / 2;
+        ctx.drawImage(design, ix, iy, imgW, imgH);
       } catch {}
     }
 
-    ctx.fillStyle = '#c8960c';
-    ctx.fillRect(0, headerH - Math.round(0.5 * mmToPx), bw, Math.round(0.5 * mmToPx));
-
     const bodyTop = headerH;
-    const bodyH = bh * 0.70;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, bodyTop, bw, bodyH);
 
@@ -402,13 +409,7 @@ const CheckInPage = () => {
       } catch {}
     }
 
-    const bandTop = bodyTop + bodyH;
-    const bandH = bh * 0.13;
     const dt = delegate.delegate_type || 'Member';
-    const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' };
-    ctx.fillStyle = bc[dt] || '#595966';
-    ctx.fillRect(0, bandTop, bw, bandH);
-
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
@@ -820,11 +821,10 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                  <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
                </div>
 
-                  <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl" style={{ width: '63mm', height: '90mm', position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '17%', backgroundColor: '#3a0007' }}>
-                      {badgeBannerDataUrl && <img src={badgeBannerDataUrl} alt="Banner" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
-                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '0.5mm', backgroundColor: '#c8960c' }} />
-                    </div>
+                  <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl" style={{ width: '63mm', height: '90mm', position: 'relative', overflow: 'hidden', backgroundColor: '#ffffff' }}>
+                    {badgeBannerDataUrl && (
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `url(${badgeBannerDataUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                    )}
                      <div style={{ position: 'absolute', top: '17%', left: 0, right: 0, height: '70%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
                        <div style={{ width: '30mm', height: '30mm', margin: '0 auto' }}>
                          {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
@@ -848,8 +848,8 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                           )}
                        </div>
                      </div>
-                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '13%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: (() => { const dt = badgeDelegate.delegate_type || 'Member'; const bc: Record<string, string> = { Member: '#3355cc', Delegate: '#2eb34d', VIP: '#cc8c0d', Gold: '#cc8c0d', Speaker: '#991a1a', Volunteer: '#334d8c', Staff: '#732673', Minister: '#1f1f1f', Exhibitor: '#cc590e', Press: '#0d0d0d' }; return bc[dt] || '#595966'; })() }}>
-                       <span className="text-white font-black uppercase tracking-wider" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '13%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                       <span className="text-white font-black uppercase tracking-wider drop-shadow" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
                      </div>
                   </div>
 

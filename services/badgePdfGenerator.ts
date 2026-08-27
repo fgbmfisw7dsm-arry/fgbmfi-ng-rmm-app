@@ -227,6 +227,7 @@ function drawBadge(
   fgbmfiLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   badgeBanner?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
+  badgeDesign?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   isPortrait: boolean = false,
   showRank: boolean = true,
   showOffice: boolean = true
@@ -235,6 +236,124 @@ function drawBadge(
   const badgeLeft = bx;
 
   try {
+
+  if (badgeDesign) {
+    const cardAspect = badgeDesign.width / badgeDesign.height;
+    const badgeAspect = bw / bh;
+    let imgW: number;
+    let imgH: number;
+    if (cardAspect > badgeAspect) {
+      imgH = bh;
+      imgW = bh * cardAspect;
+    } else {
+      imgW = bw;
+      imgH = bw / cardAspect;
+    }
+    const ix = badgeLeft + (bw - imgW) / 2;
+    const iy = badgeBottom + (bh - imgH) / 2;
+    try {
+      page.drawImage(badgeDesign as any, { x: ix, y: iy, width: imgW, height: imgH });
+    } catch {}
+
+    page.drawRectangle({
+      x: badgeLeft, y: badgeBottom + bandH, width: bw, height: bh - headerH - bandH, color: BODY_BG,
+    });
+
+    const bodyTop = badgeBottom + bh - headerH;
+    const bodyBottom = badgeBottom + bandH;
+
+    if (isPortrait) {
+      const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
+      const qrX = badgeLeft + (bw - qrSize) / 2;
+      const qrY = bodyTop - mmToPt(6) - qrSize;
+      drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
+
+      const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+      const nameMaxWidth = bw - mmToPt(4);
+      const fieldLabelSize = 7.5;
+      const fieldSize = 8.5;
+      const fieldSpacing = 1.5;
+      const totalAvail = (qrY - mmToPt(6)) - (bodyBottom + mmToPt(3));
+      const fieldReserve = 3 * fieldSize * fieldSpacing;
+      const nameAvail = Math.max(mmToPt(3), totalAvail - fieldReserve - 6);
+      const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxWidth, nameAvail, 12.0, 5.0, 1.2);
+      if (!fitted.lines.length) fitted.lines = [fullName];
+      let nameTextY = qrY - mmToPt(6);
+      for (let i = 0; i < fitted.lines.length; i++) {
+        const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
+        page.drawText(fitted.lines[i], { x: badgeLeft + Math.max(0, (bw - lw) / 2), y: nameTextY, size: fitted.fontSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: nameMaxWidth });
+        nameTextY -= fitted.fontSize * 1.05;
+      }
+      const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
+      let textY = nameTextY - nameToFieldGap;
+      const fields: [string, string][] = [
+        ['District', delegate.district || 'N/A'],
+        ['Chapter', delegate.chapter || 'N/A'],
+        ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
+      ];
+      for (const [label, value] of fields) {
+        if (textY < bodyBottom + mmToPt(3)) break;
+        const labelText = label + ': ';
+        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
+        const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
+        const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
+        page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
+        page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
+        textY -= fieldSize * fieldSpacing;
+      }
+    } else {
+      const qrSize = Math.min(bodyH * 0.83, mmToPt(30));
+      const qrX = badgeLeft + mmToPt(3);
+      const qrY = badgeBottom + bandH + (bodyH - qrSize) / 2;
+      drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
+
+      const detailX = qrX + qrSize + mmToPt(3);
+      const detailW = bw - (detailX - badgeLeft) - mmToPt(2);
+      const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+      const fieldSize = 8.5;
+      const labelSize = 7.5;
+      let textY = bodyTop - mmToPt(5);
+      const fieldCount = 3 + (showRank && delegate.rank && delegate.rank !== 'CP' ? 1 : 0) + (showOffice && delegate.office && delegate.office !== 'OTHER' ? 1 : 0);
+      const detailAreaBottom = badgeBottom + bandH + mmToPt(3);
+      const totalDetailHeight = textY - detailAreaBottom;
+      const fieldSpaceNeeded = fieldCount * fieldSize * 1.6;
+      const nameAvail = Math.max(mmToPt(4), totalDetailHeight - fieldSpaceNeeded - mmToPt(2));
+      const fitted = fitNameToSpace(fullName, fontBold as any, detailW, nameAvail, 12.0, 6.0, 1.2);
+      if (!fitted.lines.length) fitted.lines = [fullName];
+      for (let i = 0; i < fitted.lines.length; i++) {
+        page.drawText(fitted.lines[i], { x: detailX, y: textY, size: fitted.fontSize, font: fontBold as any, color: TEXT_PRIMARY, maxWidth: detailW });
+        textY -= fitted.fontSize * 1.05;
+      }
+      textY -= fitted.fontSize * 0.15;
+      const fields: [string, string][] = [
+        ['District', delegate.district || 'N/A'],
+        ['Chapter', delegate.chapter || 'N/A'],
+        ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
+      ];
+      if (showRank && delegate.rank && delegate.rank !== 'CP') fields.push(['Rank', delegate.rank]);
+      if (showOffice && delegate.office && delegate.office !== 'OTHER') fields.push(['Office', delegate.office]);
+      for (const [label, value] of fields) {
+        if (textY < badgeBottom + bandH + mmToPt(3)) break;
+        const labelWidth = font.widthOfTextAtSize(label + ': ', labelSize);
+        page.drawText(label + ': ', { x: detailX, y: textY, size: labelSize, font: fontBold as any, color: TEXT_SECONDARY });
+        page.drawText(value, { x: detailX + labelWidth, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY, maxWidth: detailW - labelWidth });
+        textY -= fieldSize * 1.6;
+      }
+    }
+
+    const delegateType = delegate.delegate_type || 'Member';
+    const bts = 8.0;
+    const btText = delegateType.toUpperCase();
+    const btw = fontBold.widthOfTextAtSize(btText, bts);
+    page.drawText(btText, {
+      x: badgeLeft + (bw - btw) / 2,
+      y: badgeBottom + (bandH - bts) / 2,
+      size: bts,
+      font: fontBold as any,
+      color: HEADER_TEXT,
+    });
+    return;
+  }
 
   if (isPortrait) {
     const headerTop = badgeBottom + bh;
@@ -633,6 +752,7 @@ export async function generateBadgePDF(
   fgbmfiLogoBytes?: Uint8Array,
   eventLogoBytes?: Uint8Array,
   badgeBannerBytes?: Uint8Array,
+  badgeDesignBytes?: Uint8Array,
   onProgress?: (progress: BadgeGenerationProgress) => void
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
@@ -658,6 +778,13 @@ export async function generateBadgePDF(
   if (badgeBannerBytes) {
     try {
       badgeBanner = await pdfDoc.embedPng(badgeBannerBytes);
+    } catch {}
+  }
+
+  let badgeDesign;
+  if (badgeDesignBytes) {
+    try {
+      badgeDesign = await pdfDoc.embedPng(badgeDesignBytes);
     } catch {}
   }
 
@@ -723,6 +850,7 @@ export async function generateBadgePDF(
         fgbmfiLogo as any,
         eventLogo as any,
         badgeBanner as any,
+        badgeDesign as any,
         IS_PORTRAIT[layout],
         showRank,
         showOffice

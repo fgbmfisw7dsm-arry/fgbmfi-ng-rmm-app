@@ -347,10 +347,11 @@ const BadgePrintingModule = () => {
     setGeneratedPdfUrl('');
 
     try {
-      const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64] = await Promise.all([
+      const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64, badgeDesignBase64] = await Promise.all([
         fetchLogoAsBase64('/logo-fgbmfi.png'),
         fetchLogoAsBase64('/event-logo.png'),
         fetchLogoAsBase64('/fgbmfi badge banner-2.png'),
+        fetchLogoAsBase64('/badge-design.png'),
       ]);
 
       const decodeBase64Img = (base64: string): Uint8Array | undefined => {
@@ -368,6 +369,7 @@ const BadgePrintingModule = () => {
       const fgbmfiLogoBytes = fgbmfiLogoBase64 ? decodeBase64Img(fgbmfiLogoBase64) : undefined;
       const eventLogoBytes = eventLogoBase64 ? decodeBase64Img(eventLogoBase64) : undefined;
       const badgeBannerBytes = badgeBannerBase64 ? decodeBase64Img(badgeBannerBase64) : undefined;
+      const badgeDesignBytes = badgeDesignBase64 ? decodeBase64Img(badgeDesignBase64) : undefined;
 
       cancellationRef.current = false;
       let hasError = false;
@@ -386,6 +388,7 @@ const BadgePrintingModule = () => {
           fgbmfiLogoBytes,
           eventLogoBytes,
           badgeBannerBytes,
+          badgeDesignBytes,
           (pg) => {
             if (cancellationRef.current) return;
             setProgress({
