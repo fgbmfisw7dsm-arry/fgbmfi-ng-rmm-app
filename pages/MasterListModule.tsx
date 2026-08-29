@@ -36,6 +36,7 @@ const MasterListModule = () => {
         );
     }
     const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+    const canDelete = canManage && eventConfig.delegate_deletion_enabled === true;
     const scope = getScopeFilter(user);
     const showRank = eventConfig.show_rank !== false;
     const showOffice = eventConfig.show_office !== false;
@@ -218,6 +219,10 @@ const MasterListModule = () => {
 
     const handleDelete = async (d: Delegate) => {
         if (!activeEventId) return;
+        if (!canDelete) {
+            alert("Delete is disabled for this event. Enable \"Allow Admins to Delete Delegates\" in Events & Config first.");
+            return;
+        }
         const name = `${d.first_name} ${d.last_name}`.trim();
         if (!window.confirm(`PERMANENTLY DELETE "${name}" (${d.district || ''}${d.chapter ? ' / ' + d.chapter : ''})?\n\nThis will also permanently remove this delegate's check-ins, session responses, and badge print history. Use "Merge" instead when the record is a duplicate of another delegate.\n\nThis action cannot be undone.`)) return;
         try {
@@ -535,7 +540,14 @@ const MasterListModule = () => {
 <td className="p-3 no-print text-center">
                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                     {canManage && (
-                                        <button onClick={() => handleDelete(d)} className="ml-1 text-red-600 font-black uppercase text-[9px] border border-red-200 px-3 py-1 rounded-lg hover:bg-red-600 hover:text-white transition-all">Delete</button>
+                                        <button
+                                            onClick={() => handleDelete(d)}
+                                            disabled={!canDelete}
+                                            title={canDelete ? undefined : 'Delete is disabled for this event — enable it in Events & Config'}
+                                            className={`ml-1 font-black uppercase text-[9px] border px-3 py-1 rounded-lg transition-all ${canDelete ? 'text-red-600 border-red-200 hover:bg-red-600 hover:text-white' : 'text-gray-300 border-gray-200 cursor-not-allowed'} disabled:opacity-60`}
+                                        >
+                                            {canDelete ? 'Delete' : 'Delete (off)'}
+                                        </button>
                                     )}
                                 </td>
                                                         </tr>
@@ -596,7 +608,14 @@ const MasterListModule = () => {
                                             <td className="p-3 no-print text-center">
                                                 <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                                 {canManage && (
-                                                    <button onClick={() => handleDelete(d)} className="ml-1 text-red-600 font-black uppercase text-[9px] border border-red-200 px-3 py-1 rounded-lg hover:bg-red-600 hover:text-white transition-all">Delete</button>
+                                                    <button
+                                                        onClick={() => handleDelete(d)}
+                                                        disabled={!canDelete}
+                                                        title={canDelete ? undefined : 'Delete is disabled for this event — enable it in Events & Config'}
+                                                        className={`ml-1 font-black uppercase text-[9px] border px-3 py-1 rounded-lg transition-all ${canDelete ? 'text-red-600 border-red-200 hover:bg-red-600 hover:text-white' : 'text-gray-300 border-gray-200 cursor-not-allowed'} disabled:opacity-60`}
+                                                    >
+                                                        {canDelete ? 'Delete' : 'Delete (off)'}
+                                                    </button>
                                                 )}
                                             </td>
                                         </tr>

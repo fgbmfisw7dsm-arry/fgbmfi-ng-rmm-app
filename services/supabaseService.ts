@@ -1633,6 +1633,11 @@ export const db = {
     deleteDelegate: async (id: string, eventId: string): Promise<boolean> => {
         if (!id || !eventId) return false;
         await ensureEventActive(eventId);
+        const { data: ev } = await supabase.from('events').select('event_config').eq('event_id', eventId).maybeSingle();
+        const evCfg = (ev?.event_config || {}) as Record<string, unknown>;
+        if (evCfg.delegate_deletion_enabled !== true) {
+            throw new Error('Delete is disabled for this event. Enable "Allow Admins to Delete Delegates" in Events & Config first.');
+        }
         const { data: del } = await supabase.from('delegates').select('first_name, last_name, district, chapter').eq('event_id', eventId).eq('delegate_id', id).maybeSingle();
         if (!del) return false;
         await supabase.from('checkins').delete().eq('event_id', eventId).eq('delegate_id', id);

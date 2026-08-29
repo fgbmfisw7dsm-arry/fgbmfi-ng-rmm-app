@@ -305,6 +305,26 @@ const EventsModule = () => {
                         <p className="text-[9px] text-amber-700/70 font-bold uppercase pt-1">Applies to registrar roles (national / regional / district registrar). Admins and event-admin are unaffected. QR check-in submissions for pre-badged delegates remain open.</p>
                     </div>
 
+                    <div className="space-y-2 p-4 bg-red-50/50 rounded-xl border border-red-100">
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Destructive Controls</label>
+                        {(() => {
+                            const config = (form.event_config || {}) as EventConfig;
+                            const deletionEnabled = config.delegate_deletion_enabled === true;
+                            return (
+                                <label className="flex items-center justify-between cursor-pointer py-1">
+                                    <span className="text-[10px] font-bold text-gray-600 uppercase">Allow Admins to Delete Delegates in Master List</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={deletionEnabled}
+                                        onChange={e => setForm({...form, event_config: {...config, delegate_deletion_enabled: e.target.checked}})}
+                                        className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                    />
+                                </label>
+                            );
+                        })()}
+                        <p className="text-[9px] text-red-700/70 font-bold uppercase pt-1">Off by default. When disabled, the Delete button for delegate records in the Master List is grayed out. Merging duplicates (which preserves attendance and badge history) is not affected and stays available to admins.</p>
+                    </div>
+
                     <div className="space-y-2 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
                         <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Pledge Names (per-event categories)</label>
                         <div className="flex gap-2">
