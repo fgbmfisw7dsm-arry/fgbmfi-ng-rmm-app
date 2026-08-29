@@ -358,6 +358,11 @@ const BadgePrintingModule = () => {
     setFeedback(null);
     setGenerating(true);
     setProgress(null);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPdfPreviewUrl(null);
     setGeneratedPdfBytes(null);
     setGeneratedBatchId(null);
     setGeneratedBatchNumber(null);
@@ -528,6 +533,20 @@ const BadgePrintingModule = () => {
     setGenerating(false);
     setProgress(null);
     setFeedback({ type: 'error', msg: 'Generation cancelled.' });
+  };
+
+  const handleClearPreview = () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setGeneratedPdfBytes(null);
+    setGeneratedBatchId(null);
+    setGeneratedBatchNumber(null);
+    setGeneratedBatchDistrict('');
+    setGeneratedPdfUrl('');
+    setPdfPreviewUrl(null);
+    setFeedback(null);
   };
 
   const buildBatchFileName = (): string => {
@@ -1216,9 +1235,18 @@ const BadgePrintingModule = () => {
 
           {generatedPdfBytes && pdfPreviewUrl && (
             <div ref={resultsRef} className="bg-white p-6 rounded-3xl shadow-sm border border-emerald-200 mt-6">
-              <h2 className="text-[10px] font-black text-emerald-600 uppercase mb-4 tracking-[0.2em]">
-                Generated PDF
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">
+                  Generated PDF
+                </h2>
+                <button
+                  onClick={handleClearPreview}
+                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-lg text-[8px] uppercase tracking-wider border border-gray-200"
+                  title="Clear this preview and start a new operation"
+                >
+                  ✕ Close
+                </button>
+              </div>
               <div className="flex flex-col lg:flex-row gap-4">
                 <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden">
                   <iframe
