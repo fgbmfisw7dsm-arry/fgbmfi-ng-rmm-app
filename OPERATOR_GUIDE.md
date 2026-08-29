@@ -69,6 +69,15 @@
 3. New QR + code generates
 4. **Admins and Registrars only**
 
+### Badge Printing (Pre-Event Batch Production — Admins & Event Admins)
+- **Badge Status filter** replaces the old Registration filter: pick **All / Badge Printed / Badge Not Printed** (default **Not Printed** — badges print before check-in).
+- **"Skip Already Printed"** toggle is ON by default, so generation only picks up unprinted badges; turn **OFF** to force a reprint (e.g. damaged badges).
+- **Batches Per Run** (default 1) limits how many PDF sub-batches one click produces — keep 1 for storage-safe, staged production.
+- **Production cycle:** Generate → Download → click **Printed** (flips every delegate in the batch to Badge *Printed*) → Delete the batch to free storage → Generate again (only unprinted remain). Each round advances cleanly with no duplicates.
+- **Batch Queue** shows each batch as `#N (District)` — e.g. `#7 (South East 1)`, or `(All Districts)`.
+- **Clear Badge Printed Flags** (admin, Batches tab) resets every delegate to *Not Printed* for the active event after tests. Batch records are kept.
+- **Generated PDF panel** has Download / Open in New Tab / Print + **✕ Close** to clear a preview between operations.
+
 ---
 
 ## Important Rules

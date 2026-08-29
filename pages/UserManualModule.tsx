@@ -59,7 +59,7 @@ const UserManualModule = () => {
                             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">Regional Events Management System (EMS)</p>
                             <div className="mt-6 flex justify-center gap-4">
                                 <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 2.9</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">Version 3.0</span>
                             </div>
                         </div>
 
@@ -363,6 +363,51 @@ const UserManualModule = () => {
                             </div>
                         </section>
 
+                        {/* Section 08B: Badge Printing & Staged Production */}
+                        <section className="mb-12 break-inside-avoid">
+                            <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
+                                <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">8B</span>
+                                Badge Printing: Batch Production & Printed Status
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">The <strong>Badge Printing</strong> module (<span className="font-mono bg-gray-100 px-1 rounded">#/admin/badges</span>, admin + event_admin) produces printable PDF badge sheets in batches before registration — usually by district. It tracks a <strong>"Badge Printed"</strong> status per delegate so reprint rounds never duplicate work.</p>
+                            <div className="space-y-4 text-xs font-bold text-gray-700">
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">FILTER BAR</span>
+                                    Narrow by District, Chapter, Delegate Type, Surname range, or Delegate Number. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">"SKIP ALREADY PRINTED" GUARD (DEFAULT ON)</span>
+                                    Generation only includes delegates marked <strong>Badge Not Printed</strong>, even if the dropdown says All. Turn the toggle <strong>OFF</strong> to force a true reprint that includes delegates already marked printed (e.g., replacing damaged badges).
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">LAYOUTS & BATCH SIZE</span>
+                                    Choose a layout (8-up, 10-up, 6-up portrait, 9-up portrait, 8-up portrait) and a <strong>Batch Size</strong> of 250, 500, or 1,000 badges per PDF file.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">BATCHES PER RUN (STORAGE-SAFE ROUNDS)</span>
+                                    Large events can exceed storage or printer capacity if every batch is generated at once. Set <strong>Batches Per Run</strong> (default 1) to generate only that many PDF sub-batches per click. The success message reports how many of the total batches were made — press <strong>Generate</strong> again to continue with the next round, which always picks up only unprinted delegates.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">RECOMMENDED PRODUCTION CYCLE</span>
+                                    <ol className="list-decimal ml-5 mt-1 space-y-1">
+                                        <li><strong>Generate</strong> a district's round (Badge Not Printed, Batches Per Run = 1).</li>
+                                        <li><strong>Download</strong> the PDF from the Generated PDF panel or Batch Queue.</li>
+                                        <li><strong>Mark Printed</strong> on the batch — every delegate in it is flagged <strong>Badge Printed</strong> and timestamped. Works reliably for 1,000-badge batches.</li>
+                                        <li><strong>Delete</strong> the batch from storage (optional) to free capacity — flags are kept, so the batch is never regenerated.</li>
+                                        <li>Repeat for the next round; only unprinted badges appear next time.</li>
+                                    </ol>
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">BATCH QUEUE & GENERATED PREVIEW</span>
+                                    The <strong>Batches</strong> tab lists every batch with its number followed by the <strong>district in brackets</strong> (e.g., #7 (South East 1), or (All Districts)). The Generated PDF panel at the bottom offers <strong>Download PDF</strong>, <strong>Open in New Tab</strong>, and <strong>Print PDF</strong>, plus a <strong>✕ Close</strong> button so you can clear a preview and start a new operation without refreshing.
+                                </div>
+                                <div className="p-4 border rounded-xl bg-gray-50">
+                                    <span className="text-blue-600 block mb-1">CLEAR BADGE PRINTED FLAGS (ADMIN)</span>
+                                    In the Batches tab header, the admin-only <strong>"Clear Badge Printed Flags"</strong> button resets every delegate's status to Badge Not Printed for the active event — for example after a test run. Batch records are retained; confirm when prompted.
+                                </div>
+                            </div>
+                        </section>
+
                         {/* Section 09: Admin Configuration */}
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
@@ -586,6 +631,58 @@ const UserManualModule = () => {
                             </div>
                         </section>
 
+                        {/* Track 3: Badge Printing */}
+                        <section className="mb-12 break-inside-avoid">
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase">Track C</div>
+                                <h2 className="text-2xl font-black text-blue-900 uppercase tracking-tight">The Badge Printing Operator’s Track</h2>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                                    <h4 className="text-xs font-black text-purple-700 uppercase mb-2">Scenario 1: Printing a District's First Round</h4>
+                                    <p className="text-sm text-gray-600 italic">"I need to print badges for South East 1."</p>
+                                    <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
+                                        <p>1. Open Badge Printing. Filter District = South East 1, Badge Status = Badge Not Printed (default).</p>
+                                        <p>2. Choose a Layout + Batch Size (e.g. 500). Leave Batches Per Run = 1.</p>
+                                        <p>3. Click Generate — one PDF sub-batch is produced.</p>
+                                        <p>4. Download, print it, then click <strong>Printed</strong> on the batch. Check the Batch Queue label: #N (South East 1).</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                                    <h4 className="text-xs font-black text-purple-700 uppercase mb-2">Scenario 2: Storage Is Tight (Staged Rounds)</h4>
+                                    <p className="text-sm text-gray-600 italic">"I can only hold a few PDFs at a time."</p>
+                                    <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
+                                        <p>1. Generate one round (Batches Per Run = 1).</p>
+                                        <p>2. Download, print, and click <strong>Printed</strong>.</p>
+                                        <p>3. Delete the batch to free storage — the delegates stay marked printed.</p>
+                                        <p>4. Generate again: only unprinted badges come up next. Repeat until the district is done.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-blue-900 text-white rounded-2xl shadow-xl">
+                                    <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 3: Reprinting an Already-Printed Badge</h4>
+                                    <p className="text-sm text-gray-300 italic">"A delegate needs a fresh badge, but theirs is already marked printed."</p>
+                                    <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+                                        <p>1. Turn <strong>"Skip Already Printed" OFF</strong>.</p>
+                                        <p>2. Set Badge Status = All, or search the delegate by name and select them.</p>
+                                        <p>3. Generate just that badge. Done — turn the guard back ON afterwards.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-red-900 text-white rounded-2xl shadow-xl mt-6">
+                                    <h4 className="text-xs font-black text-red-400 uppercase mb-2">Scenario 4: Clearing Flags After a Test</h4>
+                                    <p className="text-sm text-gray-300 italic">"We ran test badges — now production must start fresh."</p>
+                                    <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+                                        <p>1. Ask an Admin to open Badge Printing → Batches tab.</p>
+                                        <p>2. Click <strong>"Clear Badge Printed Flags"</strong> and confirm.</p>
+                                        <p>3. Every delegate returns to Badge Not Printed — regenerate from round one.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
                         {/* Troubleshooting Sheet */}
                         <section className="mb-12 break-inside-avoid">
                             <h2 className="text-xl font-black text-red-600 uppercase mb-4 border-b pb-2">Quick Troubleshooting Cheat-Sheet</h2>
@@ -631,6 +728,10 @@ const UserManualModule = () => {
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: On desktop browsers without native share support, the Share button falls back to downloading the image. Share the downloaded file manually via WhatsApp or email.</p>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                                    <p className="text-[10px] font-black text-red-800 uppercase">Q: The generated badge preview won't close!</p>
+                                    <p className="text-[10px] font-medium text-red-700 mt-1">A: Click the <strong>✕ Close</strong> button in the "Generated PDF" panel header. It clears the preview so you can start a new operation without refreshing.</p>
+                                </div>
+                                <div className="p-4 bg-red-50 rounded-xl border border-red-100">
                                     <p className="text-[10px] font-black text-red-800 uppercase">Q: Voice Distribution count not saving!</p>
                                     <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure you've selected a session first. Enter the total number and click "Save". For locked events, all writes are blocked — check if the event is finalized.</p>
                                 </div>
@@ -642,7 +743,7 @@ const UserManualModule = () => {
                 {/* Shared Footer */}
                 <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
                     <span>© 2025 FGBMFI Nigeria EMS</span>
-                    <span>Document: EMS-USER-V2.9</span>
+                    <span>Document: EMS-USER-V3.0</span>
                     <span>System Training & Operations Reference</span>
                 </div>
             </div>
