@@ -359,7 +359,7 @@ supabase.channel('dashboard_sync')
 - `showRank` and `showOffice` params threaded from `event.event_config` through `generateBadgePDF` → `drawBadge`
 - `drawBadge` no-banner portrait path fully synced with banner path — no font/QR regressions
 - Backward compatible: falls back to original logo-based header when banner unavailable
-- Color-coded delegate type stamp band at bottom (13% height) — same `BAND_COLORS` mapping
+- Color-coded delegate type stamp band at bottom (7% height) — same `BAND_COLORS` mapping; band type text 10pt normal / 9pt small badges (bumped +2pt)
 - PDF generated client-side via `pdf-lib`; uploaded to `badge-pdfs` bucket with descriptive filename (see §14)
 - PDF document metadata set: title "FGBMFI Delegate Badges", subject, creator
 - Batch tracking: `badge_batches` + `badge_print_logs` tables with status lifecycle (pending→generating→ready→printed)
@@ -369,10 +369,10 @@ supabase.channel('dashboard_sync')
 - **Canvas-based generation:** badge drawn programmatically on Canvas 2D at 3× scale (714×1020px)
 - Produces a single PNG data URL reused by all 4 export modes (Print, PDF, Image, Share)
 - 63×90mm portrait default (matching `8-up-portrait` layout)
-- Layout: 17% banner header + 70% white body (QR + text) + 13% colored footer band (rebalanced from 17/66/17)
+- Layout: 29% banner header + 64% white body (QR + text) + 7% colored footer band
 - QR code: 30mm (previously 19mm), generated via `QRCode.toCanvas(width: 400)` for sharp rendering
-- **Text sizing (Canvas):** Name 14px bold, Fields 9px bold (District/Chapter/Office/Rank), ID 8px bold
-- **Text sizing (DOM):** Name `text-[14px]`, Fields `text-[9px]`, ID `text-[8px]`
+- **Text sizing (Canvas):** Name 14px bold, Fields 9px bold (District/Chapter/Office/Rank), ID 8px bold, Delegate Type (footer band) 9px bold
+- **Text sizing (DOM):** Name `text-[14px]`, Fields `text-[9px]`, ID `text-[8px]`, Delegate Type (footer band) `11px`
 - All delegate details are individually labeled lines: District: X, Chapter: X, Office: X (if enabled), Rank: X (if enabled), ID: XXXXXXXX
 - Canvas badge respects `showRank`/`showOffice` from `event_config` — fields hidden when disabled for the event
 - Line spacing: 18px gap between each text line, 16px gap between QR bottom and name (canvas)

@@ -342,7 +342,7 @@ function drawBadge(
     }
 
     const delegateType = delegate.delegate_type || 'Member';
-    const bts = 8.0;
+    const bts = 10.0;
     const btText = delegateType.toUpperCase();
     const btw = fontBold.widthOfTextAtSize(btText, bts);
     page.drawText(btText, {
@@ -433,7 +433,7 @@ function drawBadge(
       const dt = delegate.delegate_type || 'Member';
       const bc = BAND_COLORS[dt] || DEFAULT_BAND;
       page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-      const bts = isSmall ? 7.0 : 8.0;
+      const bts = isSmall ? 9.0 : 10.0;
       const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
       page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
       return;
@@ -532,7 +532,7 @@ function drawBadge(
     const dt = delegate.delegate_type || 'Member';
     const bc = BAND_COLORS[dt] || DEFAULT_BAND;
     page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-    const bts = isSmall ? 7.0 : 8.0;
+    const bts = isSmall ? 9.0 : 10.0;
     const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
     page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
     return;
@@ -725,7 +725,7 @@ function drawBadge(
     color: rgb(bandColor[0], bandColor[1], bandColor[2]),
   });
 
-  const bandTextSize = isSmall ? 7.0 : 8.0;
+  const bandTextSize = isSmall ? 9.0 : 10.0;
   const bandText = delegateType.toUpperCase();
   const bandTextW = fontBold.widthOfTextAtSize(bandText, bandTextSize);
   page.drawText(bandText, {

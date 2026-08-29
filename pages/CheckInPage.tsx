@@ -411,7 +411,7 @@ const CheckInPage = () => {
 
     const dt = delegate.delegate_type || 'Member';
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 7px sans-serif';
+    ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(dt.toUpperCase(), bw / 2, bandTop + bandH / 2 + 3);
 
@@ -849,7 +849,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                        </div>
                      </div>
                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '7%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                       <span className="text-white font-black uppercase tracking-wider drop-shadow" style={{ fontSize: '9px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
+                       <span className="text-white font-black uppercase tracking-wider drop-shadow" style={{ fontSize: '11px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
                      </div>
                   </div>
 
