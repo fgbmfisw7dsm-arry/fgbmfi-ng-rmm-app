@@ -1348,8 +1348,11 @@ const BadgePrintingModule = () => {
                           <input type="checkbox" checked={selectedBatchIds.has(batch.batch_id)} onChange={() => toggleBatchSelect(batch.batch_id)} className="rounded" disabled={bulkDeleting} />
                         </td>
                       )}
-                      <td className="p-3 text-xs font-black text-gray-800">
-                        #{batch.batch_number}
+                      <td className="p-3">
+                        <div className="text-xs font-black text-gray-800">#{batch.batch_number}</div>
+                        <div className="text-[8px] font-bold text-gray-400">
+                          ({batch.filters?.district?.trim() || 'All Districts'})
+                        </div>
                       </td>
                       <td className="p-3 text-xs font-bold text-gray-600">{batch.badge_count}</td>
                       <td className="p-3 text-xs font-bold text-gray-600">{batch.page_count}</td>
