@@ -89,6 +89,8 @@ export interface Delegate {
   external_id: string;
   event_id: string;
   registration_source: 'import' | 'manual' | 'qr_scan';
+  badge_printed?: boolean;
+  badge_printed_at?: string | null;
   created_at: string;
 }
 
@@ -291,7 +293,7 @@ export interface BadgeFilter {
   district?: string;
   chapter?: string;
   delegateType?: string;
-  registrationStatus?: 'checked_in' | 'not_checked_in' | 'all';
+  badgePrintedStatus?: 'printed' | 'not_printed' | 'all';
   delegateNumberFrom?: string;
   delegateNumberTo?: string;
   surnameFrom?: string;

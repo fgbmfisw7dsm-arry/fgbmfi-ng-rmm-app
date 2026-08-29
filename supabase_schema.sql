@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS delegates (
     event_id UUID REFERENCES events(event_id) ON DELETE SET NULL,
     external_id TEXT,
     registration_source TEXT DEFAULT 'import' CHECK (registration_source IN ('import', 'manual', 'qr_scan')),
+    badge_printed BOOLEAN NOT NULL DEFAULT false,
+    badge_printed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -694,6 +696,7 @@ DROP INDEX IF EXISTS idx_pledges_event;
 CREATE INDEX idx_pledges_event ON pledges(event_id);
 CREATE INDEX IF NOT EXISTS idx_delegates_event_id ON delegates(event_id);
 CREATE INDEX IF NOT EXISTS idx_delegates_external_id ON delegates(external_id) WHERE external_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_delegates_badge_printed ON delegates(event_id, badge_printed);
 
 -- Unique indexes
 DROP INDEX IF EXISTS idx_delegates_qr_hash;

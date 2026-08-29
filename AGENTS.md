@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.39 (Free Guest field lock: District='National/External', Chapter='Guest', locked for registrar restrictions; client + service + RLS)
+- **Current Version:** 1.40 (Badge Printed status per delegate + staged badge generation: skip/override guard, Batches Per Run, clear-flags reset; registration filter removed from Badge Printing)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -429,6 +429,16 @@ supabase.channel('dashboard_sync')
 - `db.deleteBadgePrintLogs(ids)` / `db.clearBadgePrintLogs(eventId)` — history scrub by id or by active event.
 - BadgePrintingModule exposes admin-only bulk controls: Batches tab (Select All + Delete Selected/All) and History tab (Select All + Clear Selected/All), each with a `Set<string>` of selected ids, a `bulkDeleting` spinner, and confirm dialogs.
 - StorageModule "Delete All/Selected" reconciles via `loadFiles()` and reports honest results: error when 0 deleted, error listing failed count on partial, success only when all were removed.
+
+### 14c. Badge Printed Status + Staged Generation (v1.40)
+- **Per-delegate high tide mark:** `delegates.badge_printed BOOLEAN NOT NULL DEFAULT false` + `delegates.badge_printed_at TIMESTAMPTZ` tracked per delegate (`supabase_migration_badge_printed_status.sql`, idempotent, includes `idx_delegates_badge_printed ON delegates(event_id, badge_printed)` for the 25K "Not Printed" filter). Additive `types.ts` fields on `Delegate`.
+- **What is NOT the source of truth:** `badge_print_logs` records *generation* (`action='generated'`), not physical printing. Batch-level status (`badge_batches.status`) was never per-delegate. The flag is the per-delegate print record.
+- **Mark Printed flow:** `db.markBadgeBatchPrinted(batchId)` derives the batch's delegates from its `badge_print_logs`, sets `badge_printed=true badge_printed_at=now()` on those delegates, then flips the batch to `printed`. Returns the count marked; `recordAuditLog('badge_batch_printed')`. Guards `ensureEventActive()`. Deleting a batch keeps the flags (PDF removed frees storage; badges stay marked since they were physically printed).
+- **Clear flags (testing/honeymoon reset):** `db.clearBadgePrintedFlags(eventId)` resets all event flags to false/null and returns the count; `recordAuditLog('badge_clear_printed_flags')`; admin-only button "Clear Badge Printed Flags" in the Batches tab header (amber), confirm dialog, disabled on locked events. Batch records are untouched.
+- **Registration filter removed from Badge Printing:** `BadgeFilter.registrationStatus` (checked-in cross-query on `checkins`) replaced by `badgePrintedStatus: 'printed'|'not_printed'|'all'` — badges print BEFORE registration, so registration state was irrelevant. `getFilteredDelegates`/`getFilteredDelegateCount` now filter by the indexed `badge_printed` column directly (no `checkins` scan).
+- **Skip/override guard:** "Skip Already Printed" toggle (default ON). When ON, generation force-filters `not_printed` regardless of the dropdown; when OFF, the dropdown governs (`all` = true reprint). Badge Status dropdown is disabled while the guard is active.
+- **Staged rounds for storage:** "Batches Per Run" input (default 1). `handleGenerate` slices the candidate list to the first N sub-batches and creates only those PDFs; success message reports "Generated X of Y batches. Regenerate to continue — only unprinted badges will be included." Combined with Mark Printed + Delete Batch, this yields generate→download→mark printed→delete→continue without storage blow-up or duplicate production.
+- **Workflow:** Generate (Not Printed, 1 batch/run) → Download/Batch tab → Mark Printed (flags delegates) → Delete batch (frees storage) → repeat. Clear Badge Printed Flags resets the whole event for re-production.
 
 ### 15. Event Data Isolation (v1.4 — Strict Per-Event Delegate Scoping)
 - **Every delegate is tied to exactly one event** via `delegates.event_id`. There is no concept of global/unscoped delegates.

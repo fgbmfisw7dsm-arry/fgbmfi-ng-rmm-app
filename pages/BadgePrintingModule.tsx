@@ -24,6 +24,12 @@ const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
   { value: 1000, label: '1,000 Badges' },
 ];
 
+const badgeStatusOptions: { value: 'printed' | 'not_printed' | 'all'; label: string }[] = [
+  { value: 'all', label: 'All Statuses' },
+  { value: 'not_printed', label: 'Badge Not Printed' },
+  { value: 'printed', label: 'Badge Printed' },
+];
+
 const SORT_OPTIONS: { value: BadgeSortField; label: string }[] = [
   { value: 'surname', label: 'Surname' },
   { value: 'delegate_number', label: 'Delegate Number' },
@@ -53,7 +59,7 @@ const BadgePrintingModule = () => {
     district: '',
     chapter: '',
     delegateType: '',
-    registrationStatus: 'all',
+    badgePrintedStatus: 'not_printed',
     surnameFrom: '',
     surnameTo: '',
     delegateNumberFrom: '',
@@ -64,6 +70,8 @@ const BadgePrintingModule = () => {
   const [sortBy, setSortBy] = useState<BadgeSortField>('surname');
   const [layout, setLayout] = useState<BadgeLayout>('8-up');
   const [batchSize, setBatchSize] = useState<BadgeBatchSize>(500);
+  const [batchesPerRun, setBatchesPerRun] = useState(1);
+  const [skipAlreadyPrinted, setSkipAlreadyPrinted] = useState(true);
   const [previewCount, setPreviewCount] = useState(0);
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -137,6 +145,7 @@ const BadgePrintingModule = () => {
     if (!activeEventId) return;
     const activeFilters: BadgeFilter = {
       ...filters,
+      badgePrintedStatus: skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all'),
       selectedIds: selectedDelegates.length
         ? selectedDelegates.map((d) => d.delegate_id)
         : undefined,
@@ -152,7 +161,7 @@ const BadgePrintingModule = () => {
       !activeFilters.surnameTo &&
       !activeFilters.delegateNumberFrom &&
       !activeFilters.delegateNumberTo &&
-      activeFilters.registrationStatus === 'all'
+      activeFilters.badgePrintedStatus === 'all'
     ) {
       setPreviewCount(0);
     } else {
@@ -165,7 +174,7 @@ const BadgePrintingModule = () => {
         setPreviewDelegates([]);
       }
     }
-  }, [activeEventId, filters, selectedDelegates]);
+  }, [activeEventId, filters, selectedDelegates, skipAlreadyPrinted]);
 
   useEffect(() => {
     const timeout = setTimeout(handlePreviewCount, 300);
@@ -183,7 +192,7 @@ const BadgePrintingModule = () => {
       district: '',
       chapter: '',
       delegateType: '',
-      registrationStatus: 'all',
+      badgePrintedStatus: 'not_printed',
       surnameFrom: '',
       surnameTo: '',
       delegateNumberFrom: '',
@@ -244,7 +253,7 @@ const BadgePrintingModule = () => {
     if (active.district) count++;
     if (active.chapter) count++;
     if (active.delegateType) count++;
-    if (active.registrationStatus && active.registrationStatus !== 'all') count++;
+    if (active.badgePrintedStatus && active.badgePrintedStatus !== 'all') count++;
     if (active.surnameFrom || active.surnameTo) count++;
     if (active.delegateNumberFrom || active.delegateNumberTo) count++;
     if (active.selectedIds?.length) count++;
@@ -279,7 +288,8 @@ const BadgePrintingModule = () => {
     let delegatesToPrint: Delegate[] = allSelected;
 
     if (!allSelected.length) {
-      const activeFilters: BadgeFilter = { ...filters, registrationStatus: 'all' };
+      const effectiveStatus = skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all');
+      const activeFilters: BadgeFilter = { ...filters, badgePrintedStatus: effectiveStatus };
       const hasFilters =
         activeFilters.district ||
         activeFilters.chapter ||
@@ -288,7 +298,7 @@ const BadgePrintingModule = () => {
         activeFilters.surnameTo ||
         activeFilters.delegateNumberFrom ||
         activeFilters.delegateNumberTo ||
-        (activeFilters.registrationStatus && activeFilters.registrationStatus !== 'all');
+        (activeFilters.badgePrintedStatus && activeFilters.badgePrintedStatus !== 'all');
 
       if (!hasFilters) {
         setFeedback({
@@ -321,7 +331,12 @@ const BadgePrintingModule = () => {
     }
 
     if (!delegatesToPrint.length) {
-      setFeedback({ type: 'error', msg: 'No delegates match the selected filters.' });
+      setFeedback({
+        type: 'error',
+        msg: skipAlreadyPrinted
+          ? 'No unprinted delegates match. All badges may already be printed — disable "Skip Already Printed" to reprint.'
+          : 'No delegates match the selected filters.',
+      });
       return;
     }
 
@@ -336,6 +351,9 @@ const BadgePrintingModule = () => {
     for (let i = 0; i < delegatesToPrint.length; i += batchSize) {
       batches.push(delegatesToPrint.slice(i, i + batchSize));
     }
+
+    const runBatches = batches.slice(0, Math.max(1, batchesPerRun));
+    const runDelegatesCount = runBatches.reduce((sum, b) => sum + b.length, 0);
 
     setFeedback(null);
     setGenerating(true);
@@ -374,13 +392,13 @@ const BadgePrintingModule = () => {
       cancellationRef.current = false;
       let hasError = false;
 
-      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      for (let batchIdx = 0; batchIdx < runBatches.length; batchIdx++) {
         if (cancellationRef.current) break;
 
-        const batchDelegates = batches[batchIdx];
+        const batchDelegates = runBatches[batchIdx];
         const idxOffset = batchIdx * batchSize;
 
-        console.log('[BadgePrinting] generating batch', batchIdx + 1, 'of', batches.length, 'delegates:', batchDelegates.length, 'layout:', layout);
+        console.log('[BadgePrinting] generating batch', batchIdx + 1, 'of', runBatches.length, 'delegates:', batchDelegates.length, 'layout:', layout);
         const pdfBytes = await generateBadgePDF(
           batchDelegates,
           layout,
@@ -393,7 +411,7 @@ const BadgePrintingModule = () => {
             if (cancellationRef.current) return;
             setProgress({
               current: pg.current + idxOffset,
-              total: batches.length * batchSize,
+              total: Math.max(runDelegatesCount, 1),
               phase: pg.phase,
             } as unknown as BadgeGenerationProgress);
           }
@@ -404,6 +422,7 @@ const BadgePrintingModule = () => {
         try {
           const filtersForBatch: BadgeFilter = {
             ...filters,
+            badgePrintedStatus: skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all'),
             selectedIds: selectedDelegates.length
               ? selectedDelegates.map((d) => d.delegate_id)
               : undefined,
@@ -465,10 +484,17 @@ const BadgePrintingModule = () => {
       loadPrintLogs();
 
       if (!hasError && !cancellationRef.current) {
-        setFeedback({
-          type: 'success',
-          msg: `All ${batches.length} batch(es) generated and uploaded successfully.`,
-        });
+        if (runBatches.length < batches.length) {
+          setFeedback({
+            type: 'success',
+            msg: `Generated ${runBatches.length} of ${batches.length} batch(es). Regenerate to continue — only unprinted badges will be included.`,
+          });
+        } else {
+          setFeedback({
+            type: 'success',
+            msg: `All ${batches.length} batch(es) generated and uploaded successfully.`,
+          });
+        }
         setTimeout(() => {
           resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 200);
@@ -490,6 +516,8 @@ const BadgePrintingModule = () => {
     sortBy,
     layout,
     batchSize,
+    batchesPerRun,
+    skipAlreadyPrinted,
     selectedDelegates,
     loadBatches,
     loadPrintLogs,
@@ -658,8 +686,33 @@ const BadgePrintingModule = () => {
   };
 
   const handleMarkPrinted = async (batchId: string) => {
-    await db.updateBadgeBatchStatus(batchId, 'printed');
+    try {
+      const marked = await db.markBadgeBatchPrinted(batchId);
+      setFeedback({ type: 'success', msg: `Batch marked printed — ${marked} delegate(s) flagged as Badge Printed.` });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Mark printed failed: ${e?.message || 'unknown error'}` });
+    }
     loadBatches();
+    loadPrintLogs();
+  };
+
+  const handleClearPrintedFlags = async () => {
+    if (!activeEventId) return;
+    if (!window.confirm(
+      `Clear ALL "Badge Printed" flags for this event? Every delegate will return to "Badge Not Printed" and may be regenerated.`
+    )) return;
+    setBulkDeleting(true);
+    try {
+      const cleared = await db.clearBadgePrintedFlags(activeEventId);
+      setFeedback({ type: 'success', msg: `Cleared Badge Printed flags for ${cleared} delegate(s).` });
+      handlePreviewCount();
+      loadBatches();
+      loadPrintLogs();
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Clear failed: ${e?.message || 'unknown error'}` });
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const handleReprintBatch = async (batchId: string) => {
@@ -829,22 +882,44 @@ const BadgePrintingModule = () => {
 
               <div>
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
-                  Registration
+                  Badge Status
                 </label>
                 <select
                   className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
-                  value={filters.registrationStatus || 'all'}
+                  value={filters.badgePrintedStatus || 'all'}
+                  disabled={skipAlreadyPrinted}
                   onChange={(e) =>
                     setFilters((f) => ({
                       ...f,
-                      registrationStatus: e.target.value as 'checked_in' | 'not_checked_in' | 'all',
+                      badgePrintedStatus: e.target.value as 'printed' | 'not_printed' | 'all',
                     }))
                   }
                 >
-                  <option value="all">All Statuses</option>
-                  <option value="checked_in">Checked In</option>
-                  <option value="not_checked_in">Not Checked In</option>
+                  {badgeStatusOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+              <div className="flex items-center gap-3 p-3 border border-blue-100 rounded-xl bg-blue-50/50">
+                <label className="flex items-center gap-2 text-[9px] font-bold text-blue-800 uppercase tracking-wider cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={skipAlreadyPrinted}
+                    onChange={(e) => setSkipAlreadyPrinted(e.target.checked)}
+                    className="rounded"
+                  />
+                  Skip Already Printed
+                </label>
+                <span className="text-[8px] text-gray-400 leading-tight">
+                  {skipAlreadyPrinted
+                    ? 'Guard active: only badges marked "Not Printed" are generated.'
+                    : 'Override: reprints include badges already marked as printed.'}
+                </span>
               </div>
             </div>
 
@@ -992,7 +1067,7 @@ const BadgePrintingModule = () => {
             <h2 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-[0.2em]">
               Sort & Layout
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
                   Sort By
@@ -1040,6 +1115,24 @@ const BadgePrintingModule = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  Batches Per Run
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full p-3 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={batchesPerRun}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setBatchesPerRun(Number.isFinite(v) && v > 0 ? v : 1);
+                  }}
+                />
+                <p className="text-[8px] text-gray-400 leading-tight mt-1">
+                  Generate this many sub-batches per click to manage storage. Rounds continue from where you stopped (unprinted only).
+                </p>
               </div>
             </div>
           </div>
@@ -1111,7 +1204,13 @@ const BadgePrintingModule = () => {
               disabled={generating || isLocked || previewCount === 0}
               className="flex-1 py-5 bg-blue-900 hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-500 text-white font-black rounded-2xl text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95"
             >
-              {generating ? 'Generating...' : `Generate ${previewCount || ''} Badges`}
+              {generating
+                ? 'Generating...'
+                : previewCount === 0
+                ? 'Generate 0 Badges'
+                : previewCount <= batchSize * batchesPerRun
+                ? `Generate ${previewCount} Badges`
+                : `Generate ${Math.min(previewCount, batchSize * batchesPerRun)} of ${previewCount} Badges`}
             </button>
           </div>
 
@@ -1183,6 +1282,16 @@ const BadgePrintingModule = () => {
               Print Queue ({batches.length} batches)
             </h2>
             <div className="flex items-center gap-2 flex-wrap">
+              {isAdmin && (
+                <button
+                  onClick={handleClearPrintedFlags}
+                  disabled={bulkDeleting || isLocked}
+                  className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-700 font-bold rounded-lg text-[8px] uppercase tracking-wider border border-amber-200"
+                  title="Reset every delegate's Badge Printed flag to Not Printed (e.g. after testing). Batch records are kept."
+                >
+                  {bulkDeleting ? 'Clearing...' : 'Clear Badge Printed Flags'}
+                </button>
+              )}
               {isAdmin && batches.length > 0 && (
                 <>
                   <label className="flex items-center gap-1 text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none">

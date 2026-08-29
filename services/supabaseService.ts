@@ -2660,6 +2660,49 @@ export const db = {
         handleSupabaseError({ data: null, error }, 'Failed to update batch status');
     },
 
+    markBadgeBatchPrinted: async (batchId: string): Promise<number> => {
+        const { data: batch } = await supabase.from('badge_batches')
+            .select('event_id')
+            .eq('batch_id', batchId)
+            .maybeSingle();
+        if (!batch) throw new Error('Badge batch not found.');
+        await ensureEventActive(batch.event_id);
+
+        const { data: memberLogs } = await supabase.from('badge_print_logs')
+            .select('delegate_id')
+            .eq('batch_id', batchId);
+        const delegateIds = [...new Set((memberLogs || []).map(l => l.delegate_id))];
+
+        let marked = 0;
+        if (delegateIds.length) {
+            const { data: updated, error } = await supabase.from('delegates')
+                .update({ badge_printed: true, badge_printed_at: new Date().toISOString() })
+                .eq('event_id', batch.event_id)
+                .in('delegate_id', delegateIds)
+                .select('delegate_id');
+            handleSupabaseError({ data: updated, error }, 'Failed to mark delegates as badge printed');
+            marked = (updated || []).length || delegateIds.length;
+        }
+        await supabase.from('badge_batches')
+            .update({ status: 'printed' })
+            .eq('batch_id', batchId);
+        recordAuditLog(batch.event_id, 'badge_batch_printed', `Badge batch marked printed (${marked} delegates)`, null, 'badge_batch', batchId, { delegate_count: marked });
+        return marked;
+    },
+
+    clearBadgePrintedFlags: async (eventId: string): Promise<number> => {
+        await ensureEventActive(eventId);
+        const { data: updated, error } = await supabase.from('delegates')
+            .update({ badge_printed: false, badge_printed_at: null })
+            .eq('event_id', eventId)
+            .eq('badge_printed', true)
+            .select('delegate_id');
+        handleSupabaseError({ data: updated, error }, 'Failed to clear badge printed flags');
+        const cleared = (updated || []).length;
+        recordAuditLog(eventId, 'badge_clear_printed_flags', `Badge printed flags cleared (${cleared} delegates)`, null, 'event', eventId, { cleared });
+        return cleared;
+    },
+
     getBadgePrintLogs: async (eventId: string, delegateId?: string): Promise<BadgePrintLog[]> => {
         let query = supabase.from('badge_print_logs')
             .select('*, delegates(first_name, last_name)')
@@ -2719,17 +2762,10 @@ export const db = {
             if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
             if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
 
-            if (filters.registrationStatus === 'checked_in') {
-                const { data: checkedInIds } = await supabase.from('checkins')
-                    .select('delegate_id').eq('event_id', eventId);
-                const ids = (checkedInIds || []).map(c => c.delegate_id);
-                if (ids.length) q = q.in('delegate_id', ids);
-                else return [];
-            } else if (filters.registrationStatus === 'not_checked_in') {
-                const { data: checkedInIds } = await supabase.from('checkins')
-                    .select('delegate_id').eq('event_id', eventId);
-                const ids = (checkedInIds || []).map(c => c.delegate_id);
-                if (ids.length) q = q.not('delegate_id', 'in', `(${ids.join(',')})`);
+            if (filters.badgePrintedStatus === 'printed') {
+                q = q.eq('badge_printed', true);
+            } else if (filters.badgePrintedStatus === 'not_printed') {
+                q = q.eq('badge_printed', false);
             }
         }
 
@@ -2750,7 +2786,7 @@ export const db = {
         if (!filters.district && !filters.chapter && !filters.delegateType &&
             !filters.surnameFrom && !filters.surnameTo &&
             !filters.delegateNumberFrom && !filters.delegateNumberTo &&
-            filters.registrationStatus !== 'checked_in' && filters.registrationStatus !== 'not_checked_in') {
+            filters.badgePrintedStatus !== 'printed' && filters.badgePrintedStatus !== 'not_printed') {
             return 0;
         }
 
@@ -2764,17 +2800,10 @@ export const db = {
         if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
         if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
 
-        if (filters.registrationStatus === 'checked_in') {
-            const { data: checkedInIds } = await supabase.from('checkins')
-                .select('delegate_id').eq('event_id', eventId);
-            const ids = (checkedInIds || []).map(c => c.delegate_id);
-            if (ids.length) q = q.in('delegate_id', ids);
-            else return 0;
-        } else if (filters.registrationStatus === 'not_checked_in') {
-            const { data: checkedInIds } = await supabase.from('checkins')
-                .select('delegate_id').eq('event_id', eventId);
-            const ids = (checkedInIds || []).map(c => c.delegate_id);
-            if (ids.length) q = q.not('delegate_id', 'in', `(${ids.join(',')})`);
+        if (filters.badgePrintedStatus === 'printed') {
+            q = q.eq('badge_printed', true);
+        } else if (filters.badgePrintedStatus === 'not_printed') {
+            q = q.eq('badge_printed', false);
         }
 
         const { count, error } = await q.limit(0);
