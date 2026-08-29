@@ -12,6 +12,7 @@ const PAGE_SIZE = 25;
 const MasterListModule = () => {
     const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
     const isAdmin = isAdminRole((user?.role || '').toLowerCase()) || isEventAdminRole((user?.role || '').toLowerCase());
+    const canManage = isAdminRole((user?.role || '').toLowerCase());
 
     useEffect(() => {
         if (!activeEventId && Array.isArray(events)) {
@@ -58,6 +59,8 @@ const MasterListModule = () => {
     const [districtListLoading, setDistrictListLoading] = useState(false);
     const [districtList, setDistrictList] = useState<{ district: string; count: number }[]>([]);
     const [districtSections, setDistrictSections] = useState<Record<string, { delegates: Delegate[]; page: number; total: number; pages: number; loading: boolean }>>({});
+    const [mergePrompt, setMergePrompt] = useState<{ dropId: string; candidates: Delegate[] } | null>(null);
+    const [merging, setMerging] = useState(false);
 
     const loadData = useCallback(async (p?: number) => {
         if (!activeEventId) return;
@@ -197,9 +200,58 @@ const MasterListModule = () => {
                 await loadData();
             }
         } catch(err: any) {
-            alert("UPDATE FAILED: " + (err.message || "An error occurred."));
+            const msg = err?.message || "An error occurred.";
+            if (canManage && activeEventId && (String(err?.code) === '23505' || msg.includes('23505') || msg.includes('duplicate key'))) {
+                try {
+                    const candidates = await db.findIdentityCollision(editingId, editForm, activeEventId);
+                    if (candidates.length > 0) {
+                        setMergePrompt({ dropId: editingId, candidates });
+                        return;
+                    }
+                } catch (_) {}
+            }
+            alert("UPDATE FAILED: " + msg);
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleDelete = async (d: Delegate) => {
+        if (!activeEventId) return;
+        const name = `${d.first_name} ${d.last_name}`.trim();
+        if (!window.confirm(`PERMANENTLY DELETE "${name}" (${d.district || ''}${d.chapter ? ' / ' + d.chapter : ''})?\n\nThis will also permanently remove this delegate's check-ins, session responses, and badge print history. Use "Merge" instead when the record is a duplicate of another delegate.\n\nThis action cannot be undone.`)) return;
+        try {
+            await db.deleteDelegate(d.delegate_id, activeEventId);
+            alert(`DELETED: ${name}`);
+            if (!selectedDistrict && !searchTerm) {
+                db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
+                loadDistrictPage(d.district, districtSections[d.district]?.page || 1);
+            } else {
+                await loadData();
+            }
+        } catch (e: any) {
+            alert("DELETE FAILED: " + (e.message || 'An error occurred.'));
+        }
+    };
+
+    const handleMergeFix = async () => {
+        if (!mergePrompt || !activeEventId) return;
+        const keep = mergePrompt.candidates[0];
+        setMerging(true);
+        try {
+            await db.mergeDelegatePair({ keepId: keep.delegate_id, dropId: mergePrompt.dropId, eventId: activeEventId, reason: 'lastname duplicate' });
+            alert(`SUCCESS: Records merged into ${keep.first_name} ${keep.last_name}. Check-ins, session responses, and badge history were preserved.`);
+            setEditingId(null);
+            setMergePrompt(null);
+            if (!selectedDistrict && !searchTerm) {
+                loadAllDistricts();
+            } else {
+                await loadData();
+            }
+        } catch (e: any) {
+            alert("MERGE FAILED: " + (e.message || 'An error occurred.'));
+        } finally {
+            setMerging(false);
         }
     };
 
@@ -385,6 +437,34 @@ const MasterListModule = () => {
                 </div>
             )}
 
+            {mergePrompt && mergePrompt.candidates.length > 0 && (
+                <div className="bg-red-50 p-8 rounded-2xl shadow-md border-2 border-red-200 no-print">
+                    <div className="flex justify-between items-center mb-4 border-b border-red-200 pb-4">
+                        <h3 className="text-xl font-black text-red-900 uppercase tracking-widest">Existing Duplicate Found</h3>
+                        <button onClick={() => setMergePrompt(null)} className="text-red-400 hover:text-red-600 transition-colors font-black uppercase text-[10px]">Cancel [X]</button>
+                    </div>
+                    <p className="text-sm font-bold text-gray-600 mb-4">
+                        Your edit to <span className="text-red-800 font-black uppercase">{editForm.first_name} {editForm.last_name}</span> collides with an existing delegate record (same name and phone).
+                        To keep this delegate's check-in / session / badge history, merge the two records instead of saving a second copy.
+                    </p>
+                    <div className="space-y-3 mb-6">
+                        {mergePrompt.candidates.map(c => (
+                            <div key={c.delegate_id} className="bg-white border border-red-100 rounded-xl p-4 flex items-center gap-4">
+                                <span className="bg-red-100 text-red-700 rounded-full px-3 py-1 text-[10px] font-black uppercase">Existing</span>
+                                <div className="flex-1">
+                                    <span className="font-black text-gray-900 uppercase">{c.title} {c.first_name} {c.last_name}</span>
+                                    <span className="block text-[10px] font-bold text-gray-400 uppercase">{c.district || '-'} / {c.chapter || '-'}</span>
+                                </div>
+                                <span className="text-xs font-mono text-blue-700">{c.phone}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={handleMergeFix} disabled={merging} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-emerald-700 disabled:opacity-50">
+                        {merging ? 'MERGING RECORDS...' : '\u2713 REDEEM AS ONE \u2014 MERGE INTO EXISTING RECORD'}
+                    </button>
+                </div>
+            )}
+
             <div className="bg-white p-6 rounded-xl shadow-sm border flex flex-col md:flex-row gap-4 justify-between items-center no-print">
                 <h2 className="text-xl font-black uppercase tracking-widest text-blue-900">Delegates Master List</h2>
                 <div className="flex flex-1 flex-wrap gap-2 justify-end w-full md:w-auto">
@@ -452,9 +532,12 @@ const MasterListModule = () => {
                                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                                            <td className="p-3 no-print text-center">
-                                                                <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
-                                                            </td>
+<td className="p-3 no-print text-center">
+                                    <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
+                                    {canManage && (
+                                        <button onClick={() => handleDelete(d)} className="ml-1 text-red-600 font-black uppercase text-[9px] border border-red-200 px-3 py-1 rounded-lg hover:bg-red-600 hover:text-white transition-all">Delete</button>
+                                    )}
+                                </td>
                                                         </tr>
                                                     ))
                                                 )}
@@ -512,6 +595,9 @@ const MasterListModule = () => {
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                             <td className="p-3 no-print text-center">
                                                 <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
+                                                {canManage && (
+                                                    <button onClick={() => handleDelete(d)} className="ml-1 text-red-600 font-black uppercase text-[9px] border border-red-200 px-3 py-1 rounded-lg hover:bg-red-600 hover:text-white transition-all">Delete</button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}

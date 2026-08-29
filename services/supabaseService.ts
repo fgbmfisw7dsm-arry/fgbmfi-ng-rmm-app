@@ -141,6 +141,10 @@ const rehomeAndDeleteDelegate = async (eventId: string, dupId: string, survivorI
     await supabase.from('delegates').delete().eq('delegate_id', dupId);
 };
 
+const completeScore = (d: any) =>
+    [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
+        .filter(v => v && String(v).trim()).length;
+
 export const auth = {
     getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
         let profile: any = null;
@@ -1626,6 +1630,79 @@ export const db = {
         return ids.length;
     },
 
+    deleteDelegate: async (id: string, eventId: string): Promise<boolean> => {
+        if (!id || !eventId) return false;
+        await ensureEventActive(eventId);
+        const { data: del } = await supabase.from('delegates').select('first_name, last_name, district, chapter').eq('event_id', eventId).eq('delegate_id', id).maybeSingle();
+        if (!del) return false;
+        await supabase.from('checkins').delete().eq('event_id', eventId).eq('delegate_id', id);
+        await supabase.from('session_responses').delete().eq('event_id', eventId).eq('delegate_id', id);
+        await supabase.from('badge_print_logs').delete().eq('event_id', eventId).eq('delegate_id', id);
+        const { error } = await supabase.from('delegates').delete().eq('event_id', eventId).eq('delegate_id', id);
+        if (error) throw error;
+        recordAuditLog(eventId, 'delegate_delete', `Delegate deleted: ${del.first_name} ${del.last_name} (${del.district || ''} ${del.chapter || ''})`.trim(), null, 'delegate', id);
+        return true;
+    },
+
+    findIdentityCollision: async (id: string, updates: Partial<Delegate>, eventId: string): Promise<Delegate[]> => {
+        if (!id || !eventId) return [];
+        const { data: current } = await supabase.from('delegates').select('*').eq('event_id', eventId).eq('delegate_id', id).maybeSingle();
+        if (!current) return [];
+        const merged = { ...current, ...updates };
+        const phone = normalizePhone(merged.phone || '');
+        if (!phone) return [];
+        const { data } = await supabase.from('delegates')
+            .select('*')
+            .eq('event_id', eventId)
+            .eq('title_key', normNameKey(((merged.title || '').trim()) || 'Mr'))
+            .eq('name_first_key', normNameKey(merged.first_name))
+            .eq('name_last_key', normNameKey(merged.last_name))
+            .eq('phone_normalized', phone)
+            .limit(10);
+        return (data || []).filter((r: any) => r.delegate_id !== id);
+    },
+
+    mergeDelegatePair: async (opts: { keepId?: string | null; dropId: string; eventId: string; reason?: string }): Promise<{ keep: Delegate; drop: Delegate }> => {
+        const { keepId, dropId, eventId, reason } = opts;
+        if (!dropId || !eventId) throw new Error('mergeDelegatePair requires dropId and eventId.');
+        await ensureEventActive(eventId);
+        const { data: dropRow } = await supabase.from('delegates').select('*').eq('event_id', eventId).eq('delegate_id', dropId).maybeSingle();
+        if (!dropRow) throw new Error('Target record to merge was not found in this event.');
+        let keepRow: any = null;
+        if (keepId && keepId !== dropId) {
+            const { data: k } = await supabase.from('delegates').select('*').eq('event_id', eventId).eq('delegate_id', keepId).maybeSingle();
+            keepRow = k || null;
+        }
+        if (!keepRow) {
+            const { data: candidates } = await supabase.from('delegates')
+                .select('*')
+                .eq('event_id', eventId)
+                .eq('title_key', dropRow.title_key)
+                .eq('name_first_key', dropRow.name_first_key)
+                .eq('name_last_key', dropRow.name_last_key)
+                .eq('phone_normalized', dropRow.phone_normalized)
+                .neq('delegate_id', dropId)
+                .limit(10);
+            const list = (candidates || []).sort((a, b) => (completeScore(b) - completeScore(a)) || a.delegate_id.localeCompare(b.delegate_id));
+            keepRow = list[0] || null;
+        }
+        if (!keepRow) throw new Error('No matching record found to merge into.');
+        await rehomeAndDeleteDelegate(eventId, dropId, keepRow.delegate_id);
+        const fillFields: (keyof Delegate)[] = ['title', 'first_name', 'last_name', 'phone', 'email', 'district', 'chapter', 'rank', 'office', 'external_id', 'delegate_type'];
+        const patch = {} as Partial<Delegate>;
+        for (const f of fillFields) {
+            const keepVal = String(keepRow?.[f] ?? '').trim();
+            const dropVal = String(dropRow?.[f] ?? '').trim();
+            if (!keepVal && dropVal) Object.assign(patch, { [f]: dropRow[f] });
+        }
+        if (Object.keys(patch).length > 0) {
+            const { error: patchErr } = await supabase.from('delegates').update(patch).eq('event_id', eventId).eq('delegate_id', keepRow.delegate_id);
+            if (patchErr) console.warn('[mergeDelegatePair] gap-fill warning:', patchErr.message);
+        }
+        recordAuditLog(eventId, 'delegate_merge', `Duplicate merged: ${dropRow.first_name} ${dropRow.last_name} \u2192 ${keepRow.first_name} ${keepRow.last_name}${reason ? ` (${reason})` : ''}`, null, 'delegate', keepRow.delegate_id, { dropped: dropId });
+        return { keep: keepRow as Delegate, drop: dropRow as Delegate };
+    },
+
     /** A–D: Multi-field anomaly detection + confidence scoring. Returns full analysis with proposed repairs. */
     analyzeScrambledDelegates: async (eventId: string): Promise<{
         analyses: Array<{
@@ -1948,10 +2025,7 @@ export const db = {
         }
         if (all.length === 0) return 0;
 
-        const completeness = (d: any) =>
-            [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
-                .filter(v => v && String(v).trim()).length;
-
+        const completeness = completeScore;
         const removed = new Set<string>();
         let merged = 0;
 
