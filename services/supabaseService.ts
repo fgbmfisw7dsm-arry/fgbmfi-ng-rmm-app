@@ -2668,24 +2668,9 @@ export const db = {
         if (!batch) throw new Error('Badge batch not found.');
         await ensureEventActive(batch.event_id);
 
-        const { data: memberLogs } = await supabase.from('badge_print_logs')
-            .select('delegate_id')
-            .eq('batch_id', batchId);
-        const delegateIds = [...new Set((memberLogs || []).map(l => l.delegate_id))];
-
-        let marked = 0;
-        if (delegateIds.length) {
-            const { data: updated, error } = await supabase.from('delegates')
-                .update({ badge_printed: true, badge_printed_at: new Date().toISOString() })
-                .eq('event_id', batch.event_id)
-                .in('delegate_id', delegateIds)
-                .select('delegate_id');
-            handleSupabaseError({ data: updated, error }, 'Failed to mark delegates as badge printed');
-            marked = (updated || []).length || delegateIds.length;
-        }
-        await supabase.from('badge_batches')
-            .update({ status: 'printed' })
-            .eq('batch_id', batchId);
+        const { data, error } = await supabase.rpc('mark_badge_batch_printed', { p_batch_id: batchId });
+        handleSupabaseError({ data, error }, 'Failed to mark delegates as badge printed');
+        const marked = Number(data) || 0;
         recordAuditLog(batch.event_id, 'badge_batch_printed', `Badge batch marked printed (${marked} delegates)`, null, 'badge_batch', batchId, { delegate_count: marked });
         return marked;
     },

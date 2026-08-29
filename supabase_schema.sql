@@ -1119,6 +1119,48 @@ BEGIN
 END;
 $func$;
 
+-- Badge batch "Mark Printed" (scale-safe; avoids 1000-UUID IN-list URL bloat)
+CREATE OR REPLACE FUNCTION public.mark_badge_batch_printed(p_batch_id UUID)
+RETURNS INTEGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_event_id UUID;
+  v_marked INTEGER;
+BEGIN
+  IF NOT (is_admin_user() OR is_event_admin_user()) THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator or event administrator privileges required';
+  END IF;
+
+  SELECT b.event_id INTO v_event_id
+  FROM badge_batches b
+  WHERE b.batch_id = p_batch_id;
+
+  IF v_event_id IS NULL THEN
+    RAISE EXCEPTION 'Badge batch not found.';
+  END IF;
+
+  UPDATE delegates d
+  SET badge_printed = true,
+      badge_printed_at = now()
+  WHERE d.event_id = v_event_id
+    AND d.delegate_id IN (
+      SELECT l.delegate_id
+      FROM badge_print_logs l
+      WHERE l.batch_id = p_batch_id
+    );
+
+  GET DIAGNOSTICS v_marked = ROW_COUNT;
+
+  UPDATE badge_batches b
+  SET status = 'printed'
+  WHERE b.batch_id = p_batch_id;
+
+  RETURN v_marked;
+END;
+$$;
+
 -- 8. ROW-LEVEL SECURITY (RLS) POLICIES
 
 -- 8a. Helper: Check if current user has admin role
