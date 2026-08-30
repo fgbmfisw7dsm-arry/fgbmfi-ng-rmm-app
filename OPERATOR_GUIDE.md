@@ -58,10 +58,11 @@
 
 ## Badge Operations
 
-### Badge Reprint (Delegate forgot badge)
-1. After verifying a delegate, click **Reprint Badge** next to their record
-2. New QR + backup code generates
-3. Click **Print Badge** to send to printer
+### E-Badge Generation & Distribution (All Admins & Registrars)
+1. Search for any delegate in the Check-In search — the **E-Badge** button appears on both checked-in and not-yet-checked-in records
+2. Tap **E-Badge** to open the badge preview modal
+3. Generate and distribute: **Print**, **Download PDF**, **Download Image**, or **Share** (e.g. WhatsApp) the e-badge
+4. Preferred workflow: share the e-badge with delegates **before** they arrive (not-yet-checked-in records); a verified delegate can also regenerate/re-share their badge at any time
 
 ### Lost Badge Replacement (Security measure)
 1. Click **Lost Badge** (amber button) — ONLY for genuinely lost badges

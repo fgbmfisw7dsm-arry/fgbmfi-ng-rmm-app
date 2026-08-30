@@ -167,7 +167,7 @@ const UserManualModule = () => {
                                     </li>
                                     <li className="flex gap-4 items-start text-sm">
                                         <span className="bg-green-500/20 text-green-400 p-4 rounded-xl border border-green-500/30 font-black">
-                                            Step 3: The delegate's record appears on the verified card. <strong>Badge Reprint:</strong> Tap "Reprint Badge" to print, download as PDF/image, or share the e-badge via WhatsApp.
+                                            Step 3: The delegate's record appears on the card. <strong>E-Badge:</strong> Tap "E-Badge" to print, download as PDF/image, or share the e-badge via WhatsApp.
                                         </span>
                                     </li>
                                 </ol>
@@ -337,11 +337,11 @@ const UserManualModule = () => {
                                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">8A</span>
                                 Badge Management & E-Badge Distribution
                             </h2>
-                            <p className="text-sm text-gray-600 mb-4">Every verified delegate receives a 60mm × 70mm badge with a scannable QR code. The badge can be reprinted, downloaded, or shared digitally.</p>
+                            <p className="text-sm text-gray-600 mb-4">Every delegate receives a badge with a scannable QR code. The badge can be printed, downloaded, or shared digitally — the <strong>E-Badge</strong> action is available for both checked-in and not-yet-checked-in delegates, so you can distribute badges ahead of arrival.</p>
                             <div className="space-y-4">
                                 <div className="p-5 border rounded-2xl bg-gray-50">
-                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Badge Reprint</h4>
-                                    <p className="text-xs text-gray-600">In the Check-In search results, a verified delegate shows a <strong>"Reprint Badge"</strong> button. Tap it to open the badge preview modal showing the FGBMFI Nigeria header, delegate name, district, chapter, rank, and 28mm QR code.</p>
+                                    <h4 className="text-xs font-black text-blue-900 uppercase mb-2">E-Badge Generation</h4>
+                                    <p className="text-xs text-gray-600">In the Check-In search results, each delegate record shows an <strong>"E-Badge"</strong> button — tap it to open the badge preview modal showing the FGBMFI Nigeria header, delegate name, district, chapter, rank, and QR code. The action works on any delegate, whether or not they have checked in yet.</p>
                                 </div>
                                 <div className="p-5 border rounded-2xl bg-gray-50">
                                     <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Four Export Options</h4>

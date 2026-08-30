@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
 import { enqueueCheckIn } from '../services/offlineQueue';
+import { generateBadgeImage } from '../services/badgeImageGenerator';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -222,40 +223,13 @@ const CheckInPage = () => {
     }
   };
 
-  const handleReprintBadge = async (delegate: Delegate) => {
+  const handleBadge = async (delegate: Delegate) => {
     try {
-      if (!delegate.external_id?.startsWith('CON26')) {
-        const repaired = await db.repairExternalId(delegate.delegate_id);
-        if (repaired) delegate = { ...delegate, external_id: repaired };
-      }
+      const { badgeUrl, qrUrl, bannerUrl } = await generateBadgeImage(delegate, { showRank, showOffice });
 
-      const qrCanvas = document.createElement('canvas');
-      await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 400, margin: 1, color: { dark: '#1e3a5f' } });
-      const qrDataUrl = qrCanvas.toDataURL('image/png');
-
-      let bannerResp = '';
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const resp = await fetch(encodeURI('/badge-design.png'), { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          bannerResp = await new Promise<string>(resolve => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-        }
-      } catch (fetchErr) {
-        console.warn('Banner fetch failed, badge will render without banner:', fetchErr);
-      }
-
-      const badgeCanvasUrl = await generateBadgeCanvas(delegate, qrDataUrl, bannerResp);
-
-      setBadgeQrSvg(qrDataUrl);
-      setBadgeBannerDataUrl(bannerResp);
-      setBadgeCanvasUrl(badgeCanvasUrl);
+      setBadgeQrSvg(qrUrl);
+      setBadgeBannerDataUrl(bannerUrl);
+      setBadgeCanvasUrl(badgeUrl);
       setBadgeDelegate(delegate);
     } catch (e) {
       console.error('QR generation for badge failed:', e);
@@ -264,161 +238,7 @@ const CheckInPage = () => {
     }
   };
 
-  const generateBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, bannerDataUrl: string): Promise<string> => {
-    const mmToPx = 3.779527559;
-    const scale = 3;
-    const bw = Math.round(63 * mmToPx);
-    const bh = Math.round(90 * mmToPx);
-    const canvas = document.createElement('canvas');
-    canvas.width = bw * scale;
-    canvas.height = bh * scale;
-    const ctx = canvas.getContext('2d')!;
-    ctx.scale(scale, scale);
-
-    const headerH = bh * 0.29;
-    const bodyH = bh * 0.64;
-    const bandH = bh * 0.07;
-    const bandTop = headerH + bodyH;
-
-    if (bannerDataUrl) {
-      try {
-        const design = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = bannerDataUrl;
-        });
-        const cardAspect = design.width / design.height;
-        const badgeAspect = bw / bh;
-        let imgW: number;
-        let imgH: number;
-        if (cardAspect > badgeAspect) {
-          imgH = bh;
-          imgW = bh * cardAspect;
-        } else {
-          imgW = bw;
-          imgH = bw / cardAspect;
-        }
-        const ix = (bw - imgW) / 2;
-        const iy = (bh - imgH) / 2;
-        ctx.drawImage(design, ix, iy, imgW, imgH);
-      } catch {}
-    }
-
-    const bodyTop = headerH;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, bodyTop, bw, bodyH);
-
-    if (qrDataUrl) {
-      try {
-        const qr = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = qrDataUrl;
-        });
-        const qrSize = Math.min(bw * 0.48, bh * 0.385);
-        const qrX = (bw - qrSize) / 2;
-        const qrY = bodyTop + 8;
-        ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
-
-        const wrapCanvasText = (ctx2: CanvasRenderingContext2D, text: string, maxWidth: number): string[] => {
-          const words = text.split(' ');
-          const lines: string[] = [];
-          let cur = '';
-          for (const word of words) {
-            const test = cur ? cur + ' ' + word : word;
-            if (ctx2.measureText(test).width > maxWidth && cur) { lines.push(cur); cur = word; }
-            else { cur = test; }
-          }
-          if (cur) lines.push(cur);
-          return lines.length > 0 ? lines : [text];
-        };
-
-        const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-        const nameMaxW = bw - 16;
-        const nameY = qrY + qrSize + 16;
-        const fieldCount = 3 + (showOffice && delegate.office ? 1 : 0) + (showRank && delegate.rank ? 1 : 0);
-        const lineGap = 18;
-        const fieldsNeeded = fieldCount * lineGap;
-        const bodyBottom = bodyTop + bodyH;
-        const availForName = bodyBottom - nameY - fieldsNeeded - 8;
-
-        let nameFontSize = 14;
-        let nameLines: string[] = [];
-        const minNameSize = 9;
-
-        for (let fs = nameFontSize; fs >= minNameSize; fs -= 0.5) {
-          ctx.font = 'bold ' + fs + 'px sans-serif';
-          const lines = wrapCanvasText(ctx, fullName, nameMaxW);
-          const totalH = lines.length * fs * 1.15;
-          if (totalH <= availForName || fs <= minNameSize) {
-            nameFontSize = fs;
-            nameLines = lines;
-            if (fs <= minNameSize && totalH > availForName) {
-              while (nameLines.length * minNameSize * 1.15 > availForName && nameLines.length > 1) nameLines.pop();
-              if (nameLines.length > 0) {
-                let last = nameLines[nameLines.length - 1];
-                ctx.font = 'bold ' + minNameSize + 'px sans-serif';
-                while (ctx.measureText(last + '\u2026').width > nameMaxW && last.length > 1) last = last.slice(0, -1);
-                nameLines[nameLines.length - 1] = last + '\u2026';
-              }
-            }
-            break;
-          }
-        }
-
-        ctx.fillStyle = '#1e3a5f';
-        ctx.textAlign = 'center';
-        let currentNameY = nameY;
-        for (const line of nameLines) {
-          ctx.font = 'bold ' + nameFontSize + 'px sans-serif';
-          ctx.fillText(line, bw / 2, currentNameY);
-          currentNameY += nameFontSize * 1.15;
-        }
-
-        let textY = currentNameY + 4;
-
-        ctx.fillStyle = '#4b5563';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('District: ' + (delegate.district || 'N/A'), bw / 2, textY);
-        textY += lineGap;
-
-        ctx.fillStyle = '#4b5563';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('Chapter: ' + (delegate.chapter || 'N/A'), bw / 2, textY);
-        textY += lineGap;
-
-        if (showOffice && delegate.office) {
-          ctx.fillStyle = '#4b5563';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.fillText('Office: ' + delegate.office, bw / 2, textY);
-          textY += lineGap;
-        }
-        if (showRank && delegate.rank) {
-          ctx.fillStyle = '#4b5563';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.fillText('Rank: ' + delegate.rank, bw / 2, textY);
-          textY += lineGap;
-        }
-
-        ctx.fillStyle = '#1e3a5f';
-        ctx.font = 'bold 8px sans-serif';
-        const displayId = delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8);
-        ctx.fillText('ID: ' + displayId, bw / 2, textY);
-      } catch {}
-    }
-
-    const dt = delegate.delegate_type || 'Member';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(dt.toUpperCase(), bw / 2, bandTop + bandH / 2 + 3);
-
-    return canvas.toDataURL('image/png');
-  };
-
-  const handleLostBadge = useCallback(async (delegateId: string) => {
+const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!activeEventId || !user) return;
     if (isLocked) return;
     setRegeneratingId(delegateId);
@@ -778,11 +598,11 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                           <div className="text-right flex flex-col items-end gap-2">
                              <div className="flex gap-2 mt-1">
                                <button 
-                                 onClick={() => handleReprintBadge(d as Delegate)}
-                                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-[9px] uppercase tracking-widest shadow transition-all active:scale-95"
-                                 title="Reprint badge"
+                                 onClick={() => handleBadge(d)}
+                                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black rounded-xl text-[9px] uppercase tracking-widest shadow transition-all active:scale-95"
+                                 title="Generate and distribute E-Badge"
                                >
-                                 Reprint Badge
+                                 E-Badge
                                </button>
                                {(isAdmin || isRegistrar) && (
                                  <button 
@@ -799,13 +619,22 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                         </div>
                     </div>
                   ) : (
-                    <button 
-                      onClick={() => handleManualCheckIn(d.delegate_id)} 
-                      disabled={!!processingId || isLocked}
-                      className="w-full md:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-xl shadow-blue-100 transition-all active:scale-95"
-                    >
+                    <div className="flex flex-col md:flex-row items-center gap-3">
+                      <button 
+                        onClick={() => handleBadge(d)}
+                        className="w-full md:w-auto px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-lg shadow-purple-100 transition-all active:scale-95"
+                        title="Generate and distribute E-Badge"
+                      >
+                        E-Badge
+                      </button>
+                      <button 
+                        onClick={() => handleManualCheckIn(d.delegate_id)} 
+                        disabled={!!processingId || isLocked}
+                        className="w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 transition-all active:scale-95"
+                      >
                         {isLocked ? 'LOCKED' : (processingId === d.delegate_id ? 'WAIT...' : 'VERIFY ENTRY')}
-                    </button>
+                      </button>
+                    </div>
                   )}
               </div>
            </div>
@@ -817,7 +646,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 print:hidden" onClick={closeBadgeModal}>
              <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 animate-in zoom-in" onClick={e => e.stopPropagation()}>
                <div className="flex justify-between items-start mb-6">
-                 <h3 className="text-lg font-black text-blue-900 uppercase tracking-tighter">Badge Reprint</h3>
+                 <h3 className="text-lg font-black text-blue-900 uppercase tracking-tighter">E-Badge</h3>
                  <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
                </div>
 
