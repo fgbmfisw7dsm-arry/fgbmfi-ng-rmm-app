@@ -225,12 +225,17 @@ const CheckInPage = () => {
 
   const handleBadge = async (delegate: Delegate) => {
     try {
-      const { badgeUrl, qrUrl, bannerUrl } = await generateBadgeImage(delegate, { showRank, showOffice });
+      let target = delegate;
+      if (!delegate.external_id?.startsWith('CON26') && activeEvent?.is_active === true) {
+        const repaired = await db.repairExternalId(delegate.delegate_id);
+        if (repaired) target = { ...delegate, external_id: repaired };
+      }
+      const { badgeUrl, qrUrl, bannerUrl } = await generateBadgeImage(target, { showRank, showOffice });
 
       setBadgeQrSvg(qrUrl);
       setBadgeBannerDataUrl(bannerUrl);
       setBadgeCanvasUrl(badgeUrl);
-      setBadgeDelegate(delegate);
+      setBadgeDelegate(target);
     } catch (e) {
       console.error('QR generation for badge failed:', e);
       setFeedback({ type: 'error', msg: 'Failed to generate badge. Please try again.' });
