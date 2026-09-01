@@ -75,6 +75,42 @@ function wrapWords(text: string, font: any, maxWidth: number, fontSize: number):
   return lines.length > 0 ? lines : [text];
 }
 
+interface FittedFieldSizes {
+  sizes: number[];
+  spacing: number;
+}
+
+function fitPriorityFields(
+  fieldCount: number,
+  availableHeight: number,
+  maxSize: number,
+  minSize: number
+): FittedFieldSizes {
+  const goodSize = maxSize;
+  let sizes = new Array<number>(fieldCount).fill(goodSize);
+  let spacing = Math.max(1.3, 1.5 - (fieldCount > 3 ? 0.1 : 0));
+
+  const totalFor = (s: number[], sp: number) => s.reduce((sum, sz) => sum + sz * sp, 0);
+
+  if (totalFor(sizes, spacing) <= availableHeight) {
+    return { sizes, spacing };
+  }
+
+  const greedy = Array.from(sizes);
+  let idx = fieldCount - 1;
+  while (totalFor(greedy, spacing) > availableHeight && idx >= 0) {
+    greedy[idx] = Math.max(minSize, greedy[idx] - 0.5);
+    idx = greedy[idx] > minSize ? idx : idx - 1;
+  }
+  sizes = greedy;
+
+  if (totalFor(sizes, spacing) > availableHeight && spacing > 1.3) {
+    spacing = Math.max(1.3, spacing - 0.1);
+  }
+
+  return { sizes, spacing };
+}
+
 interface FittedName {
   lines: string[];
   fontSize: number;
@@ -263,7 +299,8 @@ function drawBadge(
     const bodyBottom = badgeBottom + bandH;
 
     if (isPortrait) {
-      const qrSize = Math.min(bw * 0.55, bh * 0.385);
+      const qrMax = mmToPt(30);
+      const qrSize = Math.min(bw * 0.55, bh * 0.385, qrMax);
       const qrX = badgeLeft + (bw - qrSize) / 2;
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
@@ -285,21 +322,28 @@ function drawBadge(
         nameTextY -= fitted.fontSize * 1.05;
       }
       const nameToFieldGap = fitted.lines.length === 1 ? fitted.fontSize * 0.55 : fitted.fontSize * 0.15;
-      let textY = nameTextY - nameToFieldGap;
+      const textY = nameTextY - nameToFieldGap;
       const fields: [string, string][] = [
         ['District', delegate.district || 'N/A'],
         ['Chapter', delegate.chapter || 'N/A'],
         ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
       ];
-      for (const [label, value] of fields) {
-        if (textY < bodyBottom + mmToPt(3)) break;
+      const fieldBottom = bodyBottom + mmToPt(3);
+      const availHeight = textY - fieldBottom;
+      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 5.5);
+      const fieldSizes = fittedFields.sizes;
+      const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4.5, s - 1));
+      const spacing = fittedFields.spacing;
+      let fy = textY;
+      for (let fi = 0; fi < fields.length; fi++) {
+        const [label, value] = fields[fi];
         const labelText = label + ': ';
-        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
-        const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
+        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSizes[fi]);
+        const totalW = lW + font.widthOfTextAtSize(value, fieldSizes[fi]);
         const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
-        page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
-        page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-        textY -= fieldSize * fieldSpacing;
+        page.drawText(labelText, { x: sx, y: fy, size: fieldLabelSizes[fi], font: fontBold as any, color: TEXT_SECONDARY });
+        page.drawText(value, { x: sx + lW, y: fy, size: fieldSizes[fi], font: font as any, color: TEXT_PRIMARY });
+        fy -= fieldSizes[fi] * spacing;
       }
     } else {
       const qrSize = Math.min(bh * 0.581, mmToPt(30));
@@ -375,7 +419,7 @@ function drawBadge(
       const bodyTop = badgeBottom + bh - headerH;
       page.drawRectangle({ x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG });
 
-      const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
+      const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55, mmToPt(30));
       const qrX = badgeLeft + (bw - qrSize) / 2;
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
@@ -419,15 +463,22 @@ function drawBadge(
         ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
       ];
 
-      for (const [label, value] of fields) {
-        if (textY < bodyBottom + mmToPt(3)) break;
+      const fieldBottom = bodyBottom + mmToPt(3);
+      const availHeight = textY - fieldBottom;
+      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5);
+      const fieldSizes = fittedFields.sizes;
+      const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
+      const spacing = fittedFields.spacing;
+      let fy = textY;
+      for (let fi = 0; fi < fields.length; fi++) {
+        const [label, value] = fields[fi];
         const labelText = label + ': ';
-        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
-        const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
+        const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSizes[fi]);
+        const totalW = lW + font.widthOfTextAtSize(value, fieldSizes[fi]);
         const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
-        page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
-        page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-    textY -= fieldSize * fieldSpacing;
+        page.drawText(labelText, { x: sx, y: fy, size: fieldLabelSizes[fi], font: fontBold as any, color: TEXT_SECONDARY });
+        page.drawText(value, { x: sx + lW, y: fy, size: fieldSizes[fi], font: font as any, color: TEXT_PRIMARY });
+        fy -= fieldSizes[fi] * spacing;
       }
 
       const dt = delegate.delegate_type || 'Member';
@@ -473,7 +524,7 @@ function drawBadge(
     const bodyTop = badgeBottom + bh - headerH;
     page.drawRectangle({ x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG });
 
-    const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55);
+    const qrSize = Math.min(bw * 0.55, (bodyTop - bodyBottom) * 0.55, mmToPt(30));
     const qrX = badgeLeft + (bw - qrSize) / 2;
     const qrY = bodyTop - mmToPt(6) - qrSize;
     drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
@@ -517,15 +568,22 @@ function drawBadge(
       ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
     ];
 
-    for (const [label, value] of fields) {
-      if (textY < bodyBottom + mmToPt(3)) break;
+    const fieldBottom = bodyBottom + mmToPt(3);
+    const availHeight = textY - fieldBottom;
+    const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5);
+    const fieldSizes = fittedFields.sizes;
+    const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
+    const spacing = fittedFields.spacing;
+    let fy = textY;
+    for (let fi = 0; fi < fields.length; fi++) {
+      const [label, value] = fields[fi];
       const labelText = label + ': ';
-      const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSize);
-      const totalW = lW + font.widthOfTextAtSize(value, fieldSize);
+      const lW = fontBold.widthOfTextAtSize(labelText, fieldLabelSizes[fi]);
+      const totalW = lW + font.widthOfTextAtSize(value, fieldSizes[fi]);
       const sx = badgeLeft + Math.max(mmToPt(2), (bw - totalW) / 2);
-      page.drawText(labelText, { x: sx, y: textY, size: fieldLabelSize, font: fontBold as any, color: TEXT_SECONDARY });
-      page.drawText(value, { x: sx + lW, y: textY, size: fieldSize, font: font as any, color: TEXT_PRIMARY });
-      textY -= fieldSize * fieldSpacing;
+      page.drawText(labelText, { x: sx, y: fy, size: fieldLabelSizes[fi], font: fontBold as any, color: TEXT_SECONDARY });
+      page.drawText(value, { x: sx + lW, y: fy, size: fieldSizes[fi], font: font as any, color: TEXT_PRIMARY });
+      fy -= fieldSizes[fi] * spacing;
     }
 
     // Category band
