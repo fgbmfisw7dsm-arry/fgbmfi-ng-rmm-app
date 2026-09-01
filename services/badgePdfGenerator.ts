@@ -274,17 +274,9 @@ function drawBadge(
   try {
 
   if (badgeDesign) {
-    const cardAspect = badgeDesign.width / badgeDesign.height;
-    const badgeAspect = bw / bh;
-    let imgW: number;
-    let imgH: number;
-    if (cardAspect > badgeAspect) {
-      imgH = bh;
-      imgW = bh * cardAspect;
-    } else {
-      imgW = bw;
-      imgH = bw / cardAspect;
-    }
+    const scale = Math.min(bw / badgeDesign.width, bh / badgeDesign.height);
+    const imgW = badgeDesign.width * scale;
+    const imgH = badgeDesign.height * scale;
     const ix = badgeLeft + (bw - imgW) / 2;
     const iy = badgeBottom + (bh - imgH) / 2;
     try {
