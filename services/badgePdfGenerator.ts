@@ -84,10 +84,10 @@ function fitPriorityFields(
   fieldCount: number,
   availableHeight: number,
   maxSize: number,
-  minSize: number
+  minSize: number,
+  boosts?: number[]
 ): FittedFieldSizes {
-  const goodSize = maxSize;
-  let sizes = new Array<number>(fieldCount).fill(goodSize);
+  let sizes = new Array<number>(fieldCount).fill(maxSize).map((sz, i) => sz + (boosts?.[i] ?? 0));
   let spacing = Math.max(1.3, 1.5 - (fieldCount > 3 ? 0.1 : 0));
 
   const totalFor = (s: number[], sp: number) => s.reduce((sum, sz) => sum + sz * sp, 0);
@@ -339,7 +339,7 @@ function drawBadge(
       ];
       const fieldBottom = bodyBottom + mmToPt(3);
       const availHeight = textY - fieldBottom;
-      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 5.5);
+      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 5.5, [0, 1, 0]);
       const fieldSizes = fittedFields.sizes;
       const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4.5, s - 1));
       const spacing = fittedFields.spacing;
@@ -475,7 +475,7 @@ function drawBadge(
 
       const fieldBottom = bodyBottom + mmToPt(3);
       const availHeight = textY - fieldBottom;
-      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5);
+      const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5, [0, 1, 0]);
       const fieldSizes = fittedFields.sizes;
       const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
       const spacing = fittedFields.spacing;
@@ -580,7 +580,7 @@ function drawBadge(
 
     const fieldBottom = bodyBottom + mmToPt(3);
     const availHeight = textY - fieldBottom;
-    const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5);
+    const fittedFields = fitPriorityFields(fields.length, availHeight, fieldSize, 4.5, [0, 1, 0]);
     const fieldSizes = fittedFields.sizes;
     const fieldLabelSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
     const spacing = fittedFields.spacing;
