@@ -274,25 +274,42 @@ function drawBadge(
   try {
 
   if (badgeDesign) {
-    const scale = Math.min(bw / badgeDesign.width, bh / badgeDesign.height);
-    const imgW = badgeDesign.width * scale;
-    const imgH = badgeDesign.height * scale;
+    const cardAspect = badgeDesign.width / badgeDesign.height;
+    let imgW: number;
+    let imgH: number;
+    let iy: number;
+    if (isPortrait) {
+      imgW = bw;
+      imgH = Math.min(imgW / cardAspect, bh);
+      iy = badgeBottom;
+    } else {
+      const badgeAspect = bw / bh;
+      if (cardAspect > badgeAspect) {
+        imgH = bh;
+        imgW = bh * cardAspect;
+      } else {
+        imgW = bw;
+        imgH = bw / cardAspect;
+      }
+      iy = badgeBottom + (bh - imgH) / 2;
+    }
     const ix = badgeLeft + (bw - imgW) / 2;
-    const iy = badgeBottom + (bh - imgH) / 2;
     try {
       page.drawImage(badgeDesign as any, { x: ix, y: iy, width: imgW, height: imgH });
     } catch {}
 
+    const bodyTop = isPortrait
+      ? iy + imgH * (1 - ZONES.headerFraction)
+      : badgeBottom + bh - headerH;
+    const bodyBottom = isPortrait ? iy + imgH * ZONES.bandFraction : badgeBottom + bandH;
+
     page.drawRectangle({
-      x: badgeLeft, y: badgeBottom + bandH, width: bw, height: bh - headerH - bandH, color: BODY_BG,
+      x: badgeLeft, y: bodyBottom, width: bw, height: bodyTop - bodyBottom, color: BODY_BG,
     });
 
-    const bodyTop = badgeBottom + bh - headerH;
-    const bodyBottom = badgeBottom + bandH;
-
     if (isPortrait) {
-      const qrMax = mmToPt(30);
-      const qrSize = Math.min(bw * 0.55, bh * 0.385, qrMax);
+      const qrMax = bh - imgH > mmToPt(3.5) ? mmToPt(24) : mmToPt(30);
+      const qrSize = Math.min(bw * 0.55, imgH * 0.385, qrMax);
       const qrX = badgeLeft + (bw - qrSize) / 2;
       const qrY = bodyTop - mmToPt(6) - qrSize;
       drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
@@ -381,9 +398,10 @@ function drawBadge(
     const bts = 10.0;
     const btText = delegateType.toUpperCase();
     const btw = fontBold.widthOfTextAtSize(btText, bts);
+    const btBandH = isPortrait ? imgH * ZONES.bandFraction : bandH;
     page.drawText(btText, {
       x: badgeLeft + (bw - btw) / 2,
-      y: badgeBottom + (bandH - bts) / 2,
+      y: badgeBottom + (btBandH - bts) / 2,
       size: bts,
       font: fontBold as any,
       color: HEADER_TEXT,
