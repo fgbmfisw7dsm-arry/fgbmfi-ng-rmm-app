@@ -9,6 +9,14 @@ import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 25;
 
+const sourceFilterLabel = (sf: string) => sf === 'portal' ? 'Portal' : sf === 'web' ? 'Web' : sf === 'manual' ? 'Manual' : '';
+const showRegId = (d: Delegate) => d.reg_type === 'portal' || d.reg_type === 'web';
+const regBadge = (rt?: string) => {
+    if (rt === 'portal') return `<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span>`;
+    if (rt === 'web') return `<span class="inline-block px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span>`;
+    return `<span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>`;
+};
+
 const MasterListModule = () => {
     const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
     const isAdmin = isAdminRole((user?.role || '').toLowerCase()) || isEventAdminRole((user?.role || '').toLowerCase());
@@ -44,7 +52,7 @@ const MasterListModule = () => {
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
-    const [sourceFilter, setSourceFilter] = useState<'portal' | 'manual' | ''>('');
+    const [sourceFilter, setSourceFilter] = useState<'portal' | 'web' | 'manual' | ''>('');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -317,13 +325,13 @@ const MasterListModule = () => {
                     showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${d.office}</td>` : '',
                     showDelegateType ? `<td class="p-3 font-medium text-[9px]">${d.delegate_type || 'Member'}</td>` : '',
                     `<td class="p-3 font-black text-gray-500 tracking-tighter">${d.phone}</td>`,
-                    `<td class="p-3">${d.registration_source === 'portal' ? '<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span>' : '<span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>'}</td>`,
-                    `<td class="p-3 font-mono text-[9px] text-gray-500">${d.external_id || '-'}</td>`,
+                    `<td class="p-3">${regBadge(d.reg_type)}</td>`,
+                    `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (d.external_id || '-') : '-'}</td>`,
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
-            const sourceLabel = sourceFilter === 'portal' ? 'Portal' : sourceFilter === 'manual' ? 'Manual' : '';
+            const sourceLabel = sourceFilterLabel(sourceFilter);
             const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
             const container = document.createElement('div');
             container.innerHTML = tableHtml;
@@ -350,12 +358,12 @@ const MasterListModule = () => {
             const source = sourceFilter || undefined;
             const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
-            const sourceLabel = sourceFilter === 'portal' ? 'Portal' : sourceFilter === 'manual' ? 'Manual' : '';
+            const sourceLabel = sourceFilterLabel(sourceFilter);
             const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
-            cols.push('phone', 'district', 'external_id', 'registration_source');
+            cols.push('phone', 'district', 'external_id', 'reg_type');
             exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.csv`, cols);
         } catch (err) {
             console.error('CSV export error:', err);
@@ -484,9 +492,10 @@ const MasterListModule = () => {
                         <option value="">All Official Districts</option>
                         {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
-                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as 'portal' | 'manual' | '')}>
+                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as 'portal' | 'web' | 'manual' | '')}>
                         <option value="">All Sources</option>
                         <option value="portal">Portal</option>
+                        <option value="web">Web</option>
                         <option value="manual">Manual</option>
                     </select>
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
@@ -509,7 +518,7 @@ const MasterListModule = () => {
                     districtList.length === 0 ? (
                         <div className="py-20 text-center space-y-4">
                             <div className="text-5xl opacity-20">📂</div>
-                            <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No delegates {sourceFilter ? `with ${sourceFilter === 'portal' ? 'Portal' : 'Manual'} source` : 'in any district'} for this event.</div>
+                            <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No delegates {sourceFilter ? `with ${sourceFilterLabel(sourceFilter)} source` : 'in any district'} for this event.</div>
                         </div>
                     ) : (
                         districtList.map(({ district, count }) => {
@@ -524,7 +533,7 @@ const MasterListModule = () => {
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
                                     <div className={`${isOfficial ? 'bg-slate-900' : 'bg-orange-600'} text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest`}>
-                                        <span>{district} DISTRICT{sourceFilter ? ` · ${sourceFilter === 'portal' ? 'PORTAL' : 'MANUAL'}` : ''}</span>
+                                        <span>{district} DISTRICT{sourceFilter ? ` · ${sourceFilterLabel(sourceFilter).toUpperCase()}` : ''}</span>
                                         <span className="bg-white/10 px-3 py-1 rounded-full">{secTotal} RECORDS</span>
                                     </div>
                                     <div className="overflow-x-auto">
@@ -549,8 +558,8 @@ const MasterListModule = () => {
                                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                                            <td className="p-3">{d.registration_source === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
-                                                            <td className="p-3 font-mono text-[9px] text-gray-500">{d.external_id || '-'}</td>
+                                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
+                                                            <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
 <td className="p-3 no-print text-center">
                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                     {canManage && (
@@ -619,6 +628,8 @@ const MasterListModule = () => {
                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
+                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
+                                            <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
                                             <td className="p-3 no-print text-center">
                                                 <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                                 {canManage && (

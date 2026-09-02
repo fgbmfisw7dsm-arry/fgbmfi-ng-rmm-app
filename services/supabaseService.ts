@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
@@ -766,7 +766,7 @@ export const db = {
         return results;
     },
 
-    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: 'portal' | 'manual'): Promise<Delegate[]> => {
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
@@ -780,7 +780,7 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: 'portal' | 'manual'): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
             return { data: [], total: 0, page, pageSize, totalPages: 0 };
@@ -794,7 +794,8 @@ export const db = {
                 p_search: search || null, p_district: district || null,
                 p_region: region || null,
                 p_event_id: eventId || null,
-                p_registration_source: source || null,
+                p_registration_source: null,
+                p_reg_type: source || null,
             });
             if (!error && data) {
                 result = data as any;
@@ -814,9 +815,11 @@ export const db = {
                 q = q.ilike('district', normalize(district));
             }
             if (source === 'portal') {
-                q = q.eq('registration_source', 'portal');
+                q = q.eq('reg_type', 'portal');
+            } else if (source === 'web') {
+                q = q.eq('reg_type', 'web');
             } else if (source === 'manual') {
-                q = q.neq('registration_source', 'portal');
+                q = q.neq('reg_type', 'portal').neq('reg_type', 'web');
             }
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
@@ -851,7 +854,7 @@ export const db = {
         return result;
     },
 
-    getDistrictsWithDelegates: async (eventId: string, source?: 'portal' | 'manual'): Promise<{ district: string; count: number }[]> => {
+    getDistrictsWithDelegates: async (eventId: string, source?: RegType): Promise<{ district: string; count: number }[]> => {
         if (!eventId) return [];
         const counts = new Map<string, number>();
         let from = 0;
@@ -862,8 +865,9 @@ export const db = {
                 .eq('event_id', eventId)
                 .not('district', 'is', null)
                 .neq('district', '');
-            if (source === 'portal') q = q.eq('registration_source', 'portal');
-            else if (source === 'manual') q = q.neq('registration_source', 'portal');
+            if (source === 'portal') q = q.eq('reg_type', 'portal');
+            else if (source === 'web') q = q.eq('reg_type', 'web');
+            else if (source === 'manual') q = q.neq('reg_type', 'portal').neq('reg_type', 'web');
             const { data, error } = await q
                 .order('delegate_id')
                 .range(from, from + 999);
@@ -1078,7 +1082,8 @@ export const db = {
             ...payload,
             qr_hash: payload.qr_hash || generateQrHash(),
             external_id: payload.external_id || generateRegId(),
-            registration_source: payload.registration_source || 'manual'
+            registration_source: payload.registration_source || 'manual',
+            reg_type: payload.reg_type || 'manual'
         }).select().single();
         if (error) {
             if (error.code === '23505' || error.message?.includes('duplicate')) {
@@ -1155,7 +1160,7 @@ export const db = {
         return repaired;
     },
 
-    importDelegates: async (csv: string, eventId?: string, onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
+    importDelegates: async (csv: string, eventId?: string, regType: RegType = 'manual', onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = csv.trim().split('\n').map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
@@ -1172,9 +1177,9 @@ export const db = {
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
             const payload = batch.map(p => {
-                const hasRegId = !!(p[0] || '').trim();
+                const fileRegId = (p[0] || '').trim();
                 return {
-                    external_id: (p[0] && p[0].startsWith('CON26')) ? p[0] : generateRegId(),
+                    external_id: (regType !== 'manual' && fileRegId) ? fileRegId : generateRegId(),
                     title: p[1] || '',
                     first_name: p[2],
                     last_name: p[3],
@@ -1187,7 +1192,8 @@ export const db = {
                     delegate_type: p[10] || 'Member',
                     qr_hash: generateQrHash(),
                     event_id: eventId,
-                    registration_source: hasRegId ? 'portal' : 'import'
+                    registration_source: regType === 'portal' ? 'portal' : 'import',
+                    reg_type: regType
                 };
             });
 
@@ -1308,7 +1314,8 @@ export const db = {
                 rank: p[8] || 'CP',
                 office: p[9] || 'OTHER',
                 delegate_type: p[10] || 'Member',
-                registration_source: 'portal'
+                registration_source: 'portal',
+                reg_type: 'portal'
             }));
 
             const { data, error } = await supabase.rpc('reconcile_delegate_matches', {
@@ -1320,6 +1327,10 @@ export const db = {
             inserted += data?.inserted || 0;
             updated += data?.updated || 0;
             skipped += data?.skipped || 0;
+        }
+
+        if (!dryRun && (inserted > 0 || updated > 0)) {
+            await supabase.from('delegates').update({ reg_type: 'portal' }).eq('event_id', eventId).eq('registration_source', 'portal');
         }
 
         return { inserted, updated, skipped, total: inserted + updated + skipped };
@@ -2916,12 +2927,12 @@ export const db = {
         while (true) {
             const { data, error } = await supabase
                 .from('delegates')
-                .select('registration_source')
+                .select('reg_type')
                 .eq('event_id', eventId)
                 .range(from, from + 999);
             if (error || !data || data.length === 0) break;
             for (const d of data) {
-                const src = (d.registration_source as string) || 'import';
+                const src = (d.reg_type as string) || 'manual';
                 counts[src] = (counts[src] || 0) + 1;
             }
             if (data.length < 1000) break;
@@ -2930,10 +2941,12 @@ export const db = {
         return { total: Object.values(counts).reduce((a, b) => a + b, 0), counts };
     },
 
-    reclassifyDelegateSource: async (eventId: string, mode: 'portal' | 'manual', delegateIds?: string[]): Promise<number> => {
+    reclassifyDelegateSource: async (eventId: string, mode: RegType, delegateIds?: string[]): Promise<number> => {
         if (!eventId) return 0;
         await ensureEventActive(eventId);
-        let q = supabase.from('delegates').update({ registration_source: mode });
+        const updates: Partial<Delegate> = { reg_type: mode };
+        if (mode === 'portal') updates.registration_source = 'portal';
+        let q = supabase.from('delegates').update(updates);
         if (delegateIds && delegateIds.length > 0) {
             q = q.in('delegate_id', delegateIds);
         } else {

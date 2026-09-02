@@ -123,7 +123,8 @@ const ImportModule = () => {
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; portalRows?: number }} | null>(null);
+    const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -555,7 +556,7 @@ const ImportModule = () => {
             const first = parseCsvLine(line)[0] || '';
             return !!first.trim();
         }).length;
-        const importStats = { ...statsRef.current, portalRows };
+        const importStats = { ...statsRef.current, portalRows, regType };
         if (!dataToImport.trim()) {
             setFeedback({ type: 'error', msg: 'Please upload a CSV file or paste CSV data before attempting import.' });
             return;
@@ -566,7 +567,7 @@ const ImportModule = () => {
         setFeedback(null);
 
         try {
-            const result = await db.importDelegates(dataToImport, activeEventId, (inserted, updated, skipped, total) => {
+            const result = await db.importDelegates(dataToImport, activeEventId, regType, (inserted, updated, skipped, total) => {
                 setProgress({ current: inserted + updated + skipped, total });
             });
 
@@ -1144,7 +1145,7 @@ const hasFile = repairHasFile;
                                     )}
                                     {(feedback.stats?.portalRows ?? 0) > 0 && (
                                         <p className="text-[10px] font-bold text-emerald-700 uppercase">
-                                            {'\uD83D\uDCCB'} {feedback.stats?.portalRows} rows carry a RegId — tagged for the Portal filter
+                                            {'\uD83D\uDCCB'} {feedback.stats?.portalRows} rows carry a RegId — upload classified as {String(feedback.stats?.regType || 'manual').toUpperCase()}
                                         </p>
                                     )}
                                 </div>
@@ -1748,12 +1749,37 @@ const hasFile = repairHasFile;
                         placeholder="Title, FirstName, LastName, District, Chapter, Phone, Email, Rank, Office, DelegateType..."
                     />
 
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                        <label className="col-span-1 flex items-center gap-2 text-[10px] font-black uppercase text-gray-500">
+                            Upload Source / Reg Type:
+                        </label>
+                        <div className="flex flex-wrap gap-2 col-span-2">
+                            {(['manual', 'portal', 'web'] as const).map(rt => (
+                                <button
+                                    key={rt}
+                                    type="button"
+                                    onClick={() => setRegType(rt)}
+                                    disabled={loading}
+                                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border-2 transition-all disabled:opacity-50 ${
+                                        regType === rt
+                                            ? rt === 'portal' ? 'bg-emerald-600 text-white border-emerald-600'
+                                              : rt === 'web' ? 'bg-blue-600 text-white border-blue-600'
+                                              : 'bg-gray-800 text-white border-gray-800'
+                                            : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                                    }`}
+                                >
+                                    {rt === 'portal' ? 'Portal' : rt === 'web' ? 'Web' : 'Manual'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <button
                         onClick={handleImport}
                         disabled={loading || !csv.trim()}
                         className="w-full py-5 bg-blue-900 hover:bg-slate-800 text-white font-black rounded-2xl shadow-2xl transition-all disabled:opacity-50 uppercase tracking-[0.2em] text-sm mt-4 transform active:scale-95"
                     >
-                        {loading ? 'ANALYZING RECORDS...' : 'PROCEED WITH BULK IMPORT'}
+                        {loading ? 'ANALYZING RECORDS...' : `PROCEED WITH BULK IMPORT · ${regType.toUpperCase()}`}
                     </button>
                 </div>
             </div>

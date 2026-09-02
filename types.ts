@@ -29,6 +29,8 @@ export enum FinancialType {
 export const PAYMENT_MODES = ['Cash', 'POS', 'Bank Transfer', 'Cheque'] as const;
 export type PaymentMode = typeof PAYMENT_MODES[number];
 
+export type RegType = 'manual' | 'portal' | 'web';
+
 export enum UserRole {
   NATIONAL_ADMIN = 'national_admin',
   REGIONAL_ADMIN = 'regional_admin',
@@ -89,6 +91,7 @@ export interface Delegate {
   external_id: string;
   event_id: string;
   registration_source: 'import' | 'manual' | 'qr_scan' | 'portal';
+  reg_type?: RegType;
   badge_printed?: boolean;
   badge_printed_at?: string | null;
   created_at: string;

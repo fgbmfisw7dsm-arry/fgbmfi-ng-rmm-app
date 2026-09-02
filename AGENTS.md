@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.43 (Badge Printing: full-card design restricted to portrait; 8-up/10-up landscape use banner+band header/footer)
+- **Current Version:** 1.44 (Reg Type Manual/Portal/Web classification + upload-tagged source)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -724,6 +724,19 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **types.ts exception (documented):** `Delegate.registration_source` union widened additively to `'import' | 'manual' | 'qr_scan' | 'portal'` — mirrors the `Pledge.pledge_name`/`Event.event_config` precedent.
 - **Import feedback (`ImportModule.tsx`):** success banner reports "N rows carry a RegId — tagged for the Portal filter".
 - **Non-disruption:** fully additive — new CHECK value, additively-defaulted RPC param, no data deletes. `import_delegates_batch_merge` / reconcile RPCs / badge printing / reports / dedup all read/write `registration_source` independently and remain valid for the new value. Registrar free-guest RLS (`registration_source='manual'` on INSERT) is unaffected.
+
+## 42. Reg Type (Manual / Portal / Web) — user-facing registration classification (v1.44)
+
+- **Problem solved:** every delegate pays for a system-generated `CON26` external_id, so the Master List "Reg ID" column displayed a fabricated ID on manual registrations and there was no first-class "Web" (international/guest) category. Upload tagging also auto-detected `portal` by sniffing "does col 0 start with `CON26`?" — wrong for any portal/web file whose IDs use a different prefix.
+- **Design decision:** a **separate `delegates.reg_type` column** (`'manual' | 'portal' | 'web'`, `NOT NULL DEFAULT 'manual'`, CHECK) was chosen over widening `registration_source`, because `registration_source` is the deep-routed operational channel (import/manual/qr_scan/portal) that RLS (free-guest), import tagging, reconcile and dedup branch on. `reg_type` is a pure user-facing classification; the operational channel stays authoritative for auth/RLS. `registerDelegate` (New Delegate form) always stores `manual`; QR-scan rows default to `manual` via the column default; bulk uploads, portal reconcile and reclassify set it explicitly.
+- **Upload-time tagging replaces RegId sniffing:** `importDelegates(csv, eventId, regType, onProgress?)` takes the operator's explicit choice. Per row: `reg_type = regType`; `registration_source = regType==='portal' ? 'portal' : 'import'`; `external_id = (regType !== 'manual' && file col 0 non-empty) ? fileRegId : generateRegId()` — real portal/web IDs (any prefix) are preserved; manual serials are ignored.
+- **Migration `supabase_migration_reg_type.sql` (idempotent):** add `reg_type` + CHECK; backfill `UPDATE ... SET reg_type='portal' WHERE registration_source='portal'`; rebuild `get_paginated_delegates` with trailing `p_reg_type TEXT DEFAULT NULL` (`manual` = `COALESCE(reg_type,'manual') NOT IN ('portal','web')`); rebuild `import_delegates_batch_merge` to accept `reg_type` — SET on INSERT, **FILL-BLANK-ONLY on the merge UPDATE** (re-imports never clobber a corrected tag; use DataModule Reclassify to change it).
+- **Master List:** Source dropdown is now All / Portal / Web / Manual and filters `reg_type` server-side (RPC `p_reg_type` + fallback `.eq('reg_type',...)` / `.neq('portal').neq('web')` for manual). Badges: Portal emerald, Web blue, Manual gray. **Reg ID column shows `external_id` ONLY when `reg_type IN ('portal','web')`, else `-`**, uniformly in the sections table, the unified table, and PDF export; CSV exports the raw `external_id` + `reg_type`. The unified (specific-district/search) table body was **missing the Source + Reg ID cells** (headers declared them but `<tbody>` never rendered them) — added, so both table modes now render the same columns (this was also why All Districts + source "suddenly showed Reg IDs" after the v1.43 §21 fix routed those views onto the sections table).
+- **ImportModule:** "Upload Source / Reg Type" selector (Manual · Portal · Web, default Manual) above the PROCEED button; button label echoes the choice; success banner reports "N rows carry a RegId — upload classified as X".
+- **DataModule reclassify:** distribution + "Mark All as" now cover Manual / Portal / Web on `reg_type` (`reclassifyDelegateSource(eventId, mode: RegType, ids?)`; portal mode also syncs `registration_source='portal'`).
+- **types.ts additive exception:** `export type RegType = 'manual' | 'portal' | 'web'` + `Delegate.reg_type?: RegType`.
+- **Deploy order:** run `supabase_migration_reg_type.sql` BEFORE importing/tagging — without the column the RPC rebuild is a no-op against an existing deployment, but the frontend's `reg_type` inserts fail on a missing column.
+- **Backward compat:** existing rows default to `'manual'` (correct: current DB is all manual); previously `registration_source='portal'` rows are backfilled to `'portal'`.
 
 ## Code Conventions
 

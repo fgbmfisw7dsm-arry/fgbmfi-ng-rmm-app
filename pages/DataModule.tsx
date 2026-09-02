@@ -323,19 +323,21 @@ const DataModule = () => {
             const allData = await db.getAllDelegates(activeEventId);
             downloadJSON({ event_id: activeEventId, event_name: activeEvent?.name || '', exported_at: new Date().toISOString(), distribution: srcDist, delegates: allData }, `BACKUP_SOURCE_${activeEvent?.name || 'EVENT'}_${Date.now()}.json`);
             setSrcBackupReady(true);
-            alert("BACKUP DOWNLOADED: You can now mark the event's delegates as Portal or Manual.");
+            alert("BACKUP DOWNLOADED: You can now mark the event's delegates as Portal, Web or Manual.");
         } catch (e: any) {
             alert("Backup failed: " + e.message);
         }
     };
 
-    const handleSourceApply = async (mode: 'portal' | 'manual') => {
+    const handleSourceApply = async (mode: 'portal' | 'web' | 'manual') => {
         if (!activeEventId) return alert("Select an active event first.");
         if (!srcBackupReady) return alert("Download the backup first.");
-        const label = mode === 'portal' ? 'Portal' : 'Manual';
+        const label = mode === 'portal' ? 'Portal' : mode === 'web' ? 'Web' : 'Manual';
         const total = srcDist?.total || 'all';
         if (mode === 'portal') {
             if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as PORTAL (registered on the FGBMFI Portal with a RegId)?\n\nOnly do this if you are certain every record in this event came from a portal export.`) ) return;
+        } else if (mode === 'web') {
+            if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as WEB (registered via the web portal — mainly International delegates and guests)?`)) return;
         } else {
             if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as MANUAL (registered outside the portal, no RegId)?`)) return;
         }
@@ -658,11 +660,11 @@ const DataModule = () => {
                 </div>
             </div>
 
-            {/* MODULE 4: DELEGATE REGISTRATION SOURCE (Portal vs Manual) */}
+            {/* MODULE 4: DELEGATE REGISTRATION SOURCE (Reg Type: Manual / Portal / Web) */}
             <div className="bg-white rounded-3xl shadow-xl border-t-8 border-teal-500 overflow-hidden">
                 <div className="p-6 bg-teal-50 border-b border-teal-100">
                     <h3 className="text-lg font-black text-teal-900 uppercase">Delegate Registration Source</h3>
-                    <p className="text-[10px] font-bold text-teal-700 uppercase">Classify active-event delegates as <span className="text-teal-900">Portal</span> (registered on the FGBMFI Portal with a RegId) or <span className="text-teal-900">Manual</span> (registered outside the portal). Drives the Master List Source filter + CSV/PDF exports.</p>
+                    <p className="text-[10px] font-bold text-teal-700 uppercase">Classify active-event delegates as <span className="text-teal-900">Portal</span> (registered on the FGBMFI Portal with a RegId), <span className="text-blue-700">Web</span> (mainly International delegates and guests), or <span className="text-teal-900">Manual</span> (registered outside the portal). Drives the Master List Source filter + CSV/PDF exports.</p>
                 </div>
                 <div className="p-8 space-y-6">
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
@@ -696,7 +698,7 @@ const DataModule = () => {
                                     </span>
                                 ))}
                             </div>
-                            <p className="text-[9px] font-bold text-teal-700 uppercase">Portal = shown by the Portal filter. import / manual / qr_scan = shown by the Manual filter.</p>
+                            <p className="text-[9px] font-bold text-teal-700 uppercase">Reg Type drives the Master List Source filter. portal = Portal filter, web = Web filter, everything else = Manual filter.</p>
                         </div>
                     )}
 
@@ -726,6 +728,13 @@ const DataModule = () => {
                                 className="flex-1 py-4 bg-emerald-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-50"
                             >
                                 {srcApplying ? 'SAVING...' : 'Mark All as Portal'}
+                            </button>
+                            <button
+                                onClick={() => handleSourceApply('web')}
+                                disabled={srcApplying}
+                                className="flex-1 py-4 bg-blue-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-blue-700 transition-all disabled:opacity-50"
+                            >
+                                {srcApplying ? 'SAVING...' : 'Mark All as Web'}
                             </button>
                             <button
                                 onClick={() => handleSourceApply('manual')}
