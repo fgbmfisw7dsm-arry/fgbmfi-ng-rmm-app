@@ -93,7 +93,7 @@ const MasterListModule = () => {
             [district]: { ...(prev[district] || { delegates: [], page: 1, total: 0, pages: 0 }), loading: true },
         }));
         try {
-            const result = await db.getPaginatedDelegates(pageNum, PAGE_SIZE, undefined, district, undefined, activeEventId);
+            const result = await db.getPaginatedDelegates(pageNum, PAGE_SIZE, undefined, district, undefined, activeEventId, sourceFilter || undefined);
             setDistrictSections(prev => ({
                 ...prev,
                 [district]: { delegates: result.data, page: pageNum, total: result.total, pages: result.totalPages, loading: false },
@@ -105,14 +105,14 @@ const MasterListModule = () => {
                 [district]: { ...(prev[district] || { delegates: [], page: 1, total: 0, pages: 0 }), loading: false },
             }));
         }
-    }, [activeEventId]);
+    }, [activeEventId, sourceFilter]);
 
     const loadAllDistricts = useCallback(async () => {
         if (!activeEventId) return;
         setDistrictListLoading(true);
         try {
             const [list, settData] = await Promise.all([
-                db.getDistrictsWithDelegates(activeEventId),
+                db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined),
                 db.getSettings(),
             ]);
             setDistrictList(list);
@@ -131,11 +131,11 @@ const MasterListModule = () => {
             setDistrictListLoading(false);
             setListLoading(false);
         }
-    }, [activeEventId, loadDistrictPage]);
+    }, [activeEventId, sourceFilter, loadDistrictPage]);
 
     useEffect(() => {
         if (!activeEventId) return;
-        if (!selectedDistrict && !searchTerm && !sourceFilter) {
+        if (!selectedDistrict && !searchTerm) {
             loadAllDistricts();
         } else {
             loadData(1);
@@ -143,7 +143,7 @@ const MasterListModule = () => {
     }, [activeEventId, selectedDistrict, searchTerm, sourceFilter]);
 
     useEffect(() => {
-        if (!selectedDistrict && !searchTerm && !sourceFilter) return;
+        if (!selectedDistrict && !searchTerm) return;
         const delegateSub = supabase.channel(`master_list_sync_${activeEventId}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData(pageRef.current))
           .subscribe();
@@ -195,9 +195,9 @@ const MasterListModule = () => {
             alert("SUCCESS: Delegate record updated and normalized.");
             const editedDistrict = (editForm.district || '').trim();
             setEditingId(null);
-            if (!selectedDistrict && !searchTerm && !sourceFilter) {
+            if (!selectedDistrict && !searchTerm) {
                 loadDistrictPage(editedDistrict, districtSections[editedDistrict]?.page || 1);
-                db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
+                db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined).then(setDistrictList).catch(() => {});
             } else {
                 await loadData();
             }
@@ -229,8 +229,8 @@ const MasterListModule = () => {
         try {
             await db.deleteDelegate(d.delegate_id, activeEventId);
             alert(`DELETED: ${name}`);
-            if (!selectedDistrict && !searchTerm && !sourceFilter) {
-                db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
+            if (!selectedDistrict && !searchTerm) {
+                db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined).then(setDistrictList).catch(() => {});
                 loadDistrictPage(d.district, districtSections[d.district]?.page || 1);
             } else {
                 await loadData();
@@ -249,7 +249,7 @@ const MasterListModule = () => {
             alert(`SUCCESS: Records merged into ${keep.first_name} ${keep.last_name}. Check-ins, session responses, and badge history were preserved.`);
             setEditingId(null);
             setMergePrompt(null);
-            if (!selectedDistrict && !searchTerm && !sourceFilter) {
+            if (!selectedDistrict && !searchTerm) {
                 loadAllDistricts();
             } else {
                 await loadData();
@@ -492,7 +492,7 @@ const MasterListModule = () => {
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
                     <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
-                    <button onClick={() => loadData()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
+                    <button onClick={() => (!selectedDistrict && !searchTerm ? loadAllDistricts() : loadData())} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
                 </div>
             </div>
 
@@ -502,14 +502,14 @@ const MasterListModule = () => {
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
-                {((!selectedDistrict && !searchTerm && !sourceFilter) ? districtListLoading : listLoading) ? (
+                {((!selectedDistrict && !searchTerm) ? districtListLoading : listLoading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
-                ) : !selectedDistrict && !searchTerm && !sourceFilter ? (
+                ) : !selectedDistrict && !searchTerm ? (
                     /* --- MULTI-DISTRICT VIEW: per-district sections with independent pagination --- */
                     districtList.length === 0 ? (
                         <div className="py-20 text-center space-y-4">
                             <div className="text-5xl opacity-20">📂</div>
-                            <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No delegates in any district for this event.</div>
+                            <div className="text-gray-400 font-black uppercase tracking-widest text-sm">No delegates {sourceFilter ? `with ${sourceFilter === 'portal' ? 'Portal' : 'Manual'} source` : 'in any district'} for this event.</div>
                         </div>
                     ) : (
                         districtList.map(({ district, count }) => {
@@ -524,7 +524,7 @@ const MasterListModule = () => {
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
                                     <div className={`${isOfficial ? 'bg-slate-900' : 'bg-orange-600'} text-white p-3 font-black flex justify-between items-center uppercase text-[10px] tracking-widest`}>
-                                        <span>{district} DISTRICT</span>
+                                        <span>{district} DISTRICT{sourceFilter ? ` · ${sourceFilter === 'portal' ? 'PORTAL' : 'MANUAL'}` : ''}</span>
                                         <span className="bg-white/10 px-3 py-1 rounded-full">{secTotal} RECORDS</span>
                                     </div>
                                     <div className="overflow-x-auto">

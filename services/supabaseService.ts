@@ -851,17 +851,20 @@ export const db = {
         return result;
     },
 
-    getDistrictsWithDelegates: async (eventId: string): Promise<{ district: string; count: number }[]> => {
+    getDistrictsWithDelegates: async (eventId: string, source?: 'portal' | 'manual'): Promise<{ district: string; count: number }[]> => {
         if (!eventId) return [];
         const counts = new Map<string, number>();
         let from = 0;
         while (true) {
-            const { data, error } = await supabase
+            let q = supabase
                 .from('delegates')
                 .select('district')
                 .eq('event_id', eventId)
                 .not('district', 'is', null)
-                .neq('district', '')
+                .neq('district', '');
+            if (source === 'portal') q = q.eq('registration_source', 'portal');
+            else if (source === 'manual') q = q.neq('registration_source', 'portal');
+            const { data, error } = await q
                 .order('delegate_id')
                 .range(from, from + 999);
             if (error || !data || data.length === 0) break;
