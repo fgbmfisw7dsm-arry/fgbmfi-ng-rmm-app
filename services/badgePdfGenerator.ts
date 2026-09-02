@@ -273,7 +273,7 @@ function drawBadge(
 
   try {
 
-  if (badgeDesign) {
+  if (badgeDesign && isPortrait) {
     const cardAspect = badgeDesign.width / badgeDesign.height;
     let imgW: number;
     let imgH: number;
