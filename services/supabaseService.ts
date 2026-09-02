@@ -11,6 +11,8 @@ const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
+export const ALL_DISTRICTS_SENTINEL = '__ALL_DISTRICTS__';
+
 const normNameKey = (val?: string) => (val || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
 
 const cleanDistrict = (raw: string): string => {
@@ -1929,8 +1931,9 @@ export const db = {
     },
 
     deleteDelegatesByDistrict: async (district: string, eventId?: string) => { 
-        let q = supabase.from('delegates').delete().ilike('district', normalize(district));
-        if (eventId) q = q.eq('event_id', eventId);
+        if (!eventId) return 0;
+        let q = supabase.from('delegates').delete().eq('event_id', eventId);
+        if (district !== ALL_DISTRICTS_SENTINEL) q = q.ilike('district', normalize(district));
         const { data } = await q.select();
         return data?.length || 0; 
     },

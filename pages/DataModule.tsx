@@ -1,9 +1,12 @@
 
 import React, { useState, useEffect, useContext } from 'react';
-import { db } from '../services/supabaseService';
+import { db, ALL_DISTRICTS_SENTINEL } from '../services/supabaseService';
 import { AppContext } from '../context/AppContext';
 import { SystemSettings, Event, isAdminRole } from '../types';
 import { downloadJSON } from '../services/utils';
+
+const isAllDistricts = (d: string) => d === ALL_DISTRICTS_SENTINEL;
+const districtLabel = (d: string) => isAllDistricts(d) ? 'ALL DISTRICTS' : d.toUpperCase();
 
 const DataModule = () => {
     const { activeEventId, user } = useContext(AppContext);
@@ -203,10 +206,10 @@ const DataModule = () => {
         setLoading(true);
         try {
             const allData = await db.getAllDelegates(activeEventId);
-            const districtData = allData.filter(d => (d.district || '').trim() === selectedDistrict.trim());
-            downloadJSON(districtData, `BACKUP_DISTRICT_${selectedDistrict}_${Date.now()}.json`);
+            const districtData = isAllDistricts(selectedDistrict) ? allData : allData.filter(d => (d.district || '').trim() === selectedDistrict.trim());
+            downloadJSON(districtData, isAllDistricts(selectedDistrict) ? `BACKUP_ALL_DISTRICTS_${Date.now()}.json` : `BACKUP_DISTRICT_${selectedDistrict}_${Date.now()}.json`);
             setDistrictBackupReady(true);
-            alert(`BACKUP DOWNLOADED for ${selectedDistrict}. You can now proceed to Step 2.`);
+            alert(`BACKUP DOWNLOADED for ${districtLabel(selectedDistrict)}. You can now proceed to Step 2.`);
         } catch (e: any) {
             alert("Backup failed: " + e.message);
         } finally {
@@ -215,13 +218,14 @@ const DataModule = () => {
     };
 
     const handleDeleteDistrict = async () => {
-        if (districtConfirmText !== `DELETE ${selectedDistrict.toUpperCase()}`) return alert(`Please type 'DELETE ${selectedDistrict.toUpperCase()}' exactly.`);
+        if (districtConfirmText !== `DELETE ${districtLabel(selectedDistrict)}`) return alert(`Please type 'DELETE ${districtLabel(selectedDistrict)}' exactly.`);
         if (!activeEventId) return alert("Select an active event first.");
+        if (isAllDistricts(selectedDistrict) && !window.confirm("FINAL WARNING: This will permanently wipe ALL delegates and their history from the active event. Continue?")) return;
         
         setLoading(true);
         try {
-            const count = await db.deleteDelegatesByDistrict(selectedDistrict, activeEventId);
-            alert(`SUCCESS: Removed ${count} delegates and their history from ${activeEvent?.name || 'active event'}.`);
+            const count = await db.deleteDelegatesByDistrict(isAllDistricts(selectedDistrict) ? ALL_DISTRICTS_SENTINEL : selectedDistrict, activeEventId);
+            alert(`${isAllDistricts(selectedDistrict) ? 'ALL DISTRICTS' : selectedDistrict.toUpperCase()}: Successfully removed ${count} delegates and their history from ${activeEvent?.name || 'active event'}.`);
             setDistrictBackupReady(false);
             setDistrictConfirmText('');
             setSelectedDistrict('');
@@ -509,7 +513,7 @@ const DataModule = () => {
                 <div className="bg-white rounded-3xl shadow-xl border-t-8 border-red-600 overflow-hidden flex flex-col">
                     <div className="p-6 bg-red-50 border-b border-red-100">
                         <h3 className="text-lg font-black text-red-900 uppercase">District Master Purge</h3>
-                        <p className="text-[10px] font-bold text-red-700 uppercase">Remove all delegates from a district within the active event</p>
+                        <p className="text-[10px] font-bold text-red-700 uppercase">Remove all delegates from a district (or all districts) within the active event</p>
                     </div>
                     <div className="p-8 flex-1 space-y-6">
                         <div className="space-y-2">
@@ -521,6 +525,7 @@ const DataModule = () => {
                                 disabled={loading}
                             >
                                 <option value="">-- Select District --</option>
+                                <option value={ALL_DISTRICTS_SENTINEL} className="bg-red-50 text-red-700">⚠ All Districts (Entire Event)</option>
                                 {settings?.districts.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                         </div>
@@ -535,7 +540,7 @@ const DataModule = () => {
                                 disabled={loading || !selectedDistrict}
                                 className="w-full py-4 bg-slate-800 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-30"
                             >
-                                {districtBackupReady ? '✅ List Exported' : 'Backup District Records'}
+                                {districtBackupReady ? '✅ Delegate List Exported' : isAllDistricts(selectedDistrict) ? 'Backup All District Records' : 'Backup District Records'}
                             </button>
                         </div>
 
@@ -543,21 +548,21 @@ const DataModule = () => {
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
                                     <span className="bg-red-100 w-5 h-5 rounded-full flex items-center justify-center">2</span> 
-                                    Type "DELETE {selectedDistrict.toUpperCase()}"
+                                    Type "DELETE {districtLabel(selectedDistrict)}"
                                 </label>
                                 <input 
                                     className="w-full p-4 border-2 border-red-100 rounded-xl bg-red-50/30 font-black text-center text-red-600 focus:ring-4 focus:ring-red-500 outline-none"
                                     value={districtConfirmText}
                                     onChange={e => setDistrictConfirmText(e.target.value)}
-                                    placeholder="Enter text..."
+                                    placeholder={`DELETE ${districtLabel(selectedDistrict)}`}
                                 />
                             </div>
                             <button 
                                 onClick={handleDeleteDistrict}
-                                disabled={loading || districtConfirmText !== `DELETE ${selectedDistrict.toUpperCase()}`}
+                                disabled={loading || districtConfirmText !== `DELETE ${districtLabel(selectedDistrict)}`}
                                 className="w-full py-5 bg-red-600 text-white font-black rounded-xl uppercase text-sm tracking-[0.2em] shadow-2xl hover:bg-red-700 disabled:opacity-10"
                             >
-                                {loading ? 'DELETING...' : `PURGE ${selectedDistrict.toUpperCase()}`}
+                                {loading ? 'DELETING...' : `PURGE ${districtLabel(selectedDistrict)}`}
                             </button>
                         </div>
                     </div>
