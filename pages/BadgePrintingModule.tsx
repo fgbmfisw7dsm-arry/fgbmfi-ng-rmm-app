@@ -73,6 +73,7 @@ const BadgePrintingModule = () => {
   const [batchesPerRun, setBatchesPerRun] = useState(1);
   const [skipAlreadyPrinted, setSkipAlreadyPrinted] = useState(true);
   const [previewCount, setPreviewCount] = useState(0);
+  const [allStatusesCount, setAllStatusesCount] = useState(0);
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
@@ -145,7 +146,7 @@ const BadgePrintingModule = () => {
     if (!activeEventId) return;
     const activeFilters: BadgeFilter = {
       ...filters,
-      badgePrintedStatus: skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all'),
+      badgePrintedStatus: filters.badgePrintedStatus || 'all',
       selectedIds: selectedDelegates.length
         ? selectedDelegates.map((d) => d.delegate_id)
         : undefined,
@@ -153,6 +154,7 @@ const BadgePrintingModule = () => {
 
     if (activeFilters.selectedIds?.length) {
       setPreviewCount(activeFilters.selectedIds.length);
+      setAllStatusesCount(activeFilters.selectedIds.length);
     } else if (
       !activeFilters.district &&
       !activeFilters.chapter &&
@@ -164,6 +166,7 @@ const BadgePrintingModule = () => {
       activeFilters.badgePrintedStatus === 'all'
     ) {
       setPreviewCount(0);
+      setAllStatusesCount(0);
     } else {
       const count = await db.getFilteredDelegateCount(activeEventId, activeFilters);
       setPreviewCount(count);
@@ -173,8 +176,14 @@ const BadgePrintingModule = () => {
       } else {
         setPreviewDelegates([]);
       }
+      const scopeTotal = await db.getFilteredDelegateCount(activeEventId, {
+        ...activeFilters,
+        badgePrintedStatus: 'all',
+        selectedIds: undefined,
+      });
+      setAllStatusesCount(scopeTotal);
     }
-  }, [activeEventId, filters, selectedDelegates, skipAlreadyPrinted]);
+  }, [activeEventId, filters, selectedDelegates]);
 
   useEffect(() => {
     const timeout = setTimeout(handlePreviewCount, 300);
@@ -203,6 +212,7 @@ const BadgePrintingModule = () => {
     setSearchQuery('');
     setSearchResults([]);
     setPreviewCount(0);
+    setAllStatusesCount(0);
   };
 
   const handleSearchDelegates = useCallback(
@@ -288,7 +298,7 @@ const BadgePrintingModule = () => {
     let delegatesToPrint: Delegate[] = allSelected;
 
     if (!allSelected.length) {
-      const effectiveStatus = skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all');
+      const effectiveStatus = filters.badgePrintedStatus || 'all';
       const activeFilters: BadgeFilter = { ...filters, badgePrintedStatus: effectiveStatus };
       const hasFilters =
         activeFilters.district ||
@@ -333,8 +343,8 @@ const BadgePrintingModule = () => {
     if (!delegatesToPrint.length) {
       setFeedback({
         type: 'error',
-        msg: skipAlreadyPrinted
-          ? 'No unprinted delegates match. All badges may already be printed — disable "Skip Already Printed" to reprint.'
+        msg: (filters.badgePrintedStatus || 'not_printed') === 'not_printed'
+          ? 'No unprinted delegates match. All badges may already be printed — switch the Badge Status filter to "All Statuses" to reprint.'
           : 'No delegates match the selected filters.',
       });
       return;
@@ -427,7 +437,7 @@ const BadgePrintingModule = () => {
         try {
           const filtersForBatch: BadgeFilter = {
             ...filters,
-            badgePrintedStatus: skipAlreadyPrinted ? 'not_printed' : (filters.badgePrintedStatus || 'all'),
+            badgePrintedStatus: filters.badgePrintedStatus || 'all',
             selectedIds: selectedDelegates.length
               ? selectedDelegates.map((d) => d.delegate_id)
               : undefined,
@@ -906,7 +916,6 @@ const BadgePrintingModule = () => {
                 <select
                   className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
                   value={filters.badgePrintedStatus || 'all'}
-                  disabled={skipAlreadyPrinted}
                   onChange={(e) =>
                     setFilters((f) => ({
                       ...f,
@@ -929,15 +938,19 @@ const BadgePrintingModule = () => {
                   <input
                     type="checkbox"
                     checked={skipAlreadyPrinted}
-                    onChange={(e) => setSkipAlreadyPrinted(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSkipAlreadyPrinted(checked);
+                      setFilters((f) => ({ ...f, badgePrintedStatus: checked ? 'not_printed' : 'all' }));
+                    }}
                     className="rounded"
                   />
                   Skip Already Printed
                 </label>
                 <span className="text-[8px] text-gray-400 leading-tight">
                   {skipAlreadyPrinted
-                    ? 'Guard active: only badges marked "Not Printed" are generated.'
-                    : 'Override: reprints include badges already marked as printed.'}
+                    ? 'Only badges marked "Not Printed" are counted. Switch Badge Status to "All Statuses" to see the full total.'
+                    : 'Reprints include badges already marked as printed.'}
                 </span>
               </div>
             </div>
@@ -1079,6 +1092,11 @@ const BadgePrintingModule = () => {
                   ))}
                 </div>
               )}
+              {selectedDelegates.length > 0 && (
+                <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[9px] font-bold text-amber-700 uppercase tracking-wide">
+                  {selectedDelegates.length} manually selected — District / Chapter / Status filters are ignored for Generate
+                </div>
+              )}
             </div>
           </div>
 
@@ -1162,6 +1180,23 @@ const BadgePrintingModule = () => {
             pageCount={getBadgePageCount(previewCount, layout)}
           />
 
+          {allStatusesCount > 0 && allStatusesCount !== previewCount && (
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[10px] font-black text-blue-900 uppercase tracking-widest">
+                  Scope Total
+                </p>
+                <p className="text-[10px] font-bold text-gray-600 text-right">
+                  <span className="text-blue-700">{allStatusesCount}</span> delegates match this{' '}
+                  {filters.district && <span className="capitalize">{filters.district}</span>}
+                  {filters.chapter && <> · {filters.chapter}</>}
+                  {!filters.district && !filters.chapter && 'selection'}
+                  {' '}· <span className="text-amber-600">{allStatusesCount - previewCount}</span> already printed
+                </p>
+              </div>
+            </div>
+          )}
+
           {previewDelegates.length > 0 && (
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h2 className="text-[10px] font-black text-gray-400 uppercase mb-3 tracking-[0.2em]">
@@ -1228,7 +1263,7 @@ const BadgePrintingModule = () => {
                 : previewCount === 0
                 ? 'Generate 0 Badges'
                 : previewCount <= batchSize * batchesPerRun
-                ? `Generate ${previewCount} Badges`
+                ? `Generate ${previewCount} Badges` + (allStatusesCount > previewCount ? ` (of ${allStatusesCount} total)` : '')
                 : `Generate ${Math.min(previewCount, batchSize * batchesPerRun)} of ${previewCount} Badges`}
             </button>
           </div>
