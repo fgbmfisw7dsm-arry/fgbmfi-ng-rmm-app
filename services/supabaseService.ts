@@ -2847,13 +2847,6 @@ export const db = {
         if (!eventId) return 0;
         if (filters.selectedIds?.length) return filters.selectedIds.length;
 
-        if (!filters.district && !filters.chapter && !filters.delegateType &&
-            !filters.surnameFrom && !filters.surnameTo &&
-            !filters.delegateNumberFrom && !filters.delegateNumberTo &&
-            filters.badgePrintedStatus !== 'printed' && filters.badgePrintedStatus !== 'not_printed') {
-            return 0;
-        }
-
         let q = supabase.from('delegates').select('delegate_id', { count: 'exact' }).eq('event_id', eventId);
 
         if (filters.district) q = q.ilike('district', `%${normalize(filters.district)}%`);

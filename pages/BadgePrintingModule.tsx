@@ -155,18 +155,6 @@ const BadgePrintingModule = () => {
     if (activeFilters.selectedIds?.length) {
       setPreviewCount(activeFilters.selectedIds.length);
       setAllStatusesCount(activeFilters.selectedIds.length);
-    } else if (
-      !activeFilters.district &&
-      !activeFilters.chapter &&
-      !activeFilters.delegateType &&
-      !activeFilters.surnameFrom &&
-      !activeFilters.surnameTo &&
-      !activeFilters.delegateNumberFrom &&
-      !activeFilters.delegateNumberTo &&
-      activeFilters.badgePrintedStatus === 'all'
-    ) {
-      setPreviewCount(0);
-      setAllStatusesCount(0);
     } else {
       const count = await db.getFilteredDelegateCount(activeEventId, activeFilters);
       setPreviewCount(count);
@@ -313,7 +301,9 @@ const BadgePrintingModule = () => {
       if (!hasFilters) {
         setFeedback({
           type: 'error',
-          msg: 'Please apply at least one filter or select delegates manually before generating.',
+          msg: activeFilters.badgePrintedStatus === 'all'
+            ? 'Select a District or Chapter to Generate badges for All Statuses.'
+            : 'Please apply at least one filter or select delegates manually before generating.',
         });
         return;
       }
