@@ -47,6 +47,13 @@ const DataModule = () => {
     const [junkBackupReady, setJunkBackupReady] = useState(false);
     const [junkDeleting, setJunkDeleting] = useState(false);
 
+    // State for Delegate Registration Source (Portal vs Manual)
+    const [srcDist, setSrcDist] = useState<{ total: number; counts: Record<string, number> } | null>(null);
+    const [srcScanning, setSrcScanning] = useState(false);
+    const [srcBackupReady, setSrcBackupReady] = useState(false);
+    const [srcApplying, setSrcApplying] = useState(false);
+    const [srcResult, setSrcResult] = useState<string | null>(null);
+
     // State for Reconcile Title Variants
     const [tvClusters, setTvClusters] = useState<any[]>([]);
     const [tvScanning, setTvScanning] = useState(false);
@@ -284,6 +291,61 @@ const DataModule = () => {
             alert("Delete failed: " + e.message);
         } finally {
             setJunkDeleting(false);
+        }
+    };
+
+    // --- LOGIC: DELEGATE REGISTRATION SOURCE RECLASSIFICATION (Portal vs Manual) ---
+    const handleSourceScan = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        setSrcScanning(true);
+        setSrcDist(null);
+        setSrcResult(null);
+        setSrcBackupReady(false);
+        try {
+            const dist = await db.getSourceDistribution(activeEventId);
+            setSrcDist(dist);
+            if (dist.total === 0) alert("No delegates found in the active event.");
+        } catch (e: any) {
+            alert("Scan failed: " + (e.message || "Database error."));
+        } finally {
+            setSrcScanning(false);
+        }
+    };
+
+    const handleSourceBackup = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        if (!srcDist) return alert("Run a scan first.");
+        try {
+            const allData = await db.getAllDelegates(activeEventId);
+            downloadJSON({ event_id: activeEventId, event_name: activeEvent?.name || '', exported_at: new Date().toISOString(), distribution: srcDist, delegates: allData }, `BACKUP_SOURCE_${activeEvent?.name || 'EVENT'}_${Date.now()}.json`);
+            setSrcBackupReady(true);
+            alert("BACKUP DOWNLOADED: You can now mark the event's delegates as Portal or Manual.");
+        } catch (e: any) {
+            alert("Backup failed: " + e.message);
+        }
+    };
+
+    const handleSourceApply = async (mode: 'portal' | 'manual') => {
+        if (!activeEventId) return alert("Select an active event first.");
+        if (!srcBackupReady) return alert("Download the backup first.");
+        const label = mode === 'portal' ? 'Portal' : 'Manual';
+        const total = srcDist?.total || 'all';
+        if (mode === 'portal') {
+            if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as PORTAL (registered on the FGBMFI Portal with a RegId)?\n\nOnly do this if you are certain every record in this event came from a portal export.`) ) return;
+        } else {
+            if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as MANUAL (registered outside the portal, no RegId)?`)) return;
+        }
+        setSrcApplying(true);
+        setSrcResult(null);
+        try {
+            const count = await db.reclassifyDelegateSource(activeEventId, mode);
+            setSrcResult(`Reclassified ${count} delegate(s) as ${label}.`);
+            setSrcBackupReady(false);
+            alert(`SUCCESS: ${count} delegate(s) reclassified as ${label}.`);
+        } catch (e: any) {
+            alert("Failed: " + (e.message || "Database error."));
+        } finally {
+            setSrcApplying(false);
         }
     };
 
@@ -588,6 +650,91 @@ const DataModule = () => {
                             {junkDeleting ? 'DELETING...' : `DELETE ${junkRows.length} JUNK ROW(S)`}
                         </button>
                     </div>
+                </div>
+            </div>
+
+            {/* MODULE 4: DELEGATE REGISTRATION SOURCE (Portal vs Manual) */}
+            <div className="bg-white rounded-3xl shadow-xl border-t-8 border-teal-500 overflow-hidden">
+                <div className="p-6 bg-teal-50 border-b border-teal-100">
+                    <h3 className="text-lg font-black text-teal-900 uppercase">Delegate Registration Source</h3>
+                    <p className="text-[10px] font-bold text-teal-700 uppercase">Classify active-event delegates as <span className="text-teal-900">Portal</span> (registered on the FGBMFI Portal with a RegId) or <span className="text-teal-900">Manual</span> (registered outside the portal). Drives the Master List Source filter + CSV/PDF exports.</p>
+                </div>
+                <div className="p-8 space-y-6">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-black text-gray-400 uppercase block mb-1">Target Event:</span>
+                        <span className="text-xl font-black text-blue-900 uppercase">{activeEvent?.name || 'NO EVENT SELECTED'}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span>
+                            Scan Source Distribution
+                        </label>
+                        <button
+                            onClick={handleSourceScan}
+                            disabled={srcScanning || !activeEventId}
+                            className="w-full py-4 bg-teal-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-teal-700 transition-all disabled:opacity-30"
+                        >
+                            {srcScanning ? 'SCANNING...' : '🔍 Scan Registration Sources'}
+                        </button>
+                    </div>
+
+                    {srcDist && (
+                        <div className="bg-teal-50/60 rounded-xl border border-teal-100 p-4 space-y-3">
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-black text-teal-900 uppercase">{srcDist.total} Delegates</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries(srcDist.counts).map(([key, count]) => (
+                                    <span key={key} className="inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase bg-white border border-teal-200 text-teal-800">
+                                        {key}: {count}
+                                    </span>
+                                ))}
+                            </div>
+                            <p className="text-[9px] font-bold text-teal-700 uppercase">Portal = shown by the Portal filter. import / manual / qr_scan = shown by the Manual filter.</p>
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">2</span>
+                            Backup Before Reclassify
+                        </label>
+                        <button
+                            onClick={handleSourceBackup}
+                            disabled={!srcDist || srcApplying}
+                            className="w-full py-4 bg-slate-800 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-30"
+                        >
+                            {srcBackupReady ? '✅ Backup Downloaded' : 'Generate & Download Backup'}
+                        </button>
+                    </div>
+
+                    <div className={`space-y-2 transition-all duration-500 ${srcBackupReady ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
+                        <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
+                            <span className="bg-red-100 w-5 h-5 rounded-full flex items-center justify-center">3</span>
+                            Mark All Delegates
+                        </label>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => handleSourceApply('portal')}
+                                disabled={srcApplying}
+                                className="flex-1 py-4 bg-emerald-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-50"
+                            >
+                                {srcApplying ? 'SAVING...' : 'Mark All as Portal'}
+                            </button>
+                            <button
+                                onClick={() => handleSourceApply('manual')}
+                                disabled={srcApplying}
+                                className="flex-1 py-4 bg-slate-700 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
+                            >
+                                {srcApplying ? 'SAVING...' : 'Mark All as Manual'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {srcResult && (
+                        <span className="block text-[11px] font-black text-emerald-700 uppercase">Done — {srcResult}</span>
+                    )}
                 </div>
             </div>
 

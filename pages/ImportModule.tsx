@@ -123,7 +123,7 @@ const ImportModule = () => {
     const [csv, setCsv] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number }} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; portalRows?: number }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -551,7 +551,11 @@ const ImportModule = () => {
 
     const handleImport = async () => {
         const dataToImport = mappedCsvData;
-        const importStats = { ...statsRef.current };
+        const portalRows = dataToImport.trim().split('\n').filter(line => {
+            const first = parseCsvLine(line)[0] || '';
+            return !!first.trim();
+        }).length;
+        const importStats = { ...statsRef.current, portalRows };
         if (!dataToImport.trim()) {
             setFeedback({ type: 'error', msg: 'Please upload a CSV file or paste CSV data before attempting import.' });
             return;
@@ -1136,6 +1140,11 @@ const hasFile = repairHasFile;
                                     {(feedback.stats?.whatsappFilled ?? 0) > 0 && (
                                         <p className="text-[10px] font-bold text-purple-700 uppercase">
                                             {'\uD83D\uDCF2'} {feedback.stats?.whatsappFilled} phones extracted from WhatsApp columns
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.portalRows ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-emerald-700 uppercase">
+                                            {'\uD83D\uDCCB'} {feedback.stats?.portalRows} rows carry a RegId — tagged for the Portal filter
                                         </p>
                                     )}
                                 </div>

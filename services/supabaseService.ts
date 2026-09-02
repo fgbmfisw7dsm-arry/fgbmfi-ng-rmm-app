@@ -764,12 +764,12 @@ export const db = {
         return results;
     },
 
-    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string): Promise<Delegate[]> => {
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: 'portal' | 'manual'): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
         while (true) {
-            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId);
+            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source);
             if (!paginated.data || paginated.data.length === 0) break;
             results.push(...paginated.data);
             if (paginated.data.length < pageSize) break;
@@ -778,7 +778,7 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: 'portal' | 'manual'): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
             return { data: [], total: 0, page, pageSize, totalPages: 0 };
@@ -792,6 +792,7 @@ export const db = {
                 p_search: search || null, p_district: district || null,
                 p_region: region || null,
                 p_event_id: eventId || null,
+                p_registration_source: source || null,
             });
             if (!error && data) {
                 result = data as any;
@@ -809,6 +810,11 @@ export const db = {
                 q = q.ilike('district', `${normalize(region)}%`);
             } else if (district) {
                 q = q.ilike('district', normalize(district));
+            }
+            if (source === 'portal') {
+                q = q.eq('registration_source', 'portal');
+            } else if (source === 'manual') {
+                q = q.neq('registration_source', 'portal');
             }
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
@@ -1160,22 +1166,25 @@ export const db = {
 
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
-            const payload = batch.map(p => ({
-                external_id: (p[0] && p[0].startsWith('CON26')) ? p[0] : generateRegId(),
-                title: p[1] || '',
-                first_name: p[2],
-                last_name: p[3],
-                district: cleanDistrict(p[4]),
-                chapter: p[5],
-                phone: p[6],
-                email: p[7],
-                rank: p[8] || 'CP',
-                office: p[9] || 'OTHER',
-                delegate_type: p[10] || 'Member',
-                qr_hash: generateQrHash(),
-                event_id: eventId,
-                registration_source: 'import'
-            }));
+            const payload = batch.map(p => {
+                const hasRegId = !!(p[0] || '').trim();
+                return {
+                    external_id: (p[0] && p[0].startsWith('CON26')) ? p[0] : generateRegId(),
+                    title: p[1] || '',
+                    first_name: p[2],
+                    last_name: p[3],
+                    district: cleanDistrict(p[4]),
+                    chapter: p[5],
+                    phone: p[6],
+                    email: p[7],
+                    rank: p[8] || 'CP',
+                    office: p[9] || 'OTHER',
+                    delegate_type: p[10] || 'Member',
+                    qr_hash: generateQrHash(),
+                    event_id: eventId,
+                    registration_source: hasRegId ? 'portal' : 'import'
+                };
+            });
 
             try {
                 const { data, error } = await supabase.rpc('import_delegates_batch_merge', {
@@ -1283,6 +1292,7 @@ export const db = {
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
             const payload = batch.map(p => ({
+                external_id: (p[0] && p[0].startsWith('CON26')) ? p[0] : generateRegId(),
                 title: p[1] || '',
                 first_name: p[2],
                 last_name: p[3],
@@ -1293,7 +1303,7 @@ export const db = {
                 rank: p[8] || 'CP',
                 office: p[9] || 'OTHER',
                 delegate_type: p[10] || 'Member',
-                registration_source: 'import'
+                registration_source: 'portal'
             }));
 
             const { data, error } = await supabase.rpc('reconcile_delegate_matches', {
@@ -2891,5 +2901,42 @@ export const db = {
 
         const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(fileName);
         return urlData.publicUrl;
+    },
+
+    getSourceDistribution: async (eventId: string): Promise<{ total: number; counts: Record<string, number> }> => {
+        if (!eventId) return { total: 0, counts: {} };
+        const counts: Record<string, number> = {};
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('delegates')
+                .select('registration_source')
+                .eq('event_id', eventId)
+                .range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            for (const d of data) {
+                const src = (d.registration_source as string) || 'import';
+                counts[src] = (counts[src] || 0) + 1;
+            }
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return { total: Object.values(counts).reduce((a, b) => a + b, 0), counts };
+    },
+
+    reclassifyDelegateSource: async (eventId: string, mode: 'portal' | 'manual', delegateIds?: string[]): Promise<number> => {
+        if (!eventId) return 0;
+        await ensureEventActive(eventId);
+        let q = supabase.from('delegates').update({ registration_source: mode });
+        if (delegateIds && delegateIds.length > 0) {
+            q = q.in('delegate_id', delegateIds);
+        } else {
+            q = q.eq('event_id', eventId);
+        }
+        const { data, error } = await q.select('delegate_id');
+        if (error) throw error;
+        const count = data?.length || 0;
+        recordAuditLog(eventId, 'delegate_source_reclassify', `Reclassified ${count} delegates as ${mode}`, null, 'event', eventId, { mode, count });
+        return count;
     },
 };

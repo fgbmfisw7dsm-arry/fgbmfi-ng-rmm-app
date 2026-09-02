@@ -88,7 +88,7 @@ export interface Delegate {
   qr_hash: string;
   external_id: string;
   event_id: string;
-  registration_source: 'import' | 'manual' | 'qr_scan';
+  registration_source: 'import' | 'manual' | 'qr_scan' | 'portal';
   badge_printed?: boolean;
   badge_printed_at?: string | null;
   created_at: string;

@@ -44,6 +44,7 @@ const MasterListModule = () => {
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
+    const [sourceFilter, setSourceFilter] = useState<'portal' | 'manual' | ''>('');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -69,7 +70,7 @@ const MasterListModule = () => {
         setListLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);
@@ -83,7 +84,7 @@ const MasterListModule = () => {
         } finally {
             setListLoading(false);
         }
-    }, [searchTerm, selectedDistrict, activeEventId]);
+    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter]);
 
     const loadDistrictPage = useCallback(async (district: string, pageNum: number) => {
         if (!activeEventId) return;
@@ -134,15 +135,15 @@ const MasterListModule = () => {
 
     useEffect(() => {
         if (!activeEventId) return;
-        if (!selectedDistrict && !searchTerm) {
+        if (!selectedDistrict && !searchTerm && !sourceFilter) {
             loadAllDistricts();
         } else {
             loadData(1);
         }
-    }, [activeEventId, selectedDistrict, searchTerm]);
+    }, [activeEventId, selectedDistrict, searchTerm, sourceFilter]);
 
     useEffect(() => {
-        if (!selectedDistrict && !searchTerm) return;
+        if (!selectedDistrict && !searchTerm && !sourceFilter) return;
         const delegateSub = supabase.channel(`master_list_sync_${activeEventId}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData(pageRef.current))
           .subscribe();
@@ -150,7 +151,7 @@ const MasterListModule = () => {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => loadData(pageRef.current))
           .subscribe();
         return () => { supabase.removeChannel(delegateSub); settingsSub.unsubscribe(); };
-    }, [loadData, selectedDistrict, searchTerm]);
+    }, [loadData, selectedDistrict, searchTerm, sourceFilter]);
 
     const officialDistricts = useMemo(() => {
         return (settings?.districts || [])
@@ -194,7 +195,7 @@ const MasterListModule = () => {
             alert("SUCCESS: Delegate record updated and normalized.");
             const editedDistrict = (editForm.district || '').trim();
             setEditingId(null);
-            if (!selectedDistrict && !searchTerm) {
+            if (!selectedDistrict && !searchTerm && !sourceFilter) {
                 loadDistrictPage(editedDistrict, districtSections[editedDistrict]?.page || 1);
                 db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
             } else {
@@ -228,7 +229,7 @@ const MasterListModule = () => {
         try {
             await db.deleteDelegate(d.delegate_id, activeEventId);
             alert(`DELETED: ${name}`);
-            if (!selectedDistrict && !searchTerm) {
+            if (!selectedDistrict && !searchTerm && !sourceFilter) {
                 db.getDistrictsWithDelegates(activeEventId).then(setDistrictList).catch(() => {});
                 loadDistrictPage(d.district, districtSections[d.district]?.page || 1);
             } else {
@@ -248,7 +249,7 @@ const MasterListModule = () => {
             alert(`SUCCESS: Records merged into ${keep.first_name} ${keep.last_name}. Check-ins, session responses, and badge history were preserved.`);
             setEditingId(null);
             setMergePrompt(null);
-            if (!selectedDistrict && !searchTerm) {
+            if (!selectedDistrict && !searchTerm && !sourceFilter) {
                 loadAllDistricts();
             } else {
                 await loadData();
@@ -295,14 +296,15 @@ const MasterListModule = () => {
         try {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search);
-            const colSpan = 7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+            const source = sourceFilter || undefined;
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
+            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
             const headerCells = [
                 '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
                 showRank ? '<th class="p-3">Rank</th>' : '',
                 showOffice ? '<th class="p-3">Office</th>' : '',
                 showDelegateType ? '<th class="p-3">Type</th>' : '',
-                '<th class="p-3">Phone</th>',
+                '<th class="p-3">Phone</th><th class="p-3">Source</th><th class="p-3">Reg ID</th>',
             ].join('');
             const rows = all.map((d, i) => {
                 const cells = [
@@ -315,10 +317,13 @@ const MasterListModule = () => {
                     showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${d.office}</td>` : '',
                     showDelegateType ? `<td class="p-3 font-medium text-[9px]">${d.delegate_type || 'Member'}</td>` : '',
                     `<td class="p-3 font-black text-gray-500 tracking-tighter">${d.phone}</td>`,
+                    `<td class="p-3">${d.registration_source === 'portal' ? '<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span>' : '<span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>'}</td>`,
+                    `<td class="p-3 font-mono text-[9px] text-gray-500">${d.external_id || '-'}</td>`,
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
+            const sourceLabel = sourceFilter === 'portal' ? 'Portal' : sourceFilter === 'manual' ? 'Manual' : '';
             const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
             const container = document.createElement('div');
             container.innerHTML = tableHtml;
@@ -327,7 +332,7 @@ const MasterListModule = () => {
             document.body.appendChild(container);
             await new Promise(r => requestAnimationFrame(r));
             await new Promise(r => setTimeout(r, 300));
-            exportToPDF(container, `Delegate_Master_List_${distLabel}.pdf`, 'landscape', 1600);
+            exportToPDF(container, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.pdf`, 'landscape', 1600);
             document.body.removeChild(container);
         } catch (err) {
             console.error('PDF export error:', err);
@@ -342,14 +347,16 @@ const MasterListModule = () => {
         try {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search);
+            const source = sourceFilter || undefined;
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
+            const sourceLabel = sourceFilter === 'portal' ? 'Portal' : sourceFilter === 'manual' ? 'Manual' : '';
             const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
-            cols.push('phone', 'district');
-            exportToCSV(all, `Delegate_Master_List_${distLabel}.csv`, cols);
+            cols.push('phone', 'district', 'external_id', 'registration_source');
+            exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.csv`, cols);
         } catch (err) {
             console.error('CSV export error:', err);
         } finally {
@@ -477,6 +484,11 @@ const MasterListModule = () => {
                         <option value="">All Official Districts</option>
                         {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
+                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as 'portal' | 'manual' | '')}>
+                        <option value="">All Sources</option>
+                        <option value="portal">Portal</option>
+                        <option value="manual">Manual</option>
+                    </select>
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
                     <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
@@ -490,9 +502,9 @@ const MasterListModule = () => {
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
-                {((!selectedDistrict && !searchTerm) ? districtListLoading : listLoading) ? (
+                {((!selectedDistrict && !searchTerm && !sourceFilter) ? districtListLoading : listLoading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
-                ) : !selectedDistrict && !searchTerm ? (
+                ) : !selectedDistrict && !searchTerm && !sourceFilter ? (
                     /* --- MULTI-DISTRICT VIEW: per-district sections with independent pagination --- */
                     districtList.length === 0 ? (
                         <div className="py-20 text-center space-y-4">
@@ -507,7 +519,7 @@ const MasterListModule = () => {
                             const secPages = sec?.pages || 0;
                             const secLoading = sec?.loading ?? true;
                             const secTotal = sec?.total || count;
-                            const colSpan = 7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
                             const isOfficial = isValueOfficial(district, officialDistricts);
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
@@ -518,7 +530,7 @@ const MasterListModule = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-[10px] text-left min-w-[1000px]">
                                             <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                                <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                                <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {secLoading ? (
@@ -537,6 +549,8 @@ const MasterListModule = () => {
                                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
+                                                            <td className="p-3">{d.registration_source === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
+                                                            <td className="p-3 font-mono text-[9px] text-gray-500">{d.external_id || '-'}</td>
 <td className="p-3 no-print text-center">
                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                     {canManage && (
@@ -591,7 +605,7 @@ const MasterListModule = () => {
                         <div className="overflow-x-auto">
                             <table className="w-full text-[10px] text-left min-w-[1000px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {delegates.map((d, i) => (
@@ -622,7 +636,7 @@ const MasterListModule = () => {
                                     ))}
                                     {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
                                         <tr key={`__pad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={7 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
                                         </tr>
                                     ))}
                                 </tbody>
