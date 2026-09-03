@@ -14,7 +14,7 @@ const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '9-up-portrait': { cols: 3, rows: 3, badgeW: 55, badgeH: 80, cutGap: 3 },
   '8-up-portrait': { cols: 4, rows: 2, badgeW: 63, badgeH: 90, cutGap: 3 },
   '4-up-3x4': { cols: 2, rows: 2, badgeW: 76.2, badgeH: 101.6, cutGap: 3 },
-  '4-up-portrait': { cols: 2, rows: 2, badgeW: 84, badgeH: 117.3, cutGap: 3 },
+  '4-up-portrait': { cols: 2, rows: 2, badgeW: 100, badgeH: 139.7, cutGap: 3 },
 };
 
 const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
@@ -41,9 +41,9 @@ const V2_ZONES = {
   typeY1: 0.150,
   typeX0: 0.58,
   typeX1: 0.955,
-  nameTop: 0.420,  // delegate name block top
-  nameBottom: 0.535,
-  detailsTop: 0.545, // detail fields + QR band
+  nameTop: 0.462,  // delegate name block top (pushed down ~1 line from design divider)
+  nameBottom: 0.577,
+  detailsTop: 0.587, // detail fields + QR band
   rowBottom: 0.895,
   detailsX: 0.055,   // left column: detail lines
   qrX0: 0.585,
@@ -379,6 +379,11 @@ function drawBadge(
     const fittedFields = fitPriorityFields(fields.length, bandHgt, fieldSize, 5, [0, 1, 0]);
     const fSizes = fittedFields.sizes;
     const lSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
+    // ID row shrunk half a point so long IDs don't crowd the QR edge
+    if (fields[2] && fields[2][0] === 'ID') {
+      fSizes[2] = Math.max(5, fSizes[2] - 0.5);
+      lSizes[2] = Math.max(4, lSizes[2] - 0.5);
+    }
     const spacing = fittedFields.spacing;
     const totalH = fSizes.reduce((sum, s) => sum + s * spacing, 0);
     let fy = bandTop - fSizes[0] * spacing * 0.5 - (bandHgt - totalH) / 2;

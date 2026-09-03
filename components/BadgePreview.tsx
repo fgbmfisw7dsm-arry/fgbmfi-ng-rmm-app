@@ -14,7 +14,7 @@ const LAYOUT_LABELS: Record<BadgeLayout, string> = {
   '9-up-portrait': '9-up Portrait (55×80mm)',
   '8-up-portrait': '8-up Portrait (63×90mm)',
   '4-up-3x4': '4-up 3×4″ Portrait (76×102mm)',
-  '4-up-portrait': '4-up Portrait Full-Design (84×117mm)',
+  '4-up-portrait': '4-up Portrait Full-Design (100×140mm)',
 };
 
 const BadgePreview: React.FC<Props> = ({ layout, badgeCount, pageCount }) => {

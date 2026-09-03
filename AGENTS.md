@@ -344,7 +344,7 @@ supabase.channel('dashboard_sync')
 - v2 fix: batch inserts of 500 rows with progress feedback
 
 ### 9. Badge Printing (pdf-lib generation)
-- 7 layouts: `8-up` (90×60mm), `10-up` (80×55mm), `6-up-portrait` (63×88mm), `9-up-portrait` (55×80mm), `8-up-portrait` (63×90mm), `4-up-3x4` (76.2×101.6mm), `4-up-portrait` (84×117mm)
+- 7 layouts: `8-up` (90×60mm), `10-up` (80×55mm), `6-up-portrait` (63×88mm), `9-up-portrait` (55×80mm), `8-up-portrait` (63×90mm), `4-up-3x4` (76.2×101.6mm), `4-up-portrait` (100×140mm)
 - Auto-detect paper orientation: if grid width > 210mm, switches to landscape A4 (`badgePdfGenerator.ts`)
 - ZONES: header 17%, body 70%, band 13% (footer reduced from 17% to gain more text area)
 - Full-width banner header: `fgbmfi badge banner-2.png` (1800×250px) replaces separate logo rendering
@@ -741,10 +741,10 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 ## 43. Full-Design Portrait Badges (v2 design – 4-up-portrait + 6-up-portrait) (v1.45)
 
 - **New transparent badge design (`public/badge-design-v2.png`, 1207×1686, aspect 0.716):** a full-bleed branded tag — solid navy header (`#003040` + orange accents) at the top ~28%, a translucent white content panel (y 0.38–0.90), and sparse bottom branding on white (y 0.90–1.00). The design already includes a **slanted navy rectangle in the top-right header** where the delegate type is printed in white text.
-- **Layouts:** added **`4-up-portrait` (84×117mm, 2×2)** and resized **`6-up-portrait` from 63×95mm → 63×88mm** — both match the design aspect 0.716 exactly so the branding fills the card with zero cropping. `9-up-portrait` / `8-up-portrait` / `4-up-3x4` keep the legacy `badge-design.png` rendering path (v1.43). Requires `supabase_migration_add_4up_portrait_layout.sql` (widen `badge_batches` layout CHECK) before any `4-up-portrait` batch is created.
+- **Layouts:** added **`4-up-portrait` (100×140mm, 2×2)** and resized **`6-up-portrait` from 63×95mm → 63×88mm** — both match the design aspect 0.716 exactly so the branding fills the card with zero cropping. 4-up is *near-A6* (true 105×148 can't fit 2-across on A4 — zero gap; 100×140 leaves 3.5mm cut margins); because badge fonts are point-based, the larger card retains the same type sizes with more room. `9-up-portrait` / `8-up-portrait` / `4-up-3x4` keep the legacy `badge-design.png` rendering path (v1.43). Requires `supabase_migration_add_4up_portrait_layout.sql` (widen `badge_batches` layout CHECK) before any `4-up-portrait` batch is created.
 - **New draw path (`badgePdfGenerator.ts`):** `drawBadge` now accepts `badgeDesignV2` (embedded PNG). When present + `isPortrait`, it draws the design full-bleed then renders content from the **tunable `V2_ZONES` fraction table** (measured from the top of the badge): white auto-fit delegate-type text centered in the navy rect (typeY0/typeY1/typeX0/typeX1); name block centered at the top of the white panel (nameTop/nameBottom); then a side-by-side body row — detail lines (District/Chapter/ID + Rank/Office per `event_config`) in a left column (`detailsX`..`qrX0`) using `fitPriorityFields`, and the QR square right-aligned (`qrX0`/`qrX1`/`qrCX`, ≤30mm). Font tiers scale by badge width (`isLarge = bw ≥ 70mm`).
 - **Plumbing:** `generateBadgePDF(..., badgeDesignV2Bytes, onProgress)` embeds and threads the new asset; `BadgePrintingModule` fetches `/badge-design-v2.png` alongside the legacy assets; dropdown + `BadgePreview` updated (7 layouts). `types.ts` additive exception: `BadgeLayout` += `'4-up-portrait'`.
-- **Calibration note:** because the design geometry can't be self-verified visually, `V2_ZONES` fractions are centralized for quick re-tuning against a printed sample (compare to `Tag TEMPLATE.png`). Check-In reprint canvas badge (CheckInPage / badgeImageGenerator) is intentionally NOT yet synced to this design — follow-up.
+- **Calibration note:** because the design geometry can't be self-verified visually, `V2_ZONES` fractions are centralized for quick re-tuning against a printed sample (compare to `Tag TEMPLATE.png`). v1.45-rev: name block lowered ~1 line (nameTop 0.462/nameBottom 0.577, details band 0.587–0.895) and the ID row renders at −0.5pt. Check-In reprint canvas badge (CheckInPage / badgeImageGenerator) is intentionally NOT yet synced to this design — follow-up.
 
 ## Code Conventions
 
