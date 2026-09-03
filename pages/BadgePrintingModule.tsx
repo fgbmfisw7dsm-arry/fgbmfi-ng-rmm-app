@@ -12,7 +12,7 @@ type Tab = 'generate' | 'batches' | 'reprint' | 'history';
 const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '8-up', label: '8-up Landscape (90×60mm)' },
   { value: '10-up', label: '10-up Landscape (80×55mm)' },
-  { value: '6-up-portrait', label: '6-up Portrait (63×88mm)' },
+  { value: '6-up-portrait', label: '6-up Portrait (65×91mm)' },
   { value: '9-up-portrait', label: '9-up Portrait (55×80mm)' },
   { value: '8-up-portrait', label: '8-up Portrait (63×90mm)' },
   { value: '4-up-3x4', label: '4-up 3×4″ Portrait (76×102mm)' },

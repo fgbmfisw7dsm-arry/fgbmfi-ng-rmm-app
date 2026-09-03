@@ -10,7 +10,7 @@ const A4 = { w: mmToPt(210), h: mmToPt(297) };
 const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '8-up': { cols: 2, rows: 4, badgeW: 90, badgeH: 60, cutGap: 3 },
   '10-up': { cols: 2, rows: 5, badgeW: 80, badgeH: 55, cutGap: 3 },
-  '6-up-portrait': { cols: 3, rows: 2, badgeW: 63, badgeH: 88, cutGap: 3 },
+  '6-up-portrait': { cols: 3, rows: 2, badgeW: 65, badgeH: 90.8, cutGap: 3 },
   '9-up-portrait': { cols: 3, rows: 3, badgeW: 55, badgeH: 80, cutGap: 3 },
   '8-up-portrait': { cols: 4, rows: 2, badgeW: 63, badgeH: 90, cutGap: 3 },
   '4-up-3x4': { cols: 2, rows: 2, badgeW: 76.2, badgeH: 101.6, cutGap: 3 },
@@ -379,10 +379,17 @@ function drawBadge(
     const fittedFields = fitPriorityFields(fields.length, bandHgt, fieldSize, 5, [0, 1, 0]);
     const fSizes = fittedFields.sizes;
     const lSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
-    // ID row shrunk half a point so long IDs don't crowd the QR edge
+    // ID row shrunk (0.5pt large / 1.0pt small) so long IDs don't crowd the QR edge,
+    // with a width-fit cap as a no-touch guarantee for very long external_ids
     if (fields[2] && fields[2][0] === 'ID') {
-      fSizes[2] = Math.max(5, fSizes[2] - 0.5);
-      lSizes[2] = Math.max(4, lSizes[2] - 0.5);
+      const idCut = isLarge ? 0.5 : 1.0;
+      fSizes[2] = Math.max(5, fSizes[2] - idCut);
+      lSizes[2] = Math.max(4, lSizes[2] - idCut);
+      const idValue = fields[2][1];
+      const idLW = fontBold.widthOfTextAtSize('ID: ', lSizes[2]);
+      while (font.widthOfTextAtSize(idValue, fSizes[2]) > detailW - idLW - mmToPt(1) && fSizes[2] > 4.5) {
+        fSizes[2] -= 0.25;
+      }
     }
     const spacing = fittedFields.spacing;
     const totalH = fSizes.reduce((sum, s) => sum + s * spacing, 0);

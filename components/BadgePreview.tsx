@@ -10,7 +10,7 @@ interface Props {
 const LAYOUT_LABELS: Record<BadgeLayout, string> = {
   '8-up': '8-up Landscape (90×60mm)',
   '10-up': '10-up Landscape (80×55mm)',
-  '6-up-portrait': '6-up Portrait (63×88mm)',
+  '6-up-portrait': '6-up Portrait (65×91mm)',
   '9-up-portrait': '9-up Portrait (55×80mm)',
   '8-up-portrait': '8-up Portrait (63×90mm)',
   '4-up-3x4': '4-up 3×4″ Portrait (76×102mm)',
