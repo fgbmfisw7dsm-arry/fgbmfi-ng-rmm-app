@@ -366,18 +366,17 @@ supabase.channel('dashboard_sync')
 - Storage management: `/admin/storage` page for listing and deleting badge PDF files
 
 ### 10. Check-in Badge Reprint (Canvas 2D)
-- **Canvas-based generation:** badge drawn programmatically on Canvas 2D at 3× scale (714×1020px)
+- **Canvas-based generation:** badge drawn programmatically on Canvas 2D at 3× scale (737×1030px)
 - Produces a single PNG data URL reused by all 4 export modes (Print, PDF, Image, Share)
-- 63×90mm portrait default (matching `8-up-portrait` layout)
-- Layout: 29% banner header + 64% white body (QR + text) + 7% colored footer band
-- QR code: 30mm (previously 19mm), generated via `QRCode.toCanvas(width: 400)` for sharp rendering
-- **Text sizing (Canvas):** Name 14px bold, Fields 9px bold (District/Chapter/Office/Rank), ID 8px bold, Delegate Type (footer band) 9px bold
-- **Text sizing (DOM):** Name `text-[14px]`, Fields `text-[9px]`, ID `text-[8px]`, Delegate Type (footer band) `11px`
-- All delegate details are individually labeled lines: District: X, Chapter: X, Office: X (if enabled), Rank: X (if enabled), ID: XXXXXXXX
-- Canvas badge respects `showRank`/`showOffice` from `event_config` — fields hidden when disabled for the event
-- Line spacing: 18px gap between each text line, 16px gap between QR bottom and name (canvas)
-- DOM badge: `marginTop: 1.5mm`, `lineHeight: 1.4`
-- Banner fetched with 5s timeout + `encodeURI()` + graceful fallback (empty banner)
+- **65×90.8mm portrait default (matching the `6-up-portrait` v2 full-design card, aspect 0.716)**
+- **v1.45 sync — same `V2_ZONES` composition as the 4/6-up v2 design** (`public/badge-design-v2.png` fetched with 5s timeout + `encodeURI()` + automatic fallback to `/badge-design.png`): full-bleed design → **delegate type as white auto-fit text in the design's top-right navy slanted rect** → **name centered at the top of the white panel** → **side-by-side body row: detail lines (District/Chapter/ID, +Rank/Office per `event_config`) LEFT, QR square RIGHT**. No programmatic white-body panel or footer type band — the design supplies the panel + footer branding.
+- **Text sizing (Canvas, 6-up tier):** Name 12px bold (auto-fit ≥8px), Labels 7px bold, Values 8px bold, Delegate Type 12→6px white auto-fit; **ID value renders at −1pt (Log value 7px) with a width-fit cap** so long external_ids can never collide with the QR edge
+- QR code: `QRCode.toCanvas(width: 400)` for sharp rendering; badge QR sized ~ `min(0.36×bw, 0.92×bandH)` on the right, color `#1e3a5f`
+- All delegate details are individually labeled lines (mirrors the v2 PDF layout)
+- Fields honor `showRank`/`showOffice` from `event_config`
+- `V2_ZONES` is exported from `badgePdfGenerator.ts` and imported here — single source of truth for badge content zones
+- On-screen modal (CheckInPage) renders the **generated canvas image itself** (`badgeCanvasUrl`) at 65×90.8mm, so the preview is pixel-identical to the printed badge
+- Banner/design fetched with 5s timeout + `encodeURI()` + graceful fallback (empty design)
 - **Never use `dangerouslySetInnerHTML` with SVG for QR** — html2canvas cannot render it
 - **Never use `position:absolute` children with percentage heights for capture** — DOM clone collapses
 

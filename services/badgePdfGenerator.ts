@@ -34,9 +34,9 @@ const ZONES = {
 };
 
 // Tunable content zones (fractions of badge width/height, measured from the top)
-// for the v2 full-bleed design (Tag 1.png, aspect 0.716) used by 6-up-portrait
-// and 4-up-portrait. Calibrated against Tag TEMPLATE.png.
-const V2_ZONES = {
+// for the v2 full-bleed design (Tag 1.png, aspect 0.716) used by 6-up-portrait,
+// 4-up-portrait and the Check-In E-Badge. Calibrated against Tag TEMPLATE.png.
+export const V2_ZONES = {
   typeY0: 0.030,   // delegate type text zone (design's slanted navy rect), top->bottom
   typeY1: 0.150,
   typeX0: 0.58,

@@ -17,8 +17,6 @@ const CheckInPage = () => {
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
-  const [badgeQrSvg, setBadgeQrSvg] = useState<string>('');
-  const [badgeBannerDataUrl, setBadgeBannerDataUrl] = useState<string>('');
   const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
@@ -79,8 +77,6 @@ const CheckInPage = () => {
       setFeedback(null);
       setCode('');
       setBadgeDelegate(null);
-      setBadgeQrSvg('');
-      setBadgeBannerDataUrl('');
       setBadgeCanvasUrl('');
       setPendingReg(null);
     };
@@ -230,10 +226,8 @@ const CheckInPage = () => {
         const repaired = await db.repairExternalId(delegate.delegate_id);
         if (repaired) target = { ...delegate, external_id: repaired };
       }
-      const { badgeUrl, qrUrl, bannerUrl } = await generateBadgeImage(target, { showRank, showOffice });
+      const { badgeUrl } = await generateBadgeImage(target, { showRank, showOffice });
 
-      setBadgeQrSvg(qrUrl);
-      setBadgeBannerDataUrl(bannerUrl);
       setBadgeCanvasUrl(badgeUrl);
       setBadgeDelegate(target);
     } catch (e) {
@@ -267,8 +261,6 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
 
   const closeBadgeModal = () => {
     setBadgeDelegate(null);
-    setBadgeQrSvg('');
-    setBadgeBannerDataUrl('');
     setBadgeCanvasUrl('');
   };
 
@@ -655,36 +647,10 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                  <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
                </div>
 
-                  <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl" style={{ width: '63mm', height: '90mm', position: 'relative', overflow: 'hidden', backgroundColor: '#ffffff' }}>
-                    {badgeBannerDataUrl && (
-                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `url(${badgeBannerDataUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                  <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl overflow-hidden" style={{ width: '65mm', height: '90.8mm', position: 'relative', backgroundColor: '#ffffff' }}>
+                    {badgeCanvasUrl && (
+                      <img src={badgeCanvasUrl} alt="E-Badge" style={{ width: '100%', height: '100%', display: 'block' }} />
                     )}
-                     <div style={{ position: 'absolute', top: '29%', left: 0, right: 0, height: '64%', backgroundColor: '#ffffff', textAlign: 'center', padding: '1.5mm 2mm' }}>
-                       <div style={{ width: '30mm', height: '30mm', margin: '0 auto' }}>
-                         {badgeQrSvg && <img src={badgeQrSvg} alt="QR" style={{ width: '100%', height: '100%' }} />}
-                       </div>
-                       <div style={{ marginTop: '1.5mm', lineHeight: '1.4' }}>
-                          {(() => {
-                            const nameText = [badgeDelegate.title, badgeDelegate.first_name, badgeDelegate.last_name].filter(Boolean).join(' ').toUpperCase();
-                            const fs = nameText.length > 22 ? '11px' : nameText.length > 18 ? '12px' : nameText.length > 14 ? '13px' : '14px';
-                            return <div style={{ fontSize: fs, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', maxWidth: '95%', margin: '0 auto' }} className="font-black text-blue-900 uppercase tracking-tight leading-tight">{badgeDelegate.title} {badgeDelegate.first_name} {badgeDelegate.last_name}</div>;
-                          })()}
-                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">District: {badgeDelegate.district || 'N/A'}</div>
-                         <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Chapter: {badgeDelegate.chapter || 'N/A'}</div>
-                         {showOffice && badgeDelegate.office && (
-                           <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Office: {badgeDelegate.office}</div>
-                         )}
-                         {showRank && badgeDelegate.rank && (
-                           <div className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">Rank: {badgeDelegate.rank}</div>
-                         )}
-                          {(badgeDelegate.external_id || badgeDelegate.delegate_id) && (
-                            (() => { const displayId = badgeDelegate.external_id?.startsWith('CON26') ? badgeDelegate.external_id : badgeDelegate.delegate_id.slice(0, 8); return <div className="text-[8px] font-black text-gray-500 uppercase">ID: <span className="text-gray-700 font-mono text-[8px]">{displayId}</span></div>; })()
-                          )}
-                       </div>
-                     </div>
-                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '7%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                       <span className="text-white font-black uppercase tracking-wider drop-shadow" style={{ fontSize: '11px' }}>{(badgeDelegate.delegate_type || 'Member').toUpperCase()}</span>
-                     </div>
                   </div>
 
                 <div className="mt-6 grid grid-cols-2 gap-2">
@@ -720,7 +686,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
         {badgeDelegate && badgeCanvasUrl && (
           <div className="hidden print:block">
             <style>{`@media print { html, body { margin: 0 !important; padding: 0 !important; background: white; } }`}</style>
-            <img src={badgeCanvasUrl} alt="Badge" style={{ width: '63mm', height: '90mm', display: 'block', margin: '0 auto' }} />
+            <img src={badgeCanvasUrl} alt="Badge" style={{ width: '65mm', height: '90.8mm', display: 'block', margin: '0 auto' }} />
           </div>
         )}
     </>
