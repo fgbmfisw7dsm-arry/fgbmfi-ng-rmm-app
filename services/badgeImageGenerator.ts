@@ -162,9 +162,12 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   ctx.font = 'bold ' + nameFontSize + 'px sans-serif';
   ctx.fillStyle = '#1e3a5f';
   ctx.textAlign = 'center';
+  const fakeBoldOffsets = [-0.4, 0, 0.4];
   let nameY = nameTop - nameFontSize * 0.2;
   for (const line of nameLines) {
-    ctx.fillText(line, bw / 2, nameY);
+    for (const off of fakeBoldOffsets) {
+      ctx.fillText(line, bw / 2 + off, nameY);
+    }
     nameY += nameFontSize * 1.15;
   }
 

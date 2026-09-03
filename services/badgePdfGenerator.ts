@@ -315,7 +315,7 @@ function drawBadge(
 
     const yFromTop = (f: number) => imgY + imgH * (1 - f);
     const isLarge = bw >= mmToPt(70);
-    const nameMaxSize = isLarge ? 12.0 : 9.5;
+    const nameMaxSize = isLarge ? 13.0 : 10.5;
     const nameMinSize = isLarge ? 6.0 : 5.0;
     const fieldSize = isLarge ? 8.0 : 6.5;
     const labelSize = isLarge ? 7.0 : 5.5;
@@ -343,16 +343,21 @@ function drawBadge(
     const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxW, Math.max(mmToPt(3), nameAvail), nameMaxSize, nameMinSize, 1.15);
     if (!fitted.lines.length) fitted.lines = [fullName];
     let nameTy = Math.min(yFromTop(V2_ZONES.nameTop) - fitted.fontSize * 0.25, yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1);
+    const fauxBoldOff = [-0.18, 0, 0.18];
     for (let i = 0; i < fitted.lines.length; i++) {
       const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
-      page.drawText(fitted.lines[i], {
-        x: badgeLeft + Math.max(0, (bw - lw) / 2),
-        y: nameTy,
-        size: fitted.fontSize,
-        font: fontBold as any,
-        color: TEXT_PRIMARY,
-        maxWidth: nameMaxW,
-      });
+      const nX = badgeLeft + Math.max(0, (bw - lw) / 2);
+      const drawWithBold = fitted.fontSize >= 6;
+      for (const off of (drawWithBold ? fauxBoldOff : [0])) {
+        page.drawText(fitted.lines[i], {
+          x: nX + off,
+          y: nameTy,
+          size: fitted.fontSize,
+          font: fontBold as any,
+          color: TEXT_PRIMARY,
+          maxWidth: nameMaxW,
+        });
+      }
       nameTy -= fitted.fontSize * 1.1;
     }
 
