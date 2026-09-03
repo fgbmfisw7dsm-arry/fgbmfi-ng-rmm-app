@@ -41,8 +41,9 @@ export const V2_ZONES = {
   typeY1: 0.150,
   typeX0: 0.58,
   typeX1: 0.955,
-  nameTop: 0.462,  // delegate name block top (pushed down ~1 line from design divider)
+  nameTop: 0.462,  // delegate name fit region (measured against badge-design-v2.png: baked Theme ink spans 0.454-0.469)
   nameBottom: 0.577,
+  nameClearTop: 0.480, // placement cap: name glyph tops must stay below the Theme ink bottom (~0.469)
   detailsTop: 0.587, // detail fields + QR band
   rowBottom: 0.895,
   detailsX: 0.055,   // left column: detail lines
@@ -342,7 +343,7 @@ function drawBadge(
     const nameAvail = yFromTop(V2_ZONES.nameTop) - yFromTop(V2_ZONES.nameBottom);
     const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxW, Math.max(mmToPt(3), nameAvail), nameMaxSize, nameMinSize, 1.15);
     if (!fitted.lines.length) fitted.lines = [fullName];
-    let nameTy = Math.min(yFromTop(V2_ZONES.nameTop) - fitted.fontSize * 0.25, yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1);
+    let nameTy = Math.min(yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1, yFromTop(V2_ZONES.nameClearTop) - fitted.fontSize * 0.75);
     const fauxBoldOff = [-0.18, 0, 0.18];
     for (let i = 0; i < fitted.lines.length; i++) {
       const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
