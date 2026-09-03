@@ -91,6 +91,11 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
 
   const yFromTop = (f: number) => f * bh;
 
+  // Canvas-local zones: the 12px canvas name is ~2 lines taller than the PDF's
+  // 9.5pt one, so the name block + details band sit 2 lines lower than the
+  // shared V2_ZONES to clear the design's baked-in "Theme" line.
+  const z = { ...V2_ZONES, nameTop: 0.542, nameBottom: 0.659, detailsTop: 0.670, rowBottom: 0.877 };
+
   if (designDataUrl) {
     try {
       const design = await loadImg(designDataUrl);
@@ -129,8 +134,8 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   // Name — centered at the top of the white panel
   const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
   const nameMaxW = bw - 8;
-  const nameTop = yFromTop(V2_ZONES.nameTop);
-  const nameBottom = yFromTop(V2_ZONES.nameBottom);
+  const nameTop = yFromTop(z.nameTop);
+  const nameBottom = yFromTop(z.nameBottom);
   const nameAvail = nameBottom - nameTop;
   let nameFontSize = nameSize;
   let nameLines: string[] = [];
@@ -164,8 +169,8 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   }
 
   // Body row — detail lines LEFT, QR square RIGHT (side by side)
-  const bandTop = yFromTop(V2_ZONES.detailsTop);
-  const bandBot = yFromTop(V2_ZONES.rowBottom);
+  const bandTop = yFromTop(z.detailsTop);
+  const bandBot = yFromTop(z.rowBottom);
   const bandHgt = bandBot - bandTop;
 
   const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92);
@@ -204,7 +209,7 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     }
   }
 
-  const lineGap = fieldSize * 2;
+  const lineGap = 14;
   const totalFields = fields.length;
   const blocked = totalFields * lineGap;
   let textY = bandTop + (bandHgt - blocked) / 2 + lineGap * 0.5;
