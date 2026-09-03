@@ -89,7 +89,7 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   const ctx = canvas.getContext('2d')!;
   ctx.scale(scale, scale);
 
-  const yFromTop = (f: number) => bh * (1 - f);
+  const yFromTop = (f: number) => f * bh;
 
   if (designDataUrl) {
     try {
@@ -114,7 +114,7 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   const tzW = bw * (V2_ZONES.typeX1 - V2_ZONES.typeX0);
   const tzTop = yFromTop(V2_ZONES.typeY0);
   const tzBot = yFromTop(V2_ZONES.typeY1);
-  let typeSize = Math.min(tzTop - tzBot, 14);
+  let typeSize = Math.min(tzBot - tzTop, 14);
   ctx.font = 'bold ' + typeSize + 'px sans-serif';
   while (ctx.measureText(typeText).width > tzW && typeSize > 6) {
     typeSize -= 0.5;
@@ -124,13 +124,14 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(typeText, bw * ((V2_ZONES.typeX0 + V2_ZONES.typeX1) / 2), (tzTop + tzBot) / 2);
+  ctx.textBaseline = 'alphabetic';
 
   // Name — centered at the top of the white panel
   const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
   const nameMaxW = bw - 8;
   const nameTop = yFromTop(V2_ZONES.nameTop);
   const nameBottom = yFromTop(V2_ZONES.nameBottom);
-  const nameAvail = nameTop - nameBottom;
+  const nameAvail = nameBottom - nameTop;
   let nameFontSize = nameSize;
   let nameLines: string[] = [];
   const minNameSize = 8;
@@ -165,11 +166,11 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   // Body row — detail lines LEFT, QR square RIGHT (side by side)
   const bandTop = yFromTop(V2_ZONES.detailsTop);
   const bandBot = yFromTop(V2_ZONES.rowBottom);
-  const bandHgt = bandTop - bandBot;
+  const bandHgt = bandBot - bandTop;
 
   const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92);
   const qrX = bw * V2_ZONES.qrCX - qrSize / 2;
-  const qrY = bandBot + (bandHgt - qrSize) / 2;
+  const qrY = bandTop + (bandHgt - qrSize) / 2;
   if (qrDataUrl) {
     try {
       const qr = await loadImg(qrDataUrl);
@@ -206,7 +207,7 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   const lineGap = fieldSize * 2;
   const totalFields = fields.length;
   const blocked = totalFields * lineGap;
-  let textY = bandTop - lineGap * 0.5 - (bandHgt - blocked) / 2 - 4;
+  let textY = bandTop + (bandHgt - blocked) / 2 + lineGap * 0.5;
 
   for (const [label, value] of fields) {
     const isId = label === 'ID';
