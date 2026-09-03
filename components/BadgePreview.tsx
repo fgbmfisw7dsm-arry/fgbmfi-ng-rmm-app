@@ -10,16 +10,17 @@ interface Props {
 const LAYOUT_LABELS: Record<BadgeLayout, string> = {
   '8-up': '8-up Landscape (90×60mm)',
   '10-up': '10-up Landscape (80×55mm)',
-  '6-up-portrait': '6-up Portrait (63×95mm)',
+  '6-up-portrait': '6-up Portrait (63×88mm)',
   '9-up-portrait': '9-up Portrait (55×80mm)',
   '8-up-portrait': '8-up Portrait (63×90mm)',
   '4-up-3x4': '4-up 3×4″ Portrait (76×102mm)',
+  '4-up-portrait': '4-up Portrait Full-Design (84×117mm)',
 };
 
 const BadgePreview: React.FC<Props> = ({ layout, badgeCount, pageCount }) => {
   const isPortrait = layout.includes('portrait') || layout === '4-up-3x4';
-  const cols = layout === '8-up' ? 2 : layout === '10-up' ? 2 : layout === '6-up-portrait' ? 3 : layout === '8-up-portrait' ? 4 : layout === '4-up-3x4' ? 2 : 3;
-  const rows = layout === '8-up' ? 4 : layout === '10-up' ? 5 : layout === '6-up-portrait' ? 2 : layout === '8-up-portrait' ? 2 : layout === '4-up-3x4' ? 2 : 3;
+  const cols = layout === '8-up' ? 2 : layout === '10-up' ? 2 : layout === '6-up-portrait' ? 3 : layout === '8-up-portrait' ? 4 : layout === '4-up-3x4' ? 2 : layout === '4-up-portrait' ? 2 : 3;
+  const rows = layout === '8-up' ? 4 : layout === '10-up' ? 5 : layout === '6-up-portrait' ? 2 : layout === '8-up-portrait' ? 2 : layout === '4-up-3x4' ? 2 : layout === '4-up-portrait' ? 2 : 3;
 
   if (!badgeCount) return null;
 

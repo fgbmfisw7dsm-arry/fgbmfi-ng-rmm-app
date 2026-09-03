@@ -12,10 +12,11 @@ type Tab = 'generate' | 'batches' | 'reprint' | 'history';
 const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '8-up', label: '8-up Landscape (90×60mm)' },
   { value: '10-up', label: '10-up Landscape (80×55mm)' },
-  { value: '6-up-portrait', label: '6-up Portrait (63×95mm)' },
+  { value: '6-up-portrait', label: '6-up Portrait (63×88mm)' },
   { value: '9-up-portrait', label: '9-up Portrait (55×80mm)' },
   { value: '8-up-portrait', label: '8-up Portrait (63×90mm)' },
   { value: '4-up-3x4', label: '4-up 3×4″ Portrait (76×102mm)' },
+  { value: '4-up-portrait', label: '4-up Portrait Full-Design (84×117mm)' },
 ];
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
@@ -370,11 +371,12 @@ const BadgePrintingModule = () => {
     setGeneratedPdfUrl('');
 
     try {
-      const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64, badgeDesignBase64] = await Promise.all([
+      const [fgbmfiLogoBase64, eventLogoBase64, badgeBannerBase64, badgeDesignBase64, badgeDesignV2Base64] = await Promise.all([
         fetchLogoAsBase64('/logo-fgbmfi.png'),
         fetchLogoAsBase64('/event-logo.png'),
         fetchLogoAsBase64('/fgbmfi badge banner-2.png'),
         fetchLogoAsBase64('/badge-design.png'),
+        fetchLogoAsBase64('/badge-design-v2.png'),
       ]);
 
       const decodeBase64Img = (base64: string): Uint8Array | undefined => {
@@ -393,6 +395,7 @@ const BadgePrintingModule = () => {
       const eventLogoBytes = eventLogoBase64 ? decodeBase64Img(eventLogoBase64) : undefined;
       const badgeBannerBytes = badgeBannerBase64 ? decodeBase64Img(badgeBannerBase64) : undefined;
       const badgeDesignBytes = badgeDesignBase64 ? decodeBase64Img(badgeDesignBase64) : undefined;
+      const badgeDesignV2Bytes = badgeDesignV2Base64 ? decodeBase64Img(badgeDesignV2Base64) : undefined;
 
       cancellationRef.current = false;
       let hasError = false;
@@ -412,6 +415,7 @@ const BadgePrintingModule = () => {
           eventLogoBytes,
           badgeBannerBytes,
           badgeDesignBytes,
+          badgeDesignV2Bytes,
           (pg) => {
             if (cancellationRef.current) return;
             setProgress({

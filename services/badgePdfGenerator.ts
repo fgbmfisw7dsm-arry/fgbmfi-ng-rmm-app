@@ -10,10 +10,11 @@ const A4 = { w: mmToPt(210), h: mmToPt(297) };
 const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '8-up': { cols: 2, rows: 4, badgeW: 90, badgeH: 60, cutGap: 3 },
   '10-up': { cols: 2, rows: 5, badgeW: 80, badgeH: 55, cutGap: 3 },
-  '6-up-portrait': { cols: 3, rows: 2, badgeW: 63, badgeH: 95, cutGap: 3 },
+  '6-up-portrait': { cols: 3, rows: 2, badgeW: 63, badgeH: 88, cutGap: 3 },
   '9-up-portrait': { cols: 3, rows: 3, badgeW: 55, badgeH: 80, cutGap: 3 },
   '8-up-portrait': { cols: 4, rows: 2, badgeW: 63, badgeH: 90, cutGap: 3 },
   '4-up-3x4': { cols: 2, rows: 2, badgeW: 76.2, badgeH: 101.6, cutGap: 3 },
+  '4-up-portrait': { cols: 2, rows: 2, badgeW: 84, badgeH: 117.3, cutGap: 3 },
 };
 
 const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
@@ -23,12 +24,31 @@ const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
   '9-up-portrait': true,
   '8-up-portrait': true,
   '4-up-3x4': true,
+  '4-up-portrait': true,
 };
 
 const ZONES = {
   headerFraction: 0.29,
   bodyFraction: 0.64,
   bandFraction: 0.07,
+};
+
+// Tunable content zones (fractions of badge width/height, measured from the top)
+// for the v2 full-bleed design (Tag 1.png, aspect 0.716) used by 6-up-portrait
+// and 4-up-portrait. Calibrated against Tag TEMPLATE.png.
+const V2_ZONES = {
+  typeY0: 0.030,   // delegate type text zone (design's slanted navy rect), top->bottom
+  typeY1: 0.150,
+  typeX0: 0.58,
+  typeX1: 0.955,
+  nameTop: 0.420,  // delegate name block top
+  nameBottom: 0.535,
+  detailsTop: 0.545, // detail fields + QR band
+  rowBottom: 0.895,
+  detailsX: 0.055,   // left column: detail lines
+  qrX0: 0.585,
+  qrX1: 0.945,
+  qrCX: 0.765,       // QR horizontal center
 };
 
 const BAND_COLORS: Record<string, readonly [number, number, number]> = {
@@ -264,6 +284,7 @@ function drawBadge(
   eventLogo?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   badgeBanner?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   badgeDesign?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
+  badgeDesignV2?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   isPortrait: boolean = false,
   showRank: boolean = true,
   showOffice: boolean = true
@@ -272,6 +293,105 @@ function drawBadge(
   const badgeLeft = bx;
 
   try {
+
+  if (badgeDesignV2 && isPortrait) {
+    const iw = badgeDesignV2.width;
+    const ih = badgeDesignV2.height;
+    let imgW = bw;
+    let imgH = imgW * ih / iw;
+    let imgX = badgeLeft;
+    let imgY = badgeBottom;
+    if (imgH > bh) {
+      const scale = bh / imgH;
+      imgW = bw * scale;
+      imgH = bh;
+      imgX = badgeLeft + (bw - imgW) / 2;
+    } else {
+      imgY = badgeBottom + (bh - imgH) / 2;
+    }
+    try {
+      page.drawImage(badgeDesignV2 as any, { x: imgX, y: imgY, width: imgW, height: imgH });
+    } catch {}
+
+    const yFromTop = (f: number) => imgY + imgH * (1 - f);
+    const isLarge = bw >= mmToPt(70);
+    const nameMaxSize = isLarge ? 12.0 : 9.5;
+    const nameMinSize = isLarge ? 6.0 : 5.0;
+    const fieldSize = isLarge ? 8.0 : 6.5;
+    const labelSize = isLarge ? 7.0 : 5.5;
+
+    // Delegate type — white text over the design's slanted navy rect (top-right)
+    const typeText = (delegate.delegate_type || 'Member').toUpperCase();
+    const tzW = bw * (V2_ZONES.typeX1 - V2_ZONES.typeX0);
+    const tzTop = yFromTop(V2_ZONES.typeY0);
+    const tzBot = yFromTop(V2_ZONES.typeY1);
+    let typeSize = Math.min(tzTop - tzBot, isLarge ? 9.5 : 8.0);
+    while (fontBold.widthOfTextAtSize(typeText, typeSize) > tzW && typeSize > 5) typeSize -= 0.25;
+    page.drawText(typeText, {
+      x: badgeLeft + bw * ((V2_ZONES.typeX0 + V2_ZONES.typeX1) / 2) - fontBold.widthOfTextAtSize(typeText, typeSize) / 2,
+      y: tzBot + (tzTop - tzBot) / 2 - typeSize * 0.35,
+      size: typeSize,
+      font: fontBold as any,
+      color: HEADER_TEXT,
+      maxWidth: tzW,
+    });
+
+    // Name — centered at top of the white panel
+    const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+    const nameMaxW = bw - mmToPt(4);
+    const nameAvail = yFromTop(V2_ZONES.nameTop) - yFromTop(V2_ZONES.nameBottom);
+    const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxW, Math.max(mmToPt(3), nameAvail), nameMaxSize, nameMinSize, 1.15);
+    if (!fitted.lines.length) fitted.lines = [fullName];
+    let nameTy = Math.min(yFromTop(V2_ZONES.nameTop) - fitted.fontSize * 0.25, yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1);
+    for (let i = 0; i < fitted.lines.length; i++) {
+      const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
+      page.drawText(fitted.lines[i], {
+        x: badgeLeft + Math.max(0, (bw - lw) / 2),
+        y: nameTy,
+        size: fitted.fontSize,
+        font: fontBold as any,
+        color: TEXT_PRIMARY,
+        maxWidth: nameMaxW,
+      });
+      nameTy -= fitted.fontSize * 1.1;
+    }
+
+    // Body row — details left, QR right (side by side)
+    const bandTop = yFromTop(V2_ZONES.detailsTop);
+    const bandBot = yFromTop(V2_ZONES.rowBottom);
+    const bandHgt = bandTop - bandBot;
+
+    const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92, mmToPt(30));
+    const qrX = badgeLeft + bw * V2_ZONES.qrCX - qrSize / 2;
+    const qrY = bandBot + (bandHgt - qrSize) / 2;
+    drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
+
+    const detailX = badgeLeft + bw * V2_ZONES.detailsX;
+    const detailW = badgeLeft + bw * V2_ZONES.qrX0 - detailX - mmToPt(1.5);
+    const fields: [string, string][] = [
+      ['District', delegate.district || 'N/A'],
+      ['Chapter', delegate.chapter || 'N/A'],
+      ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
+    ];
+    if (showRank && delegate.rank && delegate.rank !== 'CP') fields.push(['Rank', delegate.rank]);
+    if (showOffice && delegate.office && delegate.office !== 'OTHER') fields.push(['Office', delegate.office]);
+
+    const fittedFields = fitPriorityFields(fields.length, bandHgt, fieldSize, 5, [0, 1, 0]);
+    const fSizes = fittedFields.sizes;
+    const lSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
+    const spacing = fittedFields.spacing;
+    const totalH = fSizes.reduce((sum, s) => sum + s * spacing, 0);
+    let fy = bandTop - fSizes[0] * spacing * 0.5 - (bandHgt - totalH) / 2;
+    for (let fi = 0; fi < fields.length; fi++) {
+      const [label, value] = fields[fi];
+      const labelText = label + ': ';
+      const lW = fontBold.widthOfTextAtSize(labelText, lSizes[fi]);
+      page.drawText(labelText, { x: detailX, y: fy, size: lSizes[fi], font: fontBold as any, color: TEXT_SECONDARY });
+      page.drawText(value, { x: detailX + lW, y: fy, size: fSizes[fi], font: font as any, color: TEXT_PRIMARY, maxWidth: detailW - lW });
+      fy -= fSizes[fi] * spacing;
+    }
+    return;
+  }
 
   if (badgeDesign && isPortrait) {
     const cardAspect = badgeDesign.width / badgeDesign.height;
@@ -821,6 +941,7 @@ export async function generateBadgePDF(
   eventLogoBytes?: Uint8Array,
   badgeBannerBytes?: Uint8Array,
   badgeDesignBytes?: Uint8Array,
+  badgeDesignV2Bytes?: Uint8Array,
   onProgress?: (progress: BadgeGenerationProgress) => void
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
@@ -853,6 +974,13 @@ export async function generateBadgePDF(
   if (badgeDesignBytes) {
     try {
       badgeDesign = await pdfDoc.embedPng(badgeDesignBytes);
+    } catch {}
+  }
+
+  let badgeDesignV2;
+  if (badgeDesignV2Bytes) {
+    try {
+      badgeDesignV2 = await pdfDoc.embedPng(badgeDesignV2Bytes);
     } catch {}
   }
 
@@ -919,6 +1047,7 @@ export async function generateBadgePDF(
         eventLogo as any,
         badgeBanner as any,
         badgeDesign as any,
+        badgeDesignV2 as any,
         IS_PORTRAIT[layout],
         showRank,
         showOffice
