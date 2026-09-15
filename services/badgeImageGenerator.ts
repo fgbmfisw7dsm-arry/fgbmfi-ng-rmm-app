@@ -114,23 +114,6 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   const labelSize = 7;
   const fieldSize = 8;
 
-  // Delegate type — white auto-fit text in the design's top-right navy slanted rect
-  const typeText = (delegate.delegate_type || 'Member').toUpperCase();
-  const tzW = bw * (V2_ZONES.typeX1 - V2_ZONES.typeX0);
-  const tzTop = yFromTop(V2_ZONES.typeY0);
-  const tzBot = yFromTop(V2_ZONES.typeY1);
-  let typeSize = Math.min(tzBot - tzTop, 14);
-  ctx.font = 'bold ' + typeSize + 'px sans-serif';
-  while (ctx.measureText(typeText).width > tzW && typeSize > 6) {
-    typeSize -= 0.5;
-    ctx.font = 'bold ' + typeSize + 'px sans-serif';
-  }
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(typeText, bw * ((V2_ZONES.typeX0 + V2_ZONES.typeX1) / 2), (tzTop + tzBot) / 2);
-  ctx.textBaseline = 'alphabetic';
-
   // Name — centered at the top of the white panel
   const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
   const nameMaxW = bw - 8;

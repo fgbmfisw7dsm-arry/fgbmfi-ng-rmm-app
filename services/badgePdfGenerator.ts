@@ -321,22 +321,6 @@ function drawBadge(
     const fieldSize = isLarge ? 8.0 : 6.5;
     const labelSize = isLarge ? 7.0 : 5.5;
 
-    // Delegate type — white text over the design's slanted navy rect (top-right)
-    const typeText = (delegate.delegate_type || 'Member').toUpperCase();
-    const tzW = bw * (V2_ZONES.typeX1 - V2_ZONES.typeX0);
-    const tzTop = yFromTop(V2_ZONES.typeY0);
-    const tzBot = yFromTop(V2_ZONES.typeY1);
-    let typeSize = Math.min(tzTop - tzBot, isLarge ? 9.5 : 8.0);
-    while (fontBold.widthOfTextAtSize(typeText, typeSize) > tzW && typeSize > 5) typeSize -= 0.25;
-    page.drawText(typeText, {
-      x: badgeLeft + bw * ((V2_ZONES.typeX0 + V2_ZONES.typeX1) / 2) - fontBold.widthOfTextAtSize(typeText, typeSize) / 2,
-      y: tzBot + (tzTop - tzBot) / 2 - typeSize * 0.35,
-      size: typeSize,
-      font: fontBold as any,
-      color: HEADER_TEXT,
-      maxWidth: tzW,
-    });
-
     // Name — centered at top of the white panel
     const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
     const nameMaxW = bw - mmToPt(4);
@@ -532,18 +516,6 @@ function drawBadge(
       }
     }
 
-    const delegateType = delegate.delegate_type || 'Member';
-    const bts = 10.0;
-    const btText = delegateType.toUpperCase();
-    const btw = fontBold.widthOfTextAtSize(btText, bts);
-    const btBandH = isPortrait ? imgH * ZONES.bandFraction : bandH;
-    page.drawText(btText, {
-      x: badgeLeft + (bw - btw) / 2,
-      y: badgeBottom + (btBandH - bts) / 2,
-      size: bts,
-      font: fontBold as any,
-      color: HEADER_TEXT,
-    });
     return;
   }
 
@@ -632,9 +604,6 @@ function drawBadge(
       const dt = delegate.delegate_type || 'Member';
       const bc = BAND_COLORS[dt] || DEFAULT_BAND;
       page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-      const bts = isSmall ? 9.0 : 10.0;
-      const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
-      page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
       return;
     }
 
@@ -738,9 +707,6 @@ function drawBadge(
     const dt = delegate.delegate_type || 'Member';
     const bc = BAND_COLORS[dt] || DEFAULT_BAND;
     page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
-    const bts = isSmall ? 9.0 : 10.0;
-    const btw = fontBold.widthOfTextAtSize(dt.toUpperCase(), bts);
-    page.drawText(dt.toUpperCase(), { x: badgeLeft + (bw - btw) / 2, y: badgeBottom + (bandH - bts) / 2, size: bts, font: fontBold as any, color: HEADER_TEXT });
     return;
   }
 
@@ -929,17 +895,6 @@ function drawBadge(
     width: bw,
     height: bandH,
     color: rgb(bandColor[0], bandColor[1], bandColor[2]),
-  });
-
-  const bandTextSize = isSmall ? 9.0 : 10.0;
-  const bandText = delegateType.toUpperCase();
-  const bandTextW = fontBold.widthOfTextAtSize(bandText, bandTextSize);
-  page.drawText(bandText, {
-    x: badgeLeft + (bw - bandTextW) / 2,
-    y: badgeBottom + (bandH - bandTextSize) / 2,
-    size: bandTextSize,
-    font: fontBold as any,
-    color: HEADER_TEXT,
   });
   } catch (badgeErr: any) {
     console.error('drawBadge failed:', badgeErr?.message || badgeErr);

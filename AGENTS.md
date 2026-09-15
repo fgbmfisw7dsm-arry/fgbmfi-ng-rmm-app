@@ -771,6 +771,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **DB (`supabase_migration_v1.48_rename_external_district.sql`, idempotent):** (1) re-files every `delegates.district = 'National/External'` row to `International/External` (all events — project-wide rename), (2) rebuilds `delegates_insert_scoped` so restricted-event registrar Free Guest manual inserts match `district = 'International/External'` (their new home), (3) reconciles `system_settings.districts` — **`districts` is `TEXT[]` (NOT jsonb; a `jsonb` cast fails with `22P02 invalid input syntax for type json` on `{International/External,…}`)** — using `array_remove` + `ANY` + array append (order-preserving). `supabase_schema.sql` §4 seed + §12g RLS reconciled to the new label. Deploy the migration with the frontend so data and app agree; **no Master List code change required.** Parts 1–2 auto-commit even if a later part errors in the SQL editor — re-running the whole file is safe (DROP POLICY IF EXISTS / UPDATE no-ops).
 - **Historical migrations (`v1.39`, `v1.47`) intentionally keep the old label** — they are versioned history and their cleanup scopes still matched at run time.
 
+## 47. Badge Delegate-Type Text Removed (v1.49)
+
+- **Behaviour (Sep 2026):** the `MEMBER`/`FREE GUEST` delegate-type text is no longer printed on ANY badge — unconditional, no event toggle. Design images, colour-coded footer bands, QR, name/detail fields, zones and fonts are untouched, so the type area stays blank exactly as in the original graphics (`badge-design-v2.png` slanted navy rect and the legacy design band).
+- **Surfaces changed (`services/badgePdfGenerator.ts` `drawBadge` + `services/badgeImageGenerator.ts` Canvas):**
+  - V2 full-design portraits (4-up/6-up-portrait): removed the white `typeText` in the navy slanted rect.
+  - Legacy design portraits (9-up/8-up-portrait, 4-up-3x4): removed `btText` over the design's bottom band.
+  - Portrait banner / no-banner paths: removed the white `dt` text on the `BAND_COLORS` footer band (band fill kept).
+  - Landscape (8-up/10-up): removed the `bandText` on the footer band (band fill kept).
+  - Check-In e-Badge canvas: removed the white `typeText` in the navy slanted rect.
+- **Not changed:** `BAND_COLORS`/`DEFAULT_BAND` (still drive band fills), `MasterList` Type column, forms, filter dropdowns, CheckInPage's delegate info caption line, `BadgePreview` (layout-only). Only the badge-graphic text was removed.
+
 ## Code Conventions
 
 ### Naming
