@@ -272,9 +272,10 @@ $func$;
 
 DROP TABLE IF EXISTS external_delegates_dupe_backup_20260915;
 
-CREATE TABLE external_delegates_dupe_backup_20260915 (LIKE delegates INCLUDING ALL);
-
-INSERT INTO external_delegates_dupe_backup_20260915
+-- CTAS (not LIKE+INSERT): COPY delegates' `name_display` is a GENERATED column that
+-- PostgreSQL 15 refuses to accept non-DEFAULT values for on INSERT, so the backup is
+-- built as a plain table (all columns copy as ordinary, insertable columns).
+CREATE TABLE external_delegates_dupe_backup_20260915 AS
 SELECT d.*
 FROM delegates d
 WHERE d.district = 'National/External'
