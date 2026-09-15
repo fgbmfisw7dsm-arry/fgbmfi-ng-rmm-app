@@ -4,7 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, splitCsvRecords, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -162,6 +162,7 @@ const ImportModule = () => {
       'short code': 'District', 'shortcode': 'District', 'zone code': 'District', 'zonecode': 'District',
       'chapter': 'Chapter', 'branch': 'Chapter', 'unit': 'Chapter',
       'phone': 'Phone', 'phone number': 'Phone', 'phone no': 'Phone', 'phoneno': 'Phone', 'mobile': 'Phone', 'mobile no': 'Phone', 'mobileno': 'Phone', 'mobile number': 'Phone', 'mobilenumber': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'tel no': 'Phone', 'telno': 'Phone', 'cell': 'Phone', 'contact': 'Phone', 'contact number': 'Phone', 'contactnumber': 'Phone', 'nphone': 'Phone', 'n phone': 'Phone', 'direct line': 'Phone',
+      'phone/whatsapp': 'Phone', 'phone whatsapp': 'Phone', 'phone / whatsapp': 'Phone',
       'whatsapp': 'Phone', 'whatsapp number': 'Phone', 'whatsappnumber': 'Phone', 'whatsapp no': 'Phone', 'whatsappno': 'Phone', 'whatsapp phone': 'Phone', 'whatsappphone': 'Phone', 'wha': 'Phone', 'wa': 'Phone',
       'email': 'Email', 'email address': 'Email', 'e-mail': 'Email', 'mail': 'Email',
       'rank': 'Rank', 'level': 'Rank', 'grade': 'Rank',
@@ -247,7 +248,7 @@ const ImportModule = () => {
     const effectiveNameOrder = (): NameOrder => {
       if (nameOrder !== 'auto') return nameOrder;
       if (!csv.trim()) return 'given-first';
-      const lines = csv.trim().split('\n');
+      const lines = splitCsvRecords(csv);
       if (lines.length < 2) return 'given-first';
       const { headerIndex: hi } = detectHeaderRow(lines);
       const headers = parseHeaders(lines[hi]);
@@ -256,7 +257,7 @@ const ImportModule = () => {
 
     const namePreview: Array<{ raw: string; title: string; first: string; last: string }> = (() => {
       if (!csv.trim() || detectedColumns.length === 0) return [];
-      const lines = csv.trim().split('\n');
+      const lines = splitCsvRecords(csv);
       const { headerIndex: hi } = detectHeaderRow(lines);
       const headers = parseHeaders(lines[hi]);
       const findN = (f: string) => headers.findIndex(h => columnMap[h] !== false && KNOWN_FIELDS[normalizeKey(h)] === f);
@@ -305,7 +306,7 @@ const ImportModule = () => {
       reader.onload = (ev) => {
         const text = ev.target?.result as string;
         setCsv(text);
-        const lines = text.trim().split('\n');
+        const lines = splitCsvRecords(text);
         if (lines.length > 1) {
           const { headerIndex, bannerDistrict: bd, found } = detectHeaderRow(lines);
           const headers = parseHeaders(lines[headerIndex]);
@@ -363,7 +364,7 @@ const ImportModule = () => {
     const mappedCsvData = React.useMemo(() => {
       statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 };
       if (!csv.trim()) return csv;
-      const lines = csv.trim().split('\n');
+      const lines = splitCsvRecords(csv);
       if (lines.length < 2) return showMapping ? '' : csv;
 
       const { headerIndex: hi, bannerDistrict: detectedBanner } = detectHeaderRow(lines);
@@ -478,7 +479,7 @@ const ImportModule = () => {
 
     const importPreview = React.useMemo(() => {
       if (!csv.trim() || !showMapping || detectedColumns.length === 0) return null;
-      const lines = csv.trim().split('\n');
+      const lines = splitCsvRecords(csv);
       const { headerIndex: hi } = detectHeaderRow(lines);
       if (hi < 0 || hi >= lines.length) return null;
       const headers = parseHeaders(lines[hi]);
@@ -552,7 +553,7 @@ const ImportModule = () => {
 
     const handleImport = async () => {
         const dataToImport = mappedCsvData;
-        const portalRows = dataToImport.trim().split('\n').filter(line => {
+        const portalRows = splitCsvRecords(dataToImport).filter(line => {
             const first = parseCsvLine(line)[0] || '';
             return !!first.trim();
         }).length;
@@ -563,7 +564,7 @@ const ImportModule = () => {
         }
 
         setLoading(true);
-        setProgress({ current: 0, total: dataToImport.trim().split('\n').length });
+        setProgress({ current: 0, total: splitCsvRecords(dataToImport).length });
         setFeedback(null);
 
         try {
@@ -739,7 +740,7 @@ const ImportModule = () => {
     const nameKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
 
     const extractRepairRows = (text: string, order: NameOrder): { parsedRows: Array<{ phone: string; title: string; first: string; last: string; district: string; chapter: string; zone: string; raw: string }>; banner: string; headerDesc: string | null } => {
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const lines = splitCsvRecords(text).map(l => l.trim()).filter(Boolean);
         const { headerIndex, bannerDistrict, found } = detectHeaderRow(lines);
         const banner = bannerDistrict || '';
         const headers = found ? parseHeaders(lines[headerIndex] || '') : [];
@@ -869,7 +870,7 @@ const ImportModule = () => {
 
     const handleRepairAnalyze = async () => {
         if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
-        const lines = repairSourceCsv.split('\n').map(l => l.trim()).filter(Boolean);
+        const lines = splitCsvRecords(repairSourceCsv).map(l => l.trim()).filter(Boolean);
         if (lines.length === 0) {
             setRepairResult({ type: 'preview', count: 0, msg: 'Paste or upload FULL NAME, PHONE rows (or load the CSV in the Bulk Delegate Import section above), then analyze.' });
             return;
@@ -1031,10 +1032,10 @@ const hasFile = repairHasFile;
     const targetEventName = targetEvent?.name || 'the selected event';
 
     const repairSourceCsv = repairCsv.trim() ? repairCsv : csv;
-    const repairHasFile = repairSourceCsv.trim().split('\n').map(l => l.trim()).filter(Boolean).length > 0;
+    const repairHasFile = splitCsvRecords(repairSourceCsv).map(l => l.trim()).filter(Boolean).length > 0;
 
     const repairFilePreview = (() => {
-      const lines = repairSourceCsv.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = splitCsvRecords(repairSourceCsv).map(l => l.trim()).filter(Boolean);
       if (lines.length === 0) return null;
       const { parsedRows, banner, headerDesc } = extractRepairRows(repairSourceCsv, repairOrder);
       return { rows: parsedRows.slice(0, 3), banner, headerDesc, total: parsedRows.length, fromTopImport: !repairCsv.trim() && !!csv.trim() };
@@ -1731,7 +1732,7 @@ const hasFile = repairHasFile;
                         value={csv}
                         onChange={e => {
                                 setCsv(e.target.value);
-                                const lines = e.target.value.trim().split('\n');
+                                const lines = splitCsvRecords(e.target.value);
                                 if (lines.length > 1) {
                                     const { headerIndex, bannerDistrict: bd, found } = detectHeaderRow(lines);
                                     const headers = parseHeaders(lines[headerIndex]);

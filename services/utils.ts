@@ -124,6 +124,38 @@ export const parseCsvLine = (line: string): string[] => {
     return fields;
 };
 
+// Splits CSV text into logical records (physical lines), respecting
+// double-quoted fields so embedded commas/newlines inside quotes never
+// break records — e.g. a header cell like "PHONE/\nWHATSAPP" (literal
+// newline inside quotes) stays one record. Mirrors parseCsvLine's quote
+// handling so downstream parseCsvLine round-trips cleanly.
+export const splitCsvRecords = (text: string): string[] => {
+    const records: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    const s = (text || '') as string;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inQuotes) {
+            cur += ch;
+            if (ch === '"') {
+                if (s[i + 1] === '"') { cur += '"'; i++; }
+                else inQuotes = false;
+            }
+        } else if (ch === '"') {
+            inQuotes = true;
+            cur += ch;
+        } else if (ch === '\n') {
+            records.push(cur.replace(/\r$/, ''));
+            cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    if (cur.trim()) records.push(cur.replace(/\r$/, ''));
+    return records;
+};
+
 // Escapes a field for the mapped-CSV output so commas/quotes survive a round-trip.
 export const csvEscape = (field: string): string => {
     const s = (field ?? '').trim();

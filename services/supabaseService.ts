@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -1162,7 +1162,7 @@ export const db = {
 
     importDelegates: async (csv: string, eventId?: string, regType: RegType = 'manual', onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
-        const lines = csv.trim().split('\n').map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
+        const lines = splitCsvRecords(csv).map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
             const last = (p[3] || '').trim();
             const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -1288,7 +1288,7 @@ export const db = {
 
     reconcileDistrictPortal: async (csv: string, eventId?: string, dryRun: boolean = true): Promise<{ inserted: number; updated: number; skipped: number; total: number }> => {
         if (!eventId) throw new Error('reconcileDistrictPortal requires eventId');
-        const lines = csv.trim().split('\n').map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
+        const lines = splitCsvRecords(csv).map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
             const last = (p[3] || '').trim();
             const firstCell = (p[0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
