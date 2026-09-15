@@ -161,6 +161,7 @@ const ImportModule = () => {
       'dist code': 'District', 'distcode': 'District', 'short district code': 'District', 'shortdistrictcode': 'District',
       'short code': 'District', 'shortcode': 'District', 'zone code': 'District', 'zonecode': 'District',
       'chapter': 'Chapter', 'branch': 'Chapter', 'unit': 'Chapter',
+      'chapter name': 'Chapter', 'chaptername': 'Chapter', 'chap': 'Chapter', 'chapter of fgbmfi': 'Chapter',
       'phone': 'Phone', 'phone number': 'Phone', 'phone no': 'Phone', 'phoneno': 'Phone', 'mobile': 'Phone', 'mobile no': 'Phone', 'mobileno': 'Phone', 'mobile number': 'Phone', 'mobilenumber': 'Phone', 'telephone': 'Phone', 'tel': 'Phone', 'tel no': 'Phone', 'telno': 'Phone', 'cell': 'Phone', 'contact': 'Phone', 'contact number': 'Phone', 'contactnumber': 'Phone', 'nphone': 'Phone', 'n phone': 'Phone', 'direct line': 'Phone',
       'phone/whatsapp': 'Phone', 'phone whatsapp': 'Phone', 'phone / whatsapp': 'Phone',
       'whatsapp': 'Phone', 'whatsapp number': 'Phone', 'whatsappnumber': 'Phone', 'whatsapp no': 'Phone', 'whatsappno': 'Phone', 'whatsapp phone': 'Phone', 'whatsappphone': 'Phone', 'wha': 'Phone', 'wa': 'Phone',
