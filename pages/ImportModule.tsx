@@ -44,7 +44,7 @@ function normalizeDelegateType(raw: string): string {
 }
 
 function resolveGuestFields(district: string, chapter: string, delegateType: string): { district: string; chapter: string; delegateType: string } {
-  const d = (district || '').trim().toUpperCase() === 'GUE' ? 'National/External' : district;
+  const d = (district || '').trim().toUpperCase() === 'GUE' ? 'International/External' : district;
   const c = (chapter || '').trim().toUpperCase() === 'GUE' ? 'Guest' : chapter;
   return { district: d, chapter: c, delegateType: normalizeDelegateType(delegateType) };
 }

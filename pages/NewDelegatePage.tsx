@@ -6,7 +6,7 @@ import { AppContext } from '../context/AppContext';
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
-const FREE_GUEST_DISTRICT = 'National/External';
+const FREE_GUEST_DISTRICT = 'International/External';
 const FREE_GUEST_CHAPTER = 'Guest';
 
 const NewDelegatePage = () => {

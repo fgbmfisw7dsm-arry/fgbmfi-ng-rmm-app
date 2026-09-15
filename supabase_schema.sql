@@ -669,7 +669,7 @@ GRANT EXECUTE ON FUNCTION confirm_user_by_email(TEXT) TO authenticated;
 -- 4. INITIAL SEED DATA
 INSERT INTO system_settings (districts, ranks, offices, regions)
 SELECT 
-    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra", "National/External"}',
+    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra", "International/External"}',
     '{"CP", "FR", "ND", "CP-REP"}',
     '{"DC", "RVP", "NVP", "NP", "NEC", "BOT", "CP", "FR", "ND", "CP-REP", "OTHER"}',
     '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}'
@@ -1521,8 +1521,9 @@ DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
 CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
 -- v1.39: restricted events (event_config.restrict_registrar_to_free_guest) allow registrar MANUAL
--- inserts ONLY as 'Free Guest' + district='National/External'; district-scoped manual inserts are
--- disabled on restricted events. QR-scan/import sources remain under normal district scoping.
+-- inserts ONLY as 'Free Guest' + district='International/External' (v1.48 label rename from
+-- 'National/External'); district-scoped manual inserts are disabled on restricted events.
+-- QR-scan/import sources remain under normal district scoping.
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR (
@@ -1546,7 +1547,7 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
     )
     AND COALESCE(delegates.registration_source, 'manual') = 'manual'
     AND UPPER(COALESCE(delegates.delegate_type, '')) = 'FREE GUEST'
-    AND delegates.district = 'National/External'
+    AND delegates.district = 'International/External'
   ));
 CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()
