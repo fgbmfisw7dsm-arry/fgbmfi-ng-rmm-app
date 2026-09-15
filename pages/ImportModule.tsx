@@ -466,9 +466,7 @@ const ImportModule = () => {
 
         let emailVal = firstIdx('Email') >= 0 ? (values[firstIdx('Email')] || '') : '';
         if (!emailVal) {
-          const rbIdx = headers.findIndex(h =>
-            columnMap[h] !== false && ['registeredby', 'registered by'].includes(normalizeKey(h))
-          );
+          const rbIdx = headers.findIndex(h => ['registeredby', 'registered by'].includes(normalizeKey(h)));
           if (rbIdx >= 0) emailVal = values[rbIdx] || '';
         }
         colValues['Email'] = emailVal;
