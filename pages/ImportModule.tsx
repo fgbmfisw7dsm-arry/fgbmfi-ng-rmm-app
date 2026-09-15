@@ -124,14 +124,14 @@ const ImportModule = () => {
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
     const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; portalRows?: number; regType?: string }} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
     const [bannerDistrict, setBannerDistrict] = useState('');
     const [nameOrder, setNameOrder] = useState<NameOrder | 'auto'>('auto');
-    const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 });
+    const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0 });
     const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
     const [scrambleSamples, setScrambleSamples] = useState<string[]>([]);
     const [scrambleTotal, setScrambleTotal] = useState(0);
@@ -363,7 +363,7 @@ const ImportModule = () => {
     };
 
     const mappedCsvData = React.useMemo(() => {
-      statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0 };
+      statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0 };
       if (!csv.trim()) return csv;
       const lines = splitCsvRecords(csv);
       if (lines.length < 2) return showMapping ? '' : csv;
@@ -454,7 +454,10 @@ const ImportModule = () => {
         const resolvedDistrict = resolveDistrictShortCode(districtBefore || effectiveBanner);
         if (districtBefore && resolvedDistrict && resolvedDistrict !== stripDistrictSuffix(districtBefore)) statsRef.current.shortCodesResolved++;
         colValues['District'] = resolvedDistrict;
-        colValues['Chapter'] = cleanChapterName(pickRowValue(values, fieldIndices.get('Chapter') || []));
+        const chapterRaw = pickRowValue(values, fieldIndices.get('Chapter') || []);
+        if (chapterRaw.trim()) statsRef.current.chaptersInFile++;
+        else statsRef.current.chaptersBlankAtSource++;
+        colValues['Chapter'] = cleanChapterName(chapterRaw);
 
         const phoneFromPhoneCol = pickRowValue(values, phoneLikeIdx);
         const phoneFromWhatsapp = pickRowValue(values, whatsappIdx);
@@ -1148,6 +1151,16 @@ const hasFile = repairHasFile;
                                     {(feedback.stats?.portalRows ?? 0) > 0 && (
                                         <p className="text-[10px] font-bold text-emerald-700 uppercase">
                                             {'\uD83D\uDCCB'} {feedback.stats?.portalRows} rows carry a RegId — upload classified as {String(feedback.stats?.regType || 'manual').toUpperCase()}
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.chaptersInFile ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-blue-800 uppercase">
+                                            {'\uD83C\uDFF5\uFE0F'} {feedback.stats?.chaptersInFile} rows carry a Chapter ({feedback.stats?.chaptersBlankAtSource ?? 0} blank in file)
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.chaptersInFile ?? 0) > 0 && (feedback.skipped ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-red-700 uppercase">
+                                            {'\u26A0\uFE0F'} File carries Chapters but {feedback.skipped} existing rows were skipped — if Chapter is still blank, apply the v1.46 import RPC patch then re-import.
                                         </p>
                                     )}
                                 </div>

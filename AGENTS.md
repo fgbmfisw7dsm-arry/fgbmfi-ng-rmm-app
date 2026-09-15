@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.45 (Full-design portrait badges — 4-up-portrait + 6-up-portrait rework)
+- **Current Version:** 1.46 (Import merge RPC chapter fill — NC2 re-import chapter fix)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -745,6 +745,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **New draw path (`badgePdfGenerator.ts`):** `drawBadge` now accepts `badgeDesignV2` (embedded PNG). When present + `isPortrait`, it draws the design full-bleed then renders content from the **tunable `V2_ZONES` fraction table** (measured from the top of the badge): white auto-fit delegate-type text centered in the navy rect (typeY0/typeY1/typeX0/typeX1); name block centered at the top of the white panel (nameTop/nameBottom); then a side-by-side body row — detail lines (District/Chapter/ID + Rank/Office per `event_config`) in a left column (`detailsX`..`qrX0`) using `fitPriorityFields`, and the QR square right-aligned (`qrX0`/`qrX1`/`qrCX`, ≤30mm). Font tiers scale by badge width (`isLarge = bw ≥ 70mm`).
 - **Plumbing:** `generateBadgePDF(..., badgeDesignV2Bytes, onProgress)` embeds and threads the new asset; `BadgePrintingModule` fetches `/badge-design-v2.png` alongside the legacy assets; dropdown + `BadgePreview` updated (7 layouts). `types.ts` additive exception: `BadgeLayout` += `'4-up-portrait'`.
 - **Calibration note:** because the design geometry can't be self-verified visually, `V2_ZONES` fractions are centralized for quick re-tuning against a printed sample (compare to `Tag TEMPLATE.png`). v1.45-rev: name block lowered ~1 line (nameTop 0.462/nameBottom 0.577, details band 0.587–0.895) and the ID row renders at −0.5pt (large)/−1.0pt (small) with a width-fit cap. v1.45-rev2: Check-In E-Badge is now fully synced — the canvas generator (65×90.8mm, mirrored `V2_ZONES`) uses **top-down canvas coordinates** (y = `f × bh`, QR/fields anchored to `bandTop`); it previously reused the PDF's bottom-up `yFromTop` formula, mirroring the whole content block upside-down under the header and hiding the delegate-type text at the badge bottom.
+
+## 44. Import Merge RPC Chapter Fill (v1.46)
+
+- **Problem solved (NC2 re-import, Sep 2026):** after deleting the NC2 district data and re-importing `NC2 MANUAL EARLY BIRD…14-09-26.csv`, the Import Complete banner showed `2 new records imported + 203 records skipped (already complete)` and Chapter stayed EMPTY on every row — even though the mapping preview showed the CHAPTER column (index 4) correctly. Root cause: the re-import **merged** into the 203 existing identity-matched rows (name+phone) and the **deployed `import_delegates_batch_merge` merge-UPDATE path did not fill blank `chapter`** on existing rows. Fresh INSERTs always wrote chapter (so early district imports looked fine), but re-imports over existing rows could never backfill it. The result `203 skipped (0 field changes)` is the fingerprint of a merge path that does not write chapter, versus `203 updated` (which the fill behaves as).
+- **Fix (`supabase_migration_v1.46_import_chapter_fill.sql`, idempotent `CREATE OR REPLACE`):** one function folds the three canonical variants together so the live DB is version-insensitive:
+  1. **reg_type-aware (v1.44)** — INSERT writes `reg_type`, merge SET columns keep fill-blank-only.
+  2. **row-guard v2 (v1.30/§32)** — blank/numeric/numeric-leading/`=`/`<`/`>`/summary-token rows `CONTINUE` (skipped), never insert or gap-fill.
+  3. **NEW chapter fill** — on BOTH merge UPDATEs (normal + `unique_violation`), `chapter` is set to the incoming value when the stored chapter is **blank** OR is a corruption artifact: `^(ZONE|AREA)\s*\d+$` or `^[A-Z]{2}\d{1,2}$` (zone/code left over from misaligned imports). Legitimate chapter names are never overwritten. The change-detection `OR` list carries the same conditions, so corrected rows count as **updated** (not silently skipped).
+- **supabase_schema.sql reconciled** to the same function (fixes a pre-existing drift — the schema copy predated reg_type and the row-guard).
+- **Frontend visibility (`ImportModule.tsx`):** Import Complete banner now reports **"N rows carry a Chapter (M blank in file)"** (from `statsRef.chaptersInFile`/`chaptersBlankAtSource`, tracked in `mappedCsvData`) and, when the file carries chapters but `skipped > 0`, an amber/red hint: *"File carries Chapters but N existing rows were skipped — if Chapter is still blank, apply the v1.46 import RPC patch then re-import."* No other import paths changed.
+- **Operational:** apply the migration in the Supabase SQL editor (idempotent), then **re-import the CSV once** — the 203 existing NC2 rows now merge-fill their blank chapters (reported as `updated`). A read-only preview query for the affected district is included at the bottom of the migration file (blank/zone-artifact/code-artifact counts) if you want numbers before re-importing.
 
 ## Code Conventions
 

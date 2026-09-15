@@ -976,6 +976,32 @@ BEGIN
 
   FOR v_item IN SELECT * FROM JSONB_ARRAY_ELEMENTS(p_delegates)
   LOOP
+    -- Row-quality guard (v2): skip blank / purely-numeric / numeric-leading /
+    -- '='/<> -laced / summary-note-token rows so they can never be inserted
+    -- or gap-fill a real record.
+    IF (
+      TRIM(COALESCE(v_item->>'first_name','')) = ''
+      AND TRIM(COALESCE(v_item->>'last_name','')) = ''
+    )
+    OR (
+      TRIM(COALESCE(v_item->>'first_name','')) <> ''
+      AND TRIM(v_item->>'first_name') !~ '[A-Za-z]'
+    )
+    OR (
+      TRIM(COALESCE(v_item->>'last_name','')) <> ''
+      AND TRIM(v_item->>'last_name') !~ '[A-Za-z]'
+    )
+    OR TRIM(COALESCE(v_item->>'first_name','')) ~ '^\d'
+    OR TRIM(COALESCE(v_item->>'last_name','')) ~ '^\d'
+    OR TRIM(COALESCE(v_item->>'first_name','')) ~ '[=<>]'
+    OR TRIM(COALESCE(v_item->>'last_name','')) ~ '[=<>]'
+    OR (UPPER(TRIM(COALESCE(v_item->>'first_name',''))) || ' ' || UPPER(TRIM(COALESCE(v_item->>'last_name',''))))
+       ~ '(GRAND TOTAL|ZONE SUMMARY|REGISTRATION RECORDS|SUBTOTAL|SOURCE:|MARKED AS|PER NOTES|AS AT|DATE OF BIRTH|RECORDS|NOTES:|NAIRA|DELIVERABLES|SUMMARY|BATCH |ADULTS|TEENS|CHILDREN|TOTAL|CAT=)'
+    THEN
+      v_skipped := v_skipped + 1;
+      CONTINUE;
+    END IF;
+
     v_phone_norm := normalize_phone_sql(v_item->>'phone');
     v_title_key := normalize_name_key(COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'));
     v_first_key := normalize_name_key(v_item->>'first_name');
@@ -1022,7 +1048,7 @@ BEGIN
         INSERT INTO delegates (
           title, first_name, last_name, district, chapter,
           phone, email, rank, office, delegate_type,
-          qr_hash, event_id, registration_source, external_id
+          qr_hash, event_id, registration_source, external_id, reg_type
         ) VALUES (
           COALESCE(TRIM(v_item->>'title'), ''),
           TRIM(v_item->>'first_name'),
@@ -1037,7 +1063,8 @@ BEGIN
           COALESCE(v_item->>'qr_hash', gen_random_uuid()::TEXT),
           p_event_id,
           COALESCE(v_item->>'registration_source', 'import'),
-          COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr'))
+          COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr')),
+          COALESCE(v_item->>'reg_type', 'manual')
         );
         v_inserted := v_inserted + 1;
       EXCEPTION WHEN unique_violation THEN
@@ -1054,7 +1081,12 @@ BEGIN
             title = CASE WHEN COALESCE(NULLIF(TRIM(delegates.title), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'title'), ''), '') <> '' THEN TRIM(v_item->>'title') ELSE delegates.title END,
             email = CASE WHEN COALESCE(NULLIF(TRIM(delegates.email), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'email'), ''), '') <> '' THEN LOWER(TRIM(v_item->>'email')) ELSE delegates.email END,
             district = CASE WHEN COALESCE(NULLIF(TRIM(delegates.district), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'district'), ''), '') <> '' THEN TRIM(v_item->>'district') ELSE delegates.district END,
-            chapter = CASE WHEN COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') <> '' THEN TRIM(v_item->>'chapter') ELSE delegates.chapter END,
+            chapter = CASE
+              WHEN COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') = '' THEN delegates.chapter
+              WHEN COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' THEN TRIM(v_item->>'chapter')
+              WHEN TRIM(delegates.chapter) ~* '^(ZONE|AREA)\s*\d+$' THEN TRIM(v_item->>'chapter')
+              WHEN TRIM(delegates.chapter) ~* '^[A-Z]{2}\d{1,2}$' THEN TRIM(v_item->>'chapter')
+              ELSE delegates.chapter END,
             rank = CASE WHEN COALESCE(NULLIF(TRIM(delegates.rank), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), '') <> '' THEN TRIM(v_item->>'rank') ELSE delegates.rank END,
             office = CASE WHEN COALESCE(NULLIF(TRIM(delegates.office), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'office'), ''), '') <> '' THEN TRIM(v_item->>'office') ELSE delegates.office END,
             delegate_type = CASE
@@ -1064,7 +1096,8 @@ BEGIN
               WHEN COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), '') <> '' THEN TRIM(v_item->>'delegate_type')
               ELSE delegates.delegate_type END,
             phone = CASE WHEN NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm THEN v_phone_norm ELSE delegates.phone END,
-            external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END
+            external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END,
+            reg_type = CASE WHEN COALESCE(NULLIF(TRIM(delegates.reg_type), ''), '') = '' THEN COALESCE(v_item->>'reg_type', 'manual') ELSE delegates.reg_type END
           WHERE delegate_id = v_existing_id;
           GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
           IF v_rows_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
@@ -1077,7 +1110,12 @@ BEGIN
         title = CASE WHEN COALESCE(NULLIF(TRIM(delegates.title), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'title'), ''), '') <> '' THEN TRIM(v_item->>'title') ELSE delegates.title END,
         email = CASE WHEN COALESCE(NULLIF(TRIM(delegates.email), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'email'), ''), '') <> '' THEN LOWER(TRIM(v_item->>'email')) ELSE delegates.email END,
         district = CASE WHEN COALESCE(NULLIF(TRIM(delegates.district), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'district'), ''), '') <> '' THEN TRIM(v_item->>'district') ELSE delegates.district END,
-        chapter = CASE WHEN COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') <> '' THEN TRIM(v_item->>'chapter') ELSE delegates.chapter END,
+        chapter = CASE
+          WHEN COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') = '' THEN delegates.chapter
+          WHEN COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' THEN TRIM(v_item->>'chapter')
+          WHEN TRIM(delegates.chapter) ~* '^(ZONE|AREA)\s*\d+$' THEN TRIM(v_item->>'chapter')
+          WHEN TRIM(delegates.chapter) ~* '^[A-Z]{2}\d{1,2}$' THEN TRIM(v_item->>'chapter')
+          ELSE delegates.chapter END,
         rank = CASE WHEN COALESCE(NULLIF(TRIM(delegates.rank), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), '') <> '' THEN TRIM(v_item->>'rank') ELSE delegates.rank END,
         office = CASE WHEN COALESCE(NULLIF(TRIM(delegates.office), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'office'), ''), '') <> '' THEN TRIM(v_item->>'office') ELSE delegates.office END,
         delegate_type = CASE
@@ -1090,13 +1128,17 @@ BEGIN
           WHEN NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm
             THEN v_phone_norm
           ELSE delegates.phone END,
-        external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END
+        external_id = CASE WHEN COALESCE(NULLIF(TRIM(delegates.external_id), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), '') <> '' THEN TRIM(v_item->>'external_id') ELSE delegates.external_id END,
+        reg_type = CASE WHEN COALESCE(NULLIF(TRIM(delegates.reg_type), ''), '') = '' THEN COALESCE(v_item->>'reg_type', 'manual') ELSE delegates.reg_type END
       WHERE delegate_id = v_existing_id
         AND (
           (COALESCE(NULLIF(TRIM(delegates.title), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'title'), ''), '') <> '')
           OR (COALESCE(NULLIF(TRIM(delegates.email), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'email'), ''), '') <> '')
           OR (COALESCE(NULLIF(TRIM(delegates.district), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'district'), ''), '') <> '')
-          OR (COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') <> '')
+          OR (COALESCE(NULLIF(TRIM(v_item->>'chapter'), ''), '') <> ''
+              AND (COALESCE(NULLIF(TRIM(delegates.chapter), ''), '') = ''
+                   OR TRIM(delegates.chapter) ~* '^(ZONE|AREA)\s*\d+$'
+                   OR TRIM(delegates.chapter) ~* '^[A-Z]{2}\d{1,2}$'))
           OR (COALESCE(NULLIF(TRIM(delegates.rank), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'rank'), ''), '') <> '')
           OR (COALESCE(NULLIF(TRIM(delegates.office), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'office'), ''), '') <> '')
           OR (COALESCE(NULLIF(TRIM(delegates.delegate_type), ''), '') = '' AND COALESCE(NULLIF(TRIM(v_item->>'delegate_type'), ''), '') <> '')
