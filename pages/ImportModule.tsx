@@ -464,7 +464,14 @@ const ImportModule = () => {
         if (!phoneFromPhoneCol && phoneFromWhatsapp) statsRef.current.whatsappFilled++;
         colValues['Phone'] = normalizePhone(phoneFromPhoneCol || phoneFromWhatsapp);
 
-        colValues['Email'] = firstIdx('Email') >= 0 ? (values[firstIdx('Email')] || '') : '';
+        let emailVal = firstIdx('Email') >= 0 ? (values[firstIdx('Email')] || '') : '';
+        if (!emailVal) {
+          const rbIdx = headers.findIndex(h =>
+            columnMap[h] !== false && ['registeredby', 'registered by'].includes(normalizeKey(h))
+          );
+          if (rbIdx >= 0) emailVal = values[rbIdx] || '';
+        }
+        colValues['Email'] = emailVal;
         colValues['Rank'] = firstIdx('Rank') >= 0 ? (values[firstIdx('Rank')] || '') : '';
         colValues['Office'] = firstIdx('Office') >= 0 ? (values[firstIdx('Office')] || '') : '';
         colValues['DelegateType'] = firstIdx('DelegateType') >= 0 ? (values[firstIdx('DelegateType')] || '') : '';
