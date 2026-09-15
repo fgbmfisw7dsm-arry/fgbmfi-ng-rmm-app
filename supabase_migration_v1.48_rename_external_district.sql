@@ -60,20 +60,18 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
 
 -- =====================================================================================
 -- 3. Reconcile system_settings.districts (removes stale old label, appends new one,
---    preserves existing order)
+--    preserves existing order). districts is TEXT[] — array ops, NOT jsonb.
 -- =====================================================================================
 DO $$
-DECLARE v_districts jsonb;
+DECLARE v_districts text[];
 BEGIN
   SELECT districts INTO v_districts FROM system_settings LIMIT 1;
   IF v_districts IS NULL THEN RETURN; END IF;
 
-  v_districts := (SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-                  FROM (SELECT elem FROM jsonb_array_elements_text(v_districts) elem
-                        WHERE elem <> 'National/External') t);
+  v_districts := array_remove(v_districts, 'National/External');
 
-  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(v_districts) elem WHERE elem = 'International/External') THEN
-    v_districts := v_districts || '"International/External"'::jsonb;
+  IF NOT ('International/External' = ANY(v_districts)) THEN
+    v_districts := v_districts || ARRAY['International/External'];
   END IF;
 
   UPDATE system_settings SET districts = v_districts;
