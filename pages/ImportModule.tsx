@@ -1159,8 +1159,8 @@ const hasFile = repairHasFile;
                                         </p>
                                     )}
                                     {(feedback.stats?.chaptersInFile ?? 0) > 0 && (feedback.skipped ?? 0) > 0 && (
-                                        <p className="text-[10px] font-bold text-red-700 uppercase">
-                                            {'\u26A0\uFE0F'} File carries Chapters but {feedback.skipped} existing rows were skipped — if Chapter is still blank, apply the v1.46 import RPC patch then re-import.
+                                        <p className="text-[10px] font-bold text-amber-700 uppercase">
+                                            {'\u2139\uFE0F'} {feedback.skipped} existing rows were already complete — if any row still lacks Chapter in the Master List, apply the v1.46 import RPC patch then re-import.
                                         </p>
                                     )}
                                 </div>
