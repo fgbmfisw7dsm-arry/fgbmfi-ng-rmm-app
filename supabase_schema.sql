@@ -1009,6 +1009,14 @@ BEGIN
     v_email_lower := LOWER(TRIM(COALESCE(v_item->>'email', '')));
 
     v_existing_id := NULL;
+    -- Identity lookup, chained so a contact-bearing incoming row still merges into a
+    -- contact-less existing row instead of inserting a duplicate:
+    --   1. phone-primary match (incoming phone present)
+    --   2. email match (incoming email present, existing email also present)
+    --   3. names-only contact-less fallback (existing row has no phone AND no email) —
+    --      runs even when the incoming row carries contact data, so re-importing an
+    --      external/guest CSV (now tagging RegisteredBy emails) gap-fills the originals
+    --      instead of multiplying records (Sep 2026 regression).
     IF NULLIF(v_phone_norm, '') IS NOT NULL THEN
       SELECT delegate_id INTO v_existing_id
       FROM delegates
@@ -1019,7 +1027,9 @@ BEGIN
         AND NULLIF(phone_normalized, '') IS NOT NULL
         AND phone_normalized = v_phone_norm
       LIMIT 1;
-    ELSIF v_email_lower <> '' THEN
+    END IF;
+
+    IF v_existing_id IS NULL AND v_email_lower <> '' THEN
       SELECT delegate_id INTO v_existing_id
       FROM delegates
       WHERE event_id = p_event_id
@@ -1029,9 +1039,12 @@ BEGIN
         AND NULLIF(email, '') IS NOT NULL
         AND LOWER(TRIM(email)) = v_email_lower
       LIMIT 1;
-    ELSE
-      -- No phone AND no email: dedupe by exact identity alone. Prevents
-      -- repeated imports of contact-less rows multiplying identical records.
+    END IF;
+
+    IF v_existing_id IS NULL THEN
+      -- No phone AND no email on a matching existing row: dedupe by exact identity
+      -- alone. Prevents repeated imports of contact-less rows multiplying identical
+      -- records (works regardless of whether the incoming row carries contact data).
       SELECT delegate_id INTO v_existing_id
       FROM delegates
       WHERE event_id = p_event_id
