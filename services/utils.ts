@@ -75,6 +75,17 @@ export const resolveDistrictShortCode = (raw?: string | null): string => {
     return resolveDistrictAlias(v || trimmed) || trimmed;
 };
 
+// Strips a trailing chapter-code parenthetical (e.g. "(SW4-0123)") from a
+// chapter cell so only the chapter NAME is extracted for import. Only removes
+// the trailing "(...)" when its inner content matches the code shape
+// `[A-Z]{2}\d+-?\d{3,4}`; meaningful parentheticals like "(POLICE CHAPTER)"
+// or "(FRSC)" are preserved.
+export const cleanChapterName = (raw?: string | null): string => {
+    const t = (raw || '').replace(/\s+/g, ' ').trim();
+    if (!t) return t;
+    return t.replace(/\s*\(([A-Z]{2}\s*\d+\s*-?\s*\d{3,4})\)\s*$/i, '').replace(/\s+/g, ' ').trim();
+};
+
 export const normalizePhone = (raw?: string | null): string => {
     let digits = (raw || '').replace(/[^0-9]/g, '');
     if (!digits) return '';

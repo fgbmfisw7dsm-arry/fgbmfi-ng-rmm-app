@@ -4,7 +4,7 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -452,7 +452,7 @@ const ImportModule = () => {
         const resolvedDistrict = resolveDistrictShortCode(districtBefore || effectiveBanner);
         if (districtBefore && resolvedDistrict && resolvedDistrict !== stripDistrictSuffix(districtBefore)) statsRef.current.shortCodesResolved++;
         colValues['District'] = resolvedDistrict;
-        colValues['Chapter'] = pickRowValue(values, fieldIndices.get('Chapter') || []);
+        colValues['Chapter'] = cleanChapterName(pickRowValue(values, fieldIndices.get('Chapter') || []));
 
         const phoneFromPhoneCol = pickRowValue(values, phoneLikeIdx);
         const phoneFromWhatsapp = pickRowValue(values, whatsappIdx);
@@ -781,7 +781,7 @@ const ImportModule = () => {
                 fullName = (values[fullNameIdx] || '').trim().replace(/^["']|["']$/g, '');
                 phone = normalizePhone(pick(values, phoneIdxList));
                 district = districtIdx >= 0 ? (values[districtIdx] || '').trim() : '';
-                chapter = chapterIdx >= 0 ? (values[chapterIdx] || '').trim() : '';
+                chapter = chapterIdx >= 0 ? cleanChapterName(values[chapterIdx]) : '';
                 zone = zoneIdx >= 0 ? (values[zoneIdx] || '').trim() : '';
             } else if (found && firstIdxR >= 0 && lastIdxR >= 0 && phoneIdxList.length > 0) {
                 first = (values[firstIdxR] || '').trim().replace(/^["']|["']$/g, '');
@@ -790,7 +790,7 @@ const ImportModule = () => {
                 fullName = `${first} ${last}`.trim();
                 phone = normalizePhone(pick(values, phoneIdxList));
                 district = districtIdx >= 0 ? (values[districtIdx] || '').trim() : '';
-                chapter = chapterIdx >= 0 ? (values[chapterIdx] || '').trim() : '';
+                chapter = chapterIdx >= 0 ? cleanChapterName(values[chapterIdx]) : '';
                 zone = zoneIdx >= 0 ? (values[zoneIdx] || '').trim() : '';
             } else {
                 fullName = (values[0] || '').trim().replace(/^["']|["']$/g, '');

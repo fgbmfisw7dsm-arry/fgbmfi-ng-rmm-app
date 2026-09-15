@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -1184,7 +1184,7 @@ export const db = {
                     first_name: p[2],
                     last_name: p[3],
                     district: cleanDistrict(p[4]),
-                    chapter: p[5],
+                    chapter: cleanChapterName(p[5]),
                     phone: p[6],
                     email: p[7],
                     rank: p[8] || 'CP',
@@ -1308,7 +1308,7 @@ export const db = {
                 first_name: p[2],
                 last_name: p[3],
                 district: cleanDistrict(p[4]),
-                chapter: p[5],
+                chapter: cleanChapterName(p[5]),
                 phone: p[6],
                 email: p[7],
                 rank: p[8] || 'CP',
