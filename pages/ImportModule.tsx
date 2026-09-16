@@ -1,5 +1,5 @@
 
-import React, { useState, useContext, useMemo, useRef } from 'react';
+import React, { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
@@ -43,10 +43,14 @@ function normalizeDelegateType(raw: string): string {
   return (raw || '').trim();
 }
 
-function resolveGuestFields(district: string, chapter: string, delegateType: string): { district: string; chapter: string; delegateType: string } {
-  const d = (district || '').trim().toUpperCase() === 'GUE' ? 'International/External' : district;
+function resolveGuestFields(district: string, chapter: string, delegateType: string, typeMap: Record<string, string> = {}): { district: string; chapter: string; delegateType: string } {
+  const t = normalizeDelegateType(delegateType);
+  const guestDistrict = (typeMap['Free Guest'] || typeMap['National Guest'] || '').trim();
+  const d0 = (district || '').trim();
+  const d = d0.toUpperCase() === 'GUE' ? (guestDistrict || d0) : d0;
   const c = (chapter || '').trim().toUpperCase() === 'GUE' ? 'Guest' : chapter;
-  return { district: d, chapter: c, delegateType: normalizeDelegateType(delegateType) };
+  const routed = (typeMap[t] || '').trim();
+  return { district: routed ? routed : d, chapter: c, delegateType: t };
 }
 
 const hasAlpha = (s: string): boolean => /[A-Za-z]/.test(s || '');
@@ -130,6 +134,7 @@ const ImportModule = () => {
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
     const [bannerDistrict, setBannerDistrict] = useState('');
+    const [typeDistrictMap, setTypeDistrictMap] = useState<Record<string, string>>({});
     const [nameOrder, setNameOrder] = useState<NameOrder | 'auto'>('auto');
     const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0 });
     const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
@@ -149,6 +154,10 @@ const ImportModule = () => {
     const [reconcileEventId, setReconcileEventId] = useState('');
     const [reconcileLoading, setReconcileLoading] = useState(false);
     const [reconcileResult, setReconcileResult] = useState<{ type: 'preview' | 'applied' | 'error'; inserted?: number; updated?: number; skipped?: number; msg?: string } | null>(null);
+
+    useEffect(() => {
+        db.getSettings().then(s => { if (s && s.delegate_type_districts) setTypeDistrictMap(s.delegate_type_districts); }).catch(() => {});
+    }, []);
 
     const KNOWN_FIELDS: Record<string, string> = {
       'regid': 'RegId', 'reg_id': 'RegId', 'registration_id': 'RegId', 'external_id': 'RegId',
@@ -475,7 +484,7 @@ const ImportModule = () => {
         colValues['DelegateType'] = firstIdx('DelegateType') >= 0 ? (values[firstIdx('DelegateType')] || '') : '';
         colValues['RegId'] = firstIdx('RegId') >= 0 ? (values[firstIdx('RegId')] || '') : '';
 
-        const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '');
+        const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '', typeDistrictMap);
         colValues['District'] = guest.district;
         colValues['Chapter'] = guest.chapter;
         colValues['DelegateType'] = guest.delegateType;
@@ -484,7 +493,7 @@ const ImportModule = () => {
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
-    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder]);
+    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder, typeDistrictMap]);
 
     const importPreview = React.useMemo(() => {
       if (!csv.trim() || !showMapping || detectedColumns.length === 0) return null;

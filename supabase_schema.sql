@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
     regions TEXT[] DEFAULT '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}',
     titles TEXT[] DEFAULT '{"Mr", "Mrs", "Ms", "Chief", "Dr", "Prof", "Engr", "Elder"}',
     delegate_types TEXT[] DEFAULT '{"Member","National Guest","Free Guest","Dependant-Adult","Dependant-Teen","Dependant-Children","International"}',
+    delegate_type_districts JSONB NOT NULL DEFAULT '{}'::jsonb, -- v1.50: type → district routing map (Guest/International)
     audit_enabled BOOLEAN DEFAULT true,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -667,12 +668,13 @@ $func$;
 GRANT EXECUTE ON FUNCTION confirm_user_by_email(TEXT) TO authenticated;
 
 -- 4. INITIAL SEED DATA
-INSERT INTO system_settings (districts, ranks, offices, regions)
+INSERT INTO system_settings (districts, ranks, offices, regions, delegate_type_districts)
 SELECT 
-    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra", "International/External"}',
+    '{"Lagos Central", "Abuja Central", "Rivers", "Kano", "Kaduna", "Enugu", "Edo", "Anambra", "Guest", "International"}',
     '{"CP", "FR", "ND", "CP-REP"}',
     '{"DC", "RVP", "NVP", "NP", "NEC", "BOT", "CP", "FR", "ND", "CP-REP", "OTHER"}',
-    '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}'
+    '{"Lagos", "North West", "South South", "North Central", "South East", "South West"}',
+    '{"Free Guest": "Guest", "National Guest": "Guest", "International": "International"}'::jsonb
 WHERE NOT EXISTS (SELECT 1 FROM system_settings);
 
 -- 5. INDEXES (Performance — required for 25K scale)
@@ -1255,6 +1257,17 @@ AS $func$
   );
 $func$;
 
+-- 8b.2 Helper: configured district for a delegate type (v1.50 routing map)
+-- Reads system_settings.delegate_type_districts (JSONB) — no literal labels.
+CREATE OR REPLACE FUNCTION get_delegate_type_district(p_type TEXT)
+RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $func$
+  SELECT delegate_type_districts->>p_type FROM system_settings LIMIT 1;
+$func$;
+
+GRANT EXECUTE ON FUNCTION get_delegate_type_district(TEXT) TO authenticated;
+
 -- 8c. Enable RLS on all tables
 ALTER TABLE events           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE delegates        ENABLE ROW LEVEL SECURITY;
@@ -1521,8 +1534,9 @@ DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
 CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
 -- v1.39: restricted events (event_config.restrict_registrar_to_free_guest) allow registrar MANUAL
--- inserts ONLY as 'Free Guest' + district='International/External' (v1.48 label rename from
--- 'National/External'); district-scoped manual inserts are disabled on restricted events.
+-- inserts ONLY as 'Free Guest' in the CONFIGURED guest district; district-scoped manual inserts
+-- are disabled on restricted events. v1.50: the guest district is resolved dynamically from
+-- system_settings.delegate_type_districts (get_delegate_type_district) — no literal labels.
 -- QR-scan/import sources remain under normal district scoping.
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
@@ -1547,7 +1561,7 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
     )
     AND COALESCE(delegates.registration_source, 'manual') = 'manual'
     AND UPPER(COALESCE(delegates.delegate_type, '')) = 'FREE GUEST'
-    AND delegates.district = 'International/External'
+    AND delegates.district ILIKE COALESCE(get_delegate_type_district('Free Guest'), '')
   ));
 CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
 USING (is_admin_user() OR is_event_admin_user()

@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.46 (Import merge RPC chapter fill — NC2 re-import chapter fix)
+- **Current Version:** 1.50 (Delegate-Type → District Routing — Guest + International split)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -781,6 +781,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - Landscape (8-up/10-up): removed the `bandText` on the footer band (band fill kept).
   - Check-In e-Badge canvas: removed the white `typeText` in the navy slanted rect.
 - **Not changed:** `BAND_COLORS`/`DEFAULT_BAND` (still drive band fills), `MasterList` Type column, forms, filter dropdowns, CheckInPage's delegate info caption line, `BadgePreview` (layout-only). Only the badge-graphic text was removed.
+
+## 48. Delegate-Type → District Routing: Guest + International (v1.50)
+
+- **Business rule (confirmed with product owner, Sep 2026):** all guests — **Free Guest AND National Guest ("Paid Guest")** — file under the **`Guest`** district; **International** delegates file under a standalone **`International`** district; `Member`/`Dependant-*` keep their entered district. This supersedes the single `International/External` guest label (v1.48/§46) whose "International" portion conflated two populations.
+- **Single source of truth (`system_settings.delegate_type_districts` JSONB, v1.50):** a type→district map, e.g. `{"Free Guest":"Guest","National Guest":"Guest","International":"International"}`. Editable in **System Setup → new "Delegate Type → District Routing"** card (rows of type→district dropdowns + Add Route). Defaulting for an empty table: `Guest` + `International` in `districts[]` seed.
+- **Write paths resolve from the map — no label literals:** `registerDelegate` (`supabaseService.ts`) force-sets `district = getConfiguredTypeDistrict(type)` for the three routed types and throws a clear error if routing is unconfigured; the restricted-registrar Free Guest path uses `getConfiguredTypeDistrict('Free Guest')` (+ chapter `Guest`). `NewDelegatePage` locks district to the routed value for routed types (teal "District (Routed)" chip; amber for Free Guest lock), unlocks on `Member`/Dependant selection. `ImportModule.resolveGuestFields` routes `Free Guest`/`National Guest`/`International` to their mapped district and maps the `GUE` shorthand to the configured guest target.
+- **RLS is dynamic:** `delegates_insert_scoped` compares `delegates.district ILIKE get_delegate_type_district('Free Guest')` via a new SECURITY DEFINER/STABLE `get_delegate_type_district(p_type TEXT)` reading the JSONB map. A label rename can never break registrar Free Guest inserts. `supabase_schema.sql` §8b.2 + §12g reconciled; v1.39/v1.47/v1.48 migrations kept as history.
+- **Master List headers now render from config:** `getDistrictsWithDelegates` fetches settings + the routing map and maps each stored value to its configured label (`officialByKey` first, then legacy guest-pattern → routed `Guest`/`International` by `delegate_type`). `getPaginatedDelegates` detects when the requested district is a configured guest target and switches to an alias-aware fallback filter (`district.ilike.<target>,district.ilike.%/external,district.ilike.%/guest`, `count:'exact'`, server-paginated) so section counts and page queries stay consistent for legacy/renamed rows. Shared `resolveDistrictLabel(raw, districts, typeMap, delegateType)` helper in `services/utils.ts` (`normDistrictKey`, `LEGACY_GUEST_DISTRICT_RE`) for any future row-level display.
+- **Cascading district rename (`db.renameDistrict`) — future renames need no code/SQL:** a districts-list **Edit** in System Setup is now a cascade: updates `districts[]`, repoints any routing-map targets that equalled the old label, re-files `delegates.district` (+ `pledges`/`app_users`/`chapters`) to the new label across **all** events (admin-gated, NOT event-lock-gated — it is a configuration label, not event data), and writes a `district_rename` audit log. Deleting a district that is a routing target warns first.
+- **Data migration (`supabase_migration_v1.50_delegate_type_district_routing.sql`, idempotent):** adds the JSONB column; reconciles `districts[]` (drops `National/External`, `International/External`, `International/Guest`; appends `Guest` + `International`); seeds missing routing keys; re-files existing guest-pattern rows by type (International → `International`, everything else → `Guest`); creates `get_delegate_type_district()`; rebuilds `delegates_insert_scoped` (`DROP POLICY IF EXISTS / CREATE POLICY`). Deploy **before/with** the frontend. `supabase_schema.sql` reconciled identically.
+- **types.ts additive exception:** `SystemSettings.delegate_type_districts?: Record<string,string>` — mirrors the `pledge_name`/`reg_type` precedent; documented.
+- **Known caveats:** `International` now coexists as a delegate type AND a district (intentional). `chapter='Guest'` remains tied to Free Guest/`GUE` only. Bootstrap literals (`defaultData`, seed) remain only as empty-table fallbacks; `LEGACY_GUEST_DISTRICT_RE` is the only "hard-coded" guest reference and it is an alias matcher, not a label.
 
 ## Code Conventions
 

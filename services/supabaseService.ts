@@ -11,6 +11,13 @@ const normalizeEmail = (val?: string) => (val || '').trim().toLowerCase();
 const isValidEmail = (val?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(val));
 const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 
+const LEGACY_GUEST_DISTRICT_RE = /national\/external|international\/external|international\/guest/i;
+
+const FORCED_TYPE_DISTRICTS: Readonly<string[]> = ['Free Guest', 'National Guest', 'International'];
+
+let delegateTypeDistrictCache: { map: Record<string, string>; at: number } | null = null;
+const DELEGATE_TYPE_DISTRICT_CACHE_MS = 30_000;
+
 export const ALL_DISTRICTS_SENTINEL = '__ALL_DISTRICTS__';
 
 const normNameKey = (val?: string) => (val || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
@@ -541,14 +548,14 @@ export const db = {
     },
 
     getSettings: async (): Promise<SystemSettings> => {
-        const defaultData = { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: ['North Central 1', 'North Central 2', 'North Central 3', 'North Central 4', 'North Central 5', 'North East 1', 'North East 2', 'North West 1', 'North West 2', 'North West 3', 'South East 1', 'South East 2', 'South East 3', 'South South 1', 'South South 2', 'South South 3', 'South South 4', 'South West 1', 'South West 2', 'South West 3', 'South West 4', 'South West 5', 'South West 6', 'South West 7', 'SOUTH WEST 8', 'International/External'], ranks: [], offices: [], regions: [], delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'] };
+        const defaultData = { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: ['North Central 1', 'North Central 2', 'North Central 3', 'North Central 4', 'North Central 5', 'North East 1', 'North East 2', 'North West 1', 'North West 2', 'North West 3', 'South East 1', 'South East 2', 'South East 3', 'South South 1', 'South South 2', 'South South 3', 'South South 4', 'South West 1', 'South West 2', 'South West 3', 'South West 4', 'South West 5', 'South West 6', 'South West 7', 'SOUTH WEST 8', 'Guest', 'International'], ranks: [], offices: [], regions: [], delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'], delegate_type_districts: { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' }, audit_enabled: true };
         const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (error) throw error;
         const settings = data || defaultData;
         try {
             const { data: chapterDistricts } = await supabase.from('chapters').select('district');
             if (chapterDistricts?.length) {
-                const chapterDistSet = new Set((chapterDistricts as any[]).map(c => c.district));
+                const chapterDistSet = new Set((chapterDistricts as any[]).map(c => c.district).filter((d?: string) => d && !LEGACY_GUEST_DISTRICT_RE.test(d)));
                 const merged = [...new Set([...(settings.districts || []), ...chapterDistSet])].sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
                 settings.districts = merged;
             }
@@ -557,8 +564,28 @@ export const db = {
         if (!Array.isArray(settings.titles) || !Array.isArray(settings.delegate_types)) {
             console.warn('[getSettings] system_settings missing titles/delegate_types columns — run supabase_migration_fix_system_settings_columns.sql');
         }
+        if (!settings.delegate_type_districts || typeof settings.delegate_type_districts !== 'object') {
+            settings.delegate_type_districts = { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' };
+        }
         updateAuditSyncCache(settings);
         return settings;
+    },
+
+    getDelegateTypeDistrictMap: async (): Promise<Record<string, string>> => {
+        if (delegateTypeDistrictCache && Date.now() - delegateTypeDistrictCache.at < DELEGATE_TYPE_DISTRICT_CACHE_MS) {
+            return { ...delegateTypeDistrictCache.map };
+        }
+        const settings = await db.getSettings();
+        const map: Record<string, string> = settings.delegate_type_districts || {};
+        delegateTypeDistrictCache = { map: { ...map }, at: Date.now() };
+        return { ...map };
+    },
+
+    getConfiguredTypeDistrict: async (delegateType: string): Promise<string> => {
+        const map = await db.getDelegateTypeDistrictMap();
+        const direct = map[delegateType];
+        if (direct && direct.trim()) return direct.trim();
+        return '';
     },
 
     updateSettings: async (settings: SystemSettings, field?: keyof SystemSettings): Promise<SystemSettings> => {
@@ -584,6 +611,47 @@ export const db = {
             if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         }
+    },
+
+    // Admin-gated label migration (NOT event-lock-gated — a district rename is configuration,
+    // must propagate to locked events too). Cascades: districts[] + routing map targets +
+    // re-files all delegate/pledge/user/chapter rows that still carry the old label.
+    renameDistrict: async (oldLabel: string, newLabel: string): Promise<{ districts: string[]; routing: Record<string, string>; delegatesRefiled: number }> => {
+        const oldTrim = normalize(oldLabel);
+        const newTrim = normalize(newLabel);
+        if (!oldTrim || !newTrim) throw new Error('District names cannot be blank.');
+        if (oldTrim.toLowerCase() === newTrim.toLowerCase()) throw new Error('The new district name must differ from the current name.');
+        const settings = await db.getSettings();
+        const districts = [...(settings.districts || [])];
+        if (!districts.some(d => normalize(d).toLowerCase() === oldTrim.toLowerCase())) {
+            throw new Error(`District "${oldTrim}" was not found in the districts list.`);
+        }
+        if (districts.some(d => normalize(d).toLowerCase() === newTrim.toLowerCase())) {
+            throw new Error(`District "${newTrim}" already exists — renaming onto an existing name is not allowed.`);
+        }
+        const nextDistricts = districts.map(d => normalize(d).toLowerCase() === oldTrim.toLowerCase() ? newTrim : d);
+        const routing = { ...(settings.delegate_type_districts || {}) };
+        for (const k of Object.keys(routing)) {
+            if (normalize(routing[k]).toLowerCase() === oldTrim.toLowerCase()) routing[k] = newTrim;
+        }
+        const { data: current } = await supabase.from('system_settings').select('id').limit(1).maybeSingle();
+        if (!current) throw new Error('System settings row not found.');
+        const { error: settingsErr } = await supabase.from('system_settings')
+            .update({ districts: nextDistricts, delegate_type_districts: routing })
+            .eq('id', current.id);
+        if (settingsErr) throw settingsErr;
+        const refile = async (table: 'delegates' | 'pledges' | 'app_users' | 'chapters') => {
+            const { data, error } = await supabase.from(table).update({ district: newTrim }).eq('district', oldTrim).select('delegate_id');
+            if (error) console.warn(`[renameDistrict] ${table} re-file failed:`, error.message);
+            return (data || []).length;
+        };
+        const delegatesRefiled = await refile('delegates');
+        await refile('pledges');
+        await refile('app_users');
+        await refile('chapters');
+        delegateTypeDistrictCache = null;
+        recordAuditLog('', 'district_rename', `District renamed "${oldTrim}" → "${newTrim}" (${delegatesRefiled} delegate rows re-filed)`, null, 'system_settings', null, { old: oldTrim, new: newTrim, delegatesRefiled });
+        return { districts: nextDistricts, routing, delegatesRefiled };
     },
 
     getUsers: async (): Promise<User[]> => 
@@ -788,16 +856,30 @@ export const db = {
 
         let result: { data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number };
 
+        let guestAliasOr: string | null = null;
+        if (district) {
+            const typeMap = await db.getDelegateTypeDistrictMap();
+            const guestTargets = [typeMap['Free Guest'], typeMap['National Guest']]
+                .map(v => (v || '').trim())
+                .filter(Boolean);
+            const districtNorm = normalize(district);
+            const isGuestTarget = guestTargets.some(t => normalize(t).toUpperCase() === districtNorm.toUpperCase());
+            if (isGuestTarget) {
+                guestAliasOr = `district.ilike.${districtNorm},district.ilike.%/external,district.ilike.%/guest`;
+            }
+        }
+
         try {
+            if (guestAliasOr) throw new Error('Guest alias filter — using fallback');
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
-                p_search: search || null, p_district: district || null,
+                p_search: search || null, p_district: guestAliasOr ? null : (district || null),
                 p_region: region || null,
                 p_event_id: eventId || null,
                 p_registration_source: null,
                 p_reg_type: source || null,
             });
-            if (!error && data) {
+            if (!error && data && !guestAliasOr) {
                 result = data as any;
                 console.log('[getPaginatedDelegates] RPC success, eventId:', eventId, 'returned:', result.data?.length, 'delegates, total:', result.total);
             } else {
@@ -809,7 +891,9 @@ export const db = {
             let q = supabase.from('delegates').select('*', { count: 'exact' });
             if (eventId) q = q.eq('event_id', eventId);
             if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
-            if (region) {
+            if (guestAliasOr) {
+                q = q.or(guestAliasOr);
+            } else if (region) {
                 q = q.ilike('district', `${normalize(region)}%`);
             } else if (district) {
                 q = q.ilike('district', normalize(district));
@@ -856,12 +940,20 @@ export const db = {
 
     getDistrictsWithDelegates: async (eventId: string, source?: RegType): Promise<{ district: string; count: number }[]> => {
         if (!eventId) return [];
+        const [settings, typeMap] = await Promise.all([db.getSettings(), db.getDelegateTypeDistrictMap()]);
+        const officialByKey = new Map<string, string>();
+        (settings.districts || []).forEach(d => {
+            const t = d.trim();
+            if (t) officialByKey.set(normalize(t).toUpperCase(), t);
+        });
+        const guestDistrict = (typeMap['Free Guest'] || typeMap['National Guest'] || '').trim();
+        const intlDistrict = (typeMap['International'] || '').trim();
         const counts = new Map<string, number>();
         let from = 0;
         while (true) {
             let q = supabase
                 .from('delegates')
-                .select('district')
+                .select('district, delegate_type')
                 .eq('event_id', eventId)
                 .not('district', 'is', null)
                 .neq('district', '');
@@ -873,8 +965,19 @@ export const db = {
                 .range(from, from + 999);
             if (error || !data || data.length === 0) break;
             for (const d of data) {
-                const key = normalize(d.district).toUpperCase();
-                counts.set(key, (counts.get(key) || 0) + 1);
+                const stored = (d.district || '').trim();
+                if (!stored) continue;
+                const key = normalize(stored).toUpperCase();
+                let label = officialByKey.get(key);
+                if (!label && LEGACY_GUEST_DISTRICT_RE.test(stored)) {
+                    if ((d.delegate_type || '').trim().toUpperCase() === 'INTERNATIONAL' && intlDistrict) {
+                        label = intlDistrict;
+                    } else if (guestDistrict) {
+                        label = guestDistrict;
+                    }
+                }
+                if (!label) label = stored;
+                counts.set(label, (counts.get(label) || 0) + 1);
             }
             if (data.length < 1000) break;
             from += 1000;
@@ -1050,8 +1153,17 @@ export const db = {
         const payload: Partial<Delegate> = { ...delegate, phone: normalizePhone(delegate.phone || '') };
         if (restricted) {
             payload.delegate_type = 'Free Guest';
-            payload.district = 'International/External';
+            payload.district = await db.getConfiguredTypeDistrict('Free Guest');
             payload.chapter = 'Guest';
+            if (!payload.district) throw new Error('Free Guest district not configured in System Setup.');
+        }
+        if (FORCED_TYPE_DISTRICTS.includes(payload.delegate_type || '')) {
+            const routed = await db.getConfiguredTypeDistrict((payload.delegate_type as string));
+            if (routed) {
+                payload.district = routed;
+            } else {
+                throw new Error(`${payload.delegate_type} district not configured in System Setup.`);
+            }
         }
         if (payload.phone) {
             const { data: candidates } = await supabase.from('delegates')

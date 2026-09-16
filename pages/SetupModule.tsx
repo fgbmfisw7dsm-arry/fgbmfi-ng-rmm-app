@@ -179,6 +179,8 @@ const SetupModule = () => {
     const [chapterFilterDistrict, setChapterFilterDistrict] = useState('');
     const [chapterSearch, setChapterSearch] = useState('');
     const [importingChapters, setImportingChapters] = useState(false);
+    const [routingType, setRoutingType] = useState('');
+    const [routingDistrict, setRoutingDistrict] = useState('');
 
     const sortSettings = (data: any): SystemSettings => {
         return {
@@ -188,7 +190,9 @@ const SetupModule = () => {
             offices: [...(data.offices || [])].sort((a, b) => a.localeCompare(b)),
             titles: [...(data.titles || [])].sort((a, b) => a.localeCompare(b)),
             regions: [...(data.regions || [])].sort((a, b) => a.localeCompare(b)),
-            delegate_types: [...(data.delegate_types || ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'])].sort((a, b) => a.localeCompare(b))
+            delegate_types: [...(data.delegate_types || ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'])].sort((a, b) => a.localeCompare(b)),
+            delegate_type_districts: { ...(data.delegate_type_districts || { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' }) },
+            audit_enabled: data.audit_enabled !== false
         };
     };
 
@@ -231,15 +235,39 @@ const SetupModule = () => {
         const newSettings = { ...settings };
         const currentList = Array.isArray(newSettings[key]) ? [...(newSettings[key] as string[])] : [];
 
+        let deletedDistrictLabel: string | undefined;
         if (action === 'add') {
             currentList.push(val as string);
         } else if (action === 'edit') {
             currentList[val as number] = newVal || '';
         } else if (action === 'delete') {
+            deletedDistrictLabel = key === 'districts' ? (newSettings[key] as string[])[val as number] : undefined;
             currentList.splice(val as number, 1);
         }
 
         (newSettings[key] as any) = currentList;
+
+        // District renames cascade (v1.50): districts[] + routing targets + re-filed rows.
+        if (key === 'districts' && action === 'edit') {
+            const oldLabel = (settings.districts as string[])[val as number];
+            setSyncingKey(key);
+            try {
+                const res = await db.renameDistrict(oldLabel, newVal || '');
+                await loadSettings();
+                alert(`District renamed. "${res.districts.find(d => d === (newVal || '').trim()) || newVal}" now shows everywhere — ${res.delegatesRefiled} delegate rows were re-filed.`);
+            } catch (e: any) {
+                alert(`Rename failed: ${e.message || 'Database update failed.'}`);
+                await loadSettings();
+            } finally {
+                setSyncingKey(null);
+            }
+            return;
+        }
+        if (key === 'districts' && action === 'delete' && deletedDistrictLabel && settings.delegate_type_districts
+            && Object.values(settings.delegate_type_districts).some(v => v === deletedDistrictLabel)) {
+            const ok = window.confirm(`"${deletedDistrictLabel}" is the target of a Delegate-Type → District routing rule. Deleting it will break routed Free Guest / National Guest / International registrations. Remove the routing rule first. Continue delete anyway?`);
+            if (!ok) return;
+        }
         
         // 2. IMMEDIATE SYNC WITH DATABASE
         setSyncingKey(key);
@@ -254,6 +282,30 @@ const SetupModule = () => {
         } finally {
             setSyncingKey(null);
         }
+    };
+
+    const handleRoutingChange = async (type: string, district: string) => {
+        if (!settings) return;
+        const next = { ...(settings.delegate_type_districts || {}) };
+        if (district) next[type] = district; else delete next[type];
+        const newSettings = { ...settings, delegate_type_districts: next };
+        setSyncingKey('delegate_type_districts');
+        try {
+            const updated = await db.updateSettings(newSettings, 'delegate_type_districts');
+            setSettings(sortSettings(updated));
+        } catch (e: any) {
+            alert(`Synchronization Error: ${e.message || 'Database update failed.'}`);
+            await loadSettings();
+        } finally {
+            setSyncingKey(null);
+        }
+    };
+
+    const handleRoutingAdd = async () => {
+        if (!routingType || !routingDistrict) { alert('Select both a delegate type and a district.'); return; }
+        await handleRoutingChange(routingType, routingDistrict);
+        setRoutingType('');
+        setRoutingDistrict('');
     };
 
     const handleImportChapters = async () => {
@@ -340,6 +392,69 @@ const SetupModule = () => {
                     onAction={(a, v, nv) => handleAction('delegate_types', a, v, nv)}
                     isSyncing={syncingKey === 'delegate_types'}
                 />
+
+                <div className="bg-white rounded-3xl border shadow-sm flex flex-col h-full overflow-hidden transition-all hover:shadow-md lg:col-span-2">
+                    <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
+                        <div>
+                            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-900">Delegate Type → District Routing</h3>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">Registrations of these types are auto-filed to their configured district (v1.50)</p>
+                        </div>
+                        {syncingKey === 'delegate_type_districts' && (
+                            <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-700 rounded-full animate-pulse">
+                                <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-ping"></div>
+                                <span className="text-[8px] font-black uppercase">Syncing</span>
+                            </div>
+                        )}
+                    </div>
+                    <div className="p-6 bg-white border-b space-y-3">
+                        {(Object.entries(settings?.delegate_type_districts || {})).map(([type, district]) => (
+                            <div key={type} className="flex items-center justify-between gap-3 rounded-2xl border border-teal-100 bg-teal-50/50 px-4 py-3">
+                                <span className="font-black uppercase tracking-tight text-gray-700 text-xs">{type}</span>
+                                <span className="flex items-center gap-2">
+                                    <select
+                                        className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-white outline-none focus:border-blue-500"
+                                        value={district}
+                                        onChange={e => handleRoutingChange(type, e.target.value)}
+                                    >
+                                        <option value="">-- none --</option>
+                                        {(settings?.districts || []).map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                    <button
+                                        onClick={() => handleRoutingChange(type, '')}
+                                        className="text-red-500 border border-red-100 px-3 py-2 rounded-xl hover:bg-red-600 hover:text-white transition-all font-black uppercase text-[8px]"
+                                    >
+                                        Remove
+                                    </button>
+                                </span>
+                            </div>
+                        ))}
+                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+                            <select
+                                className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50 outline-none focus:border-blue-500"
+                                value={routingType}
+                                onChange={e => setRoutingType(e.target.value)}
+                            >
+                                <option value="">-- Delegate Type --</option>
+                                {(settings?.delegate_types || []).filter(t => !(settings?.delegate_type_districts || {})[t]).map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <select
+                                className="p-2.5 border-2 border-gray-100 rounded-xl font-bold text-xs bg-gray-50 outline-none focus:border-blue-500"
+                                value={routingDistrict}
+                                onChange={e => setRoutingDistrict(e.target.value)}
+                            >
+                                <option value="">-- District --</option>
+                                {(settings?.districts || []).map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
+                            <button
+                                onClick={handleRoutingAdd}
+                                disabled={!routingType || !routingDistrict}
+                                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl uppercase text-[10px] tracking-widest shadow-lg shadow-blue-100 disabled:opacity-30 transition-all active:scale-95"
+                            >
+                                Add Route
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <div className="bg-white rounded-3xl border shadow-sm flex flex-col h-full overflow-hidden transition-all hover:shadow-md lg:col-span-2">
                     <div className="p-6 bg-slate-50 border-b flex justify-between items-center">

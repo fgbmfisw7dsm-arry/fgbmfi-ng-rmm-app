@@ -63,6 +63,37 @@ export const resolveDistrictAlias = (raw?: string | null): string | null => {
     return DISTRICT_ALIASES[key] || null;
 };
 
+export const normDistrictKey = (v?: string | null): string =>
+    (v || '').replace(/\s+/g, ' ').trim().toUpperCase();
+
+// Legacy guest-district labels that were hard-coded in past versions (v1.39–v1.48).
+// Used to map any remaining stored rows to the currently-configured labels.
+export const LEGACY_GUEST_DISTRICT_RE = /NATIONAL\/EXTERNAL|INTERNATIONAL\/EXTERNAL|INTERNATIONAL\/GUEST/i;
+
+// Maps a STORED delegate.district value to a configured label so Master List rows
+// and section headers always agree with System Setup. delegateType routes legacy
+// guest labels correctly after the Guest / International split (v1.50).
+export const resolveDistrictLabel = (
+    raw?: string | null,
+    districts?: string[],
+    typeMap?: Record<string, string>,
+    delegateType?: string
+): string => {
+    const stored = (raw || '').trim();
+    if (!stored) return stored;
+    const key = normDistrictKey(stored);
+    const official = (districts || []).find(d => normDistrictKey(d) === key);
+    if (official) return official;
+    if (LEGACY_GUEST_DISTRICT_RE.test(stored)) {
+        const t = (delegateType || '').trim().toUpperCase();
+        const intl = ((typeMap || {})['International'] || '').trim();
+        if (t === 'INTERNATIONAL' && intl) return intl;
+        const guest = ((typeMap || {})['Free Guest'] || (typeMap || {})['National Guest'] || '').trim();
+        if (guest) return guest;
+    }
+    return stored;
+};
+
 export const resolveDistrictShortCode = (raw?: string | null): string => {
     const trimmed = (raw || '').trim();
     let v = trimmed;

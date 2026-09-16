@@ -6,8 +6,8 @@ import { AppContext } from '../context/AppContext';
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
-const FREE_GUEST_DISTRICT = 'International/External';
 const FREE_GUEST_CHAPTER = 'Guest';
+const ROUTED_TYPES = ['Free Guest', 'National Guest', 'International'];
 
 const NewDelegatePage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -36,6 +36,12 @@ const NewDelegatePage = () => {
   const [availableOffices, setAvailableOffices] = useState<string[]>([]);
   const [availableDelegateTypes, setAvailableDelegateTypes] = useState<string[]>(['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International']);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [typeDistrictMap, setTypeDistrictMap] = useState<Record<string, string>>({});
+
+  const routedDistrict = (type?: string): string => (((typeDistrictMap || {})[(type || '').trim()] || '').trim());
+  const forcedTypeRouted = ROUTED_TYPES.includes(form.delegate_type || '') ? routedDistrict(form.delegate_type || '') : '';
+  const districtLocked = freeGuestLocked || isDistrictScoped || (ROUTED_TYPES.includes(form.delegate_type || '') && !!forcedTypeRouted);
+  const displayedDistrict = freeGuestLocked ? (routedDistrict('Free Guest') || form.district) : (forcedTypeRouted || form.district);
   
   const [successData, setSuccessData] = useState<{
     id: string;
@@ -51,13 +57,20 @@ const NewDelegatePage = () => {
     }
   }, [user, isDistrictScoped, freeGuestLocked]);
 
-  useEffect(() => {
+useEffect(() => {
     if (freeGuestLocked) {
-        setForm(prev => ({ ...prev, delegate_type: 'Free Guest', district: FREE_GUEST_DISTRICT, chapter: FREE_GUEST_CHAPTER }));
+        setForm(prev => ({ ...prev, delegate_type: 'Free Guest', district: routedDistrict('Free Guest'), chapter: FREE_GUEST_CHAPTER }));
     }
-  }, [freeGuestLocked]);
+}, [freeGuestLocked, typeDistrictMap]);
 
-  useEffect(() => { 
+useEffect(() => {
+    if (!freeGuestLocked && ROUTED_TYPES.includes(form.delegate_type || '')) {
+        const d = routedDistrict(form.delegate_type || '');
+        if (d && form.district !== d) setForm(prev => ({ ...prev, district: d }));
+    }
+}, [form.delegate_type, typeDistrictMap, freeGuestLocked]);
+
+useEffect(() => { 
     db.getSettings().then(data => {
         if (data) {
             if (data.districts && data.districts.length > 0) {
@@ -74,6 +87,7 @@ const NewDelegatePage = () => {
             if (data.ranks && data.ranks.length > 0) setAvailableRanks(data.ranks);
             if (data.offices && data.offices.length > 0) setAvailableOffices(data.offices);
             if (data.delegate_types && data.delegate_types.length > 0) setAvailableDelegateTypes(data.delegate_types);
+            if (data.delegate_type_districts) setTypeDistrictMap(data.delegate_type_districts);
         }
     }).catch(e => console.warn("Using default lookup lists."));
   }, []);
@@ -100,8 +114,11 @@ const NewDelegatePage = () => {
         const payload = { ...form, event_id: activeEventId };
         if (freeGuestLocked) {
             payload.delegate_type = 'Free Guest';
-            payload.district = FREE_GUEST_DISTRICT;
+            payload.district = routedDistrict('Free Guest') || form.district;
             payload.chapter = FREE_GUEST_CHAPTER;
+        } else if (ROUTED_TYPES.includes(payload.delegate_type || '')) {
+            const d = routedDistrict(payload.delegate_type || '');
+            if (d) payload.district = d;
         }
         if (isDistrictScoped && !freeGuestLocked) payload.district = user.district;
 
@@ -135,7 +152,7 @@ const NewDelegatePage = () => {
 
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-            district: freeGuestLocked ? FREE_GUEST_DISTRICT : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
+            district: freeGuestLocked ? (routedDistrict('Free Guest') || '') : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
         });
         
     } catch (e: any) { 
@@ -255,17 +272,12 @@ const NewDelegatePage = () => {
 
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                    {freeGuestLocked ? 'District (Free Guest)' : (isDistrictScoped ? 'District (Auto-Assigned)' : 'District *')}
+                    {freeGuestLocked ? 'District (Free Guest)' : (districtLocked ? 'District (Routed)' : (isDistrictScoped ? 'District (Auto-Assigned)' : 'District *'))}
                     </label>
-                    {freeGuestLocked ? (
-                    <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
-                        <span className="font-black text-amber-800 uppercase">{FREE_GUEST_DISTRICT}</span>
-                        <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
-                    </div>
-                    ) : isDistrictScoped ? (
-                    <div className="w-full p-4 border-2 border-blue-50 rounded-2xl bg-blue-50 flex items-center justify-between">
-                        <span className="font-black text-blue-900 uppercase">{user?.district}</span>
-                        <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                    {districtLocked ? (
+                    <div className={`w-full p-4 border-2 rounded-2xl flex items-center justify-between ${freeGuestLocked ? 'border-amber-100 bg-amber-50' : isDistrictScoped ? 'border-blue-50 bg-blue-50' : 'border-teal-100 bg-teal-50'}`}>
+                        <span className={`font-black uppercase ${freeGuestLocked ? 'text-amber-800' : isDistrictScoped ? 'text-blue-900' : 'text-teal-800'}`}>{displayedDistrict || '—'}</span>
+                        <span className={`text-[8px] font-black uppercase tracking-widest ${freeGuestLocked ? 'text-amber-500' : isDistrictScoped ? 'text-blue-400' : 'text-teal-500'}`}>Locked</span>
                     </div>
                     ) : (
                     <select required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.district} onChange={e => setForm({...form, district: e.target.value})}>

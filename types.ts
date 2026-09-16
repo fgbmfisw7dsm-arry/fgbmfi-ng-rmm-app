@@ -205,6 +205,9 @@ export interface SystemSettings {
   regions: string[];
   titles: string[];
   delegate_types: string[];
+  // v1.50 (additive exception): delegate-type → district routing map
+  // (e.g. { "Free Guest": "Guest", "National Guest": "Guest", "International": "International" })
+  delegate_type_districts?: Record<string, string>;
   audit_enabled?: boolean;
 }
 
