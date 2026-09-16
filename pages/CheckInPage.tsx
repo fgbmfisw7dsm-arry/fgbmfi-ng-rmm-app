@@ -16,6 +16,8 @@ const CheckInPage = () => {
   const [results, setResults] = useState<(Delegate & { checkedIn: boolean })[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
+  const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
+  const verifiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
   const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
@@ -31,6 +33,20 @@ const CheckInPage = () => {
 
   const localVerifiedIds = useRef<Set<string>>(new Set());
   const qrCanvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
+  const clearVerifiedSnapshot = () => {
+    if (verifiedTimerRef.current) clearTimeout(verifiedTimerRef.current);
+    verifiedTimerRef.current = null;
+    setVerifiedDelegate(null);
+  };
+  const showVerifiedSnapshot = (delegate: Partial<Delegate> | null, alreadyCheckedIn: boolean) => {
+    if (verifiedTimerRef.current) clearTimeout(verifiedTimerRef.current);
+    if (!delegate) { setVerifiedDelegate(null); return; }
+    setVerifiedDelegate({ ...delegate, alreadyCheckedIn });
+    verifiedTimerRef.current = setTimeout(() => {
+      setVerifiedDelegate(null);
+      verifiedTimerRef.current = null;
+    }, 3500);
+  };
   const isLocked = activeEvent?.is_active === false;
   const isAdmin = isAdminRole(user?.role || '');
   const isRegistrar = isRegistrarRole(user?.role || '');
@@ -80,6 +96,7 @@ const CheckInPage = () => {
       setBadgeDelegate(null);
       setBadgeCanvasUrl('');
       setPendingReg(null);
+      setVerifiedDelegate(null);
     };
   }, []);
 
@@ -136,9 +153,11 @@ const CheckInPage = () => {
             setResults(prev => prev.map(d => 
               d.delegate_id === delegateId ? { ...d, checkedIn: true, verifiedLocally: !res.alreadyCheckedIn, qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
             ));
+            showVerifiedSnapshot(res.delegate || null, !!res.alreadyCheckedIn);
             setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' });
             setTimeout(() => setFeedback(null), res.alreadyCheckedIn ? 3000 : 2000);
         } else {
+            clearVerifiedSnapshot();
             setFeedback({ type: 'error', msg: res.message || 'Verification failed.' });
         }
     } catch (e: any) { 
@@ -152,10 +171,12 @@ const CheckInPage = () => {
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked) return;
     if(!user || !activeEventId) { processingRef.current = false; return; }
+    clearVerifiedSnapshot();
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
         const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
         if(res && res.success) { 
+          showVerifiedSnapshot(res.delegate || null, !!res.alreadyCheckedIn);
           setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
@@ -175,6 +196,7 @@ const CheckInPage = () => {
           }
           setTimeout(() => { setFeedback(null); setCode(''); }, res.alreadyCheckedIn ? 3000 : 5000);
         } else if (res.needsRegistration) {
+          clearVerifiedSnapshot();
           setFeedback(null);
           setCode(res.scannedCode || '');
           setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
@@ -191,6 +213,7 @@ const CheckInPage = () => {
             office: res.parsedData?.['office'] || 'OTHER'
           });
         } else { 
+          clearVerifiedSnapshot();
           setFeedback({ type: 'error', msg: res.message || 'Invalid or Scoped Code' }); 
           setPendingReg(null);
           setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
@@ -341,6 +364,7 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
   const clearSearch = () => {
     setQuery('');
     setResults([]);
+    clearVerifiedSnapshot();
     setFeedback(null);
     setPendingReg(null);
   };
@@ -350,6 +374,7 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!code?.trim() || processingRef.current) return;
     processingRef.current = true;
     scannedRef.current = true;
+    clearVerifiedSnapshot();
     setFeedback(null);
     setPendingReg(null);
     setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
@@ -440,6 +465,7 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
                 onClick={() => {
                   setCode('');
                   setPendingReg(null);
+                  clearVerifiedSnapshot();
                   setFeedback(null);
                   setRegForm({ title: '', first_name: '', last_name: '', district: '', chapter: '', phone: '', email: '', rank: 'CP', office: 'OTHER', delegate_type: 'Member' });
                 }}
@@ -693,10 +719,35 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
         )}
     </div>
 
-        {badgeDelegate && badgeCanvasUrl && (
+{badgeDelegate && badgeCanvasUrl && (
           <div className="hidden print:block">
             <style>{`@media print { html, body { margin: 0 !important; padding: 0 !important; background: white; } }`}</style>
             <img src={badgeCanvasUrl} alt="Badge" style={{ width: '65mm', height: '90.8mm', display: 'block', margin: '0 auto' }} />
+          </div>
+        )}
+
+        {verifiedDelegate && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,420px)] pointer-events-none print:hidden animate-in slide-in-from-bottom-4">
+            <div className={`rounded-2xl border-2 overflow-hidden shadow-2xl ${verifiedDelegate.alreadyCheckedIn ? 'border-amber-300' : 'border-green-300'}`}>
+              <div className={`px-5 py-2.5 flex items-center justify-center gap-2 ${verifiedDelegate.alreadyCheckedIn ? 'bg-amber-500' : 'bg-green-500'}`}>
+                <span className="text-[11px] font-black text-white uppercase tracking-widest">
+                  {verifiedDelegate.alreadyCheckedIn ? 'Already Checked-in' : 'Verified'}
+                </span>
+              </div>
+              <div className="px-5 py-4 bg-white">
+                <p className="text-xl font-black text-blue-900 uppercase leading-tight truncate">
+                  {[verifiedDelegate.title, verifiedDelegate.first_name, verifiedDelegate.last_name].filter(Boolean).join(' ')}
+                </p>
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-1 truncate">
+                  {verifiedDelegate.district || '—'}{verifiedDelegate.chapter ? ` · ${verifiedDelegate.chapter}` : ''}
+                </p>
+                {showDelegateType && verifiedDelegate.delegate_type && (
+                  <span className="inline-block mt-2 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[9px] font-black uppercase tracking-widest">
+                    {verifiedDelegate.delegate_type}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         )}
     </>

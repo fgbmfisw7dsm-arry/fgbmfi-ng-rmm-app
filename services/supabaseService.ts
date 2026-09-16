@@ -1105,7 +1105,7 @@ export const db = {
         return withRetry(async () => {
         await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
-        const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, first_name, last_name, district, chapter').eq('delegate_id', delegateId).maybeSingle();
+        const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, title, first_name, last_name, district, chapter, delegate_type').eq('delegate_id', delegateId).maybeSingle();
 
         const { data: existingCheckins } = await supabase.from('checkins').select('checkin_id, session_id').eq('event_id', eventId).eq('delegate_id', delegateId);
 
@@ -1122,7 +1122,7 @@ export const db = {
         );
         if (isDuplicate) {
             console.log('[checkInDelegate] duplicate detected — arrival' + (safeSessionId ? ` + session ${safeSessionId}` : '') + ` — delegate: ${del?.first_name} ${del?.last_name} (${delegateId})`);
-            return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+            return { success: true, message: 'Already Checked-in', alreadyCheckedIn: true, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', title: del?.title || '', first_name: del?.first_name || '', last_name: del?.last_name || '', district: del?.district || '', chapter: del?.chapter || '', delegate_type: del?.delegate_type || '' } as any };
         }
         let actuallyInserted = true;
         const { error } = await supabase.from('checkins').insert({ event_id: eventId, delegate_id: delegateId, session_id: safeSessionId, checked_in_by: registrar.id });
@@ -1140,7 +1140,7 @@ export const db = {
             recordAuditLog(eventId, safeSessionId ? 'checkin_session' : 'checkin_arrival', `${label}: ${detail}`, registrar, 'checkin', delegateId, { session_id: safeSessionId });
         }
 
-        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', first_name: del?.first_name || '', last_name: del?.last_name || '' } as any };
+        return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', title: del?.title || '', first_name: del?.first_name || '', last_name: del?.last_name || '', district: del?.district || '', chapter: del?.chapter || '', delegate_type: del?.delegate_type || '' } as any };
         });
     },
 

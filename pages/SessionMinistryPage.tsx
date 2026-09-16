@@ -27,6 +27,8 @@ const SessionMinistryPage: React.FC = () => {
   const [code, setCode] = useState('');
   const [results, setResults] = useState<(Delegate & { recorded: boolean; code?: string })[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
+  const verifiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string, string> | null } | null>(null);
@@ -44,6 +46,21 @@ const SessionMinistryPage: React.FC = () => {
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
   const localRecordedIds = useRef<Set<string>>(new Set());
+
+  const clearVerifiedSnapshot = () => {
+    if (verifiedTimerRef.current) clearTimeout(verifiedTimerRef.current);
+    verifiedTimerRef.current = null;
+    setVerifiedDelegate(null);
+  };
+  const showVerifiedSnapshot = (delegate: Partial<Delegate> | null, alreadyCheckedIn: boolean) => {
+    if (verifiedTimerRef.current) clearTimeout(verifiedTimerRef.current);
+    if (!delegate) { setVerifiedDelegate(null); return; }
+    setVerifiedDelegate({ ...delegate, alreadyCheckedIn });
+    verifiedTimerRef.current = setTimeout(() => {
+      setVerifiedDelegate(null);
+      verifiedTimerRef.current = null;
+    }, 3500);
+  };
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeEventId],
@@ -90,6 +107,7 @@ const SessionMinistryPage: React.FC = () => {
       setFeedback(null);
       setCode('');
       setPendingReg(null);
+      setVerifiedDelegate(null);
     };
   }, []);
 
@@ -137,9 +155,12 @@ const SessionMinistryPage: React.FC = () => {
         setResults(prev => prev.map(d =>
           d.delegate_id === delegateId ? { ...d, recorded: true } : d
         ));
+        const row = results.find(r => r.delegate_id === delegateId);
+        if (row) showVerifiedSnapshot(row, false);
         setFeedback({ type: 'success', msg: 'Recorded!' });
         setTimeout(() => setFeedback(null), 2000);
       } else {
+        clearVerifiedSnapshot();
         setFeedback({ type: 'error', msg: res.message || 'Already Recorded' });
         setTimeout(() => setFeedback(null), 3000);
       }
@@ -153,16 +174,20 @@ const SessionMinistryPage: React.FC = () => {
   const handleCodeSubmit = async (codeVal: string) => {
     if (isLocked || !user || !activeEventId) { processingRef.current = false; return; }
     if (!selectedSessionId) {
+      clearVerifiedSnapshot();
       setFeedback({ type: 'error', msg: 'Please select a session first.' });
       processingRef.current = false;
       return;
     }
+    clearVerifiedSnapshot();
     setFeedback({ type: 'success', msg: 'Verifying code...' });
     try {
       const res = await db.checkInByCode(activeEventId, codeVal, user, selectedSessionId);
       if (res?.success && res.delegate) {
+        showVerifiedSnapshot(res.delegate || null, !!res.alreadyCheckedIn);
         await handleRecord(res.delegate.delegate_id);
       } else if (res?.needsRegistration) {
+        clearVerifiedSnapshot();
         setFeedback(null);
         setCode(res.scannedCode || '');
         setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
@@ -179,6 +204,7 @@ const SessionMinistryPage: React.FC = () => {
           delegate_type: res.parsedData?.['delegate_type'] || 'Member',
         } as typeof regForm);
       } else {
+        clearVerifiedSnapshot();
         setFeedback({ type: 'error', msg: res?.message || 'Invalid code or delegate not found.' });
         setPendingReg(null);
         setTimeout(() => setFeedback(null), 5000);
@@ -212,6 +238,7 @@ const SessionMinistryPage: React.FC = () => {
     if (!scannedCode?.trim() || processingRef.current) return;
     processingRef.current = true;
     scannedRef.current = true;
+    clearVerifiedSnapshot();
     setFeedback(null);
     setPendingReg(null);
     setCode(scannedCode);
@@ -242,6 +269,7 @@ const SessionMinistryPage: React.FC = () => {
   const clearSearch = () => {
     setQuery('');
     setResults([]);
+    clearVerifiedSnapshot();
     setFeedback(null);
     setPendingReg(null);
   };
@@ -412,7 +440,7 @@ const SessionMinistryPage: React.FC = () => {
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Delegate not in database</p>
                 <p className="text-[8px] font-mono text-gray-500 mt-1 break-all">Scanned: {pendingReg.scannedCode}</p>
               </div>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); clearVerifiedSnapshot(); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -466,7 +494,7 @@ const SessionMinistryPage: React.FC = () => {
               <button onClick={handleQuickRegister} disabled={registering || isLocked} className="flex-1 py-4 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 text-white font-black rounded-2xl text-[11px] uppercase tracking-widest shadow-lg transition-all active:scale-95">
                 {registering ? 'Registering...' : 'Register & Record'}
               </button>
-              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
+              <button onClick={() => { setPendingReg(null); setFeedback(null); setCode(''); clearVerifiedSnapshot(); }} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-2xl text-[11px] uppercase tracking-widest transition-all">
                 Cancel
               </button>
             </div>
@@ -654,6 +682,31 @@ const SessionMinistryPage: React.FC = () => {
               <button onClick={handleManualSave} disabled={savingManual || recordSummary.isPending} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black uppercase text-sm hover:bg-blue-700 disabled:opacity-50">
                 {savingManual || recordSummary.isPending ? 'Saving...' : 'Save'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {verifiedDelegate && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,420px)] pointer-events-none print:hidden animate-in slide-in-from-bottom-4">
+          <div className={`rounded-2xl border-2 overflow-hidden shadow-2xl ${verifiedDelegate.alreadyCheckedIn ? 'border-amber-300' : 'border-green-300'}`}>
+            <div className={`px-5 py-2.5 flex items-center justify-center gap-2 ${verifiedDelegate.alreadyCheckedIn ? 'bg-amber-500' : 'bg-green-500'}`}>
+              <span className="text-[11px] font-black text-white uppercase tracking-widest">
+                {verifiedDelegate.alreadyCheckedIn ? 'Already Recorded' : 'Recorded'}
+              </span>
+            </div>
+            <div className="px-5 py-4 bg-white">
+              <p className="text-xl font-black text-blue-900 uppercase leading-tight truncate">
+                {[verifiedDelegate.title, verifiedDelegate.first_name, verifiedDelegate.last_name].filter(Boolean).join(' ')}
+              </p>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-1 truncate">
+                {verifiedDelegate.district || '—'}{verifiedDelegate.chapter ? ` · ${verifiedDelegate.chapter}` : ''}
+              </p>
+              {showDelegateType && verifiedDelegate.delegate_type && (
+                <span className="inline-block mt-2 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[9px] font-black uppercase tracking-widest">
+                  {verifiedDelegate.delegate_type}
+                </span>
+              )}
             </div>
           </div>
         </div>

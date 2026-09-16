@@ -804,6 +804,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **DB backstop (`supabase_migration_qr_checkin_reconcile.sql`, idempotent):** verifies identity columns, reports (read-only) internal dup-cluster counts, and creates `idx_delegates_same_person` (Sprint 21 partial unique index) **only when missing AND no dup clusters exist** — a `qr_scan` insert can then never produce a second person. Re-run after any DataModule dedup if it reported a skip.
 - **Scope note:** `SessionMinistryPage` uses the same `registerDelegateFromQR` → benefits automatically. No `types.ts`/`supabaseClient.ts` changes.
 
+## 50. Verified-Scan Key Details Snapshot (v1.52)
+
+- **Purpose:** when a badge QR is resolved during arrival check-in / session attendance (CheckInPage) or an alter-call response (SessionMinistryPage), the registrar briefly sees the delegate's identity — **Title + First + Last name, District · Chapter, Delegate Type** and a status chip — so they can confirm the right badge at the door without opening a record. Non-blocking by design.
+- **Data cost is zero:** `checkInDelegate` already fetches the delegate row (`supabaseService.ts`); the `del` SELECT now also reads `title, delegate_type` and both `delegate:` return payloads include them. Same single request per scan — no extra queries, no `types.ts` change (`CheckInResult.delegate` is already `Delegate?`).
+- **UI (`CheckInPage.tsx` + `SessionMinistryPage.tsx`):** `verifiedDelegate` state + `showVerifiedSnapshot(delegate, alreadyCheckedIn)` / `clearVerifiedSnapshot()` helpers. Rendered as a `fixed bottom-center` overlay (`pointer-events-none`, `z-40`, `print:hidden`) that auto-dismisses after 3.5s and is instantly replaced/cleared by the next scan (cleared on scan start, search clear, error, needsRegistration, and unmount). Green "Verified"/"Recorded" for a fresh write, amber "Already Checked-in"/"Already Recorded" for duplicates — no interaction required, so queue throughput is unaffected.
+- **Consciously excluded** (chosen with product owner, Sep 2026): Reg ID, phone, email, rank, office — identity/privacy fields only; long names truncate in a fixed-height card.
+- **SessionMinistryPage note:** `handleRecord` also surfaces the snapshot for the manual-result path when the row is present in search results; it never clobbers a snapshot set by a scan (only refreshes when a row is actually found).
+
 ## Code Conventions
 
 ### Naming
