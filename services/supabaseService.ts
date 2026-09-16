@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -33,6 +33,106 @@ const cleanDistrict = (raw: string): string => {
     }
   }
   return trimmed;
+};
+
+// Resolves a scanned (portal/3rd-party badge) payload against an existing
+// delegate record in the active event. Passes run in a ladder — normalized
+// phone, then email, then the family-aware canonical name key — and only a
+// SINGLE strong candidate is accepted (mirrors the import-merge semantics; a
+// family-key conflict or multiple distinct rows is treated as "ambiguous",
+// so we never auto-checkin the wrong person).
+const matchDelegateByIdentity = async (
+  eventId: string,
+  p: Record<string, string>
+): Promise<{ delegate_id: string; first_name: string; last_name: string } | null> => {
+  const pFirst = normalize(p['first_name']);
+  const pLast = normalize(p['last_name']);
+  const pTitle = normalize(p['title']);
+  const pPhone = normalizePhone(p['phone']);
+  const pEmail = normalizeEmail(p['email']);
+  const famKey = pFirst && pLast ? familyAwareNameKey(pTitle, pFirst, pLast) : '';
+
+  const pick = (rows: any[]): { delegate_id: string; first_name: string; last_name: string } | null => {
+    if (!rows || rows.length === 0) return null;
+    const famMatch = famKey ? rows.filter(r => familyAwareNameKey(r.title, r.first_name, r.last_name) === famKey) : [];
+    const pool = famKey && famMatch.length > 0 ? famMatch : rows;
+    return pool.length === 1 ? pool[0] : null;
+  };
+
+  if (pPhone) {
+    let rows: any[] = [];
+    const byRaw = await supabase.from('delegates')
+      .select('delegate_id, first_name, last_name, title, phone, email')
+      .eq('event_id', eventId)
+      .eq('phone', pPhone)
+      .limit(25);
+    if (byRaw.data) rows = byRaw.data;
+    if (rows.length === 0) {
+      try {
+        const byNorm = await supabase.from('delegates')
+          .select('delegate_id, first_name, last_name, title, phone, email')
+          .eq('event_id', eventId)
+          .eq('phone_normalized', pPhone)
+          .limit(25);
+        if (byNorm.data) rows = byNorm.data;
+      } catch {}
+    }
+    const hit = pick(rows);
+    if (hit) return hit;
+  }
+
+  if (pEmail) {
+    const { data } = await supabase.from('delegates')
+      .select('delegate_id, first_name, last_name, title, phone, email')
+      .eq('event_id', eventId)
+      .ilike('email', pEmail)
+      .limit(25);
+    const hit = pick(data || []);
+    if (hit) return hit;
+  }
+
+  if (pFirst && pLast) {
+    const nameKey = canonicalNameKeyStr(pFirst, pLast);
+    let data: any[] | null = null;
+    try {
+      const withKey = await supabase.from('delegates')
+        .select('delegate_id, first_name, last_name, title, phone, email')
+        .eq('event_id', eventId)
+        .eq('name_key', nameKey)
+        .limit(25);
+      data = withKey.data || null;
+    } catch {}
+    if (!(data && data.length > 0)) {
+      const res = await supabase.from('delegates')
+        .select('delegate_id, first_name, last_name, title, phone, email')
+        .eq('event_id', eventId)
+        .ilike('first_name', pFirst)
+        .ilike('last_name', pLast)
+        .limit(25);
+      data = res.data || null;
+    }
+    const hit = pick(data || []);
+    if (hit) return hit;
+  }
+
+  return null;
+};
+
+// Canonicalizes a scanned district so an external/portal short code (e.g. SW7)
+// can never be filed as a phantom district. Routed types (Free Guest/National
+// Guest/International) resolve from the System Setup routing map first.
+const canonicalizeDistrict = async (raw: string | undefined, delegateType: string | undefined): Promise<string> => {
+  if (FORCED_TYPE_DISTRICTS.includes(delegateType || '')) {
+    const routed = await db.getConfiguredTypeDistrict((delegateType || '').trim());
+    if (routed) return routed;
+    throw new Error(`${delegateType} district not configured in System Setup.`);
+  }
+  const resolved = resolveDistrictShortCode(raw);
+  if (!resolved) throw new Error('District is required — select the delegate district.');
+  const settings = await db.getSettings();
+  const official = (settings.districts || []).find(d => normalize(d).toLowerCase() === normalize(resolved).toLowerCase());
+  if (official) return official;
+  throw new Error(`District "${resolved}" is not an official district (System Setup). Select the correct district or add it in System Setup before registering.`);
 };
 
 const COUNTRY_NAMES = new Set([
@@ -1112,7 +1212,7 @@ export const db = {
         };
         
         const parsedData = parseQRData(code);
-        const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || code;
+        const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || parsedData?.['reg_id'] || parsedData?.['RegId'] || code;
         
         // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
         if (code.length > 10 && code === lookupId) {
@@ -1132,6 +1232,17 @@ export const db = {
             if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
         }
         
+        // Pass 4: Fuzzy identity resolution — portal/3rd-party badge payloads
+        // carry contact data but no EMS identifier (qr_hash/external_id/
+        // delegate_id). Reconcile to the existing delegate so a verified member
+        // is stamped directly instead of being offered for duplicate registration.
+        if (parsedData && (parsedData['first_name'] || parsedData['last_name'])) {
+            const matched = await matchDelegateByIdentity(eventId, parsedData);
+            if (matched && matched.delegate_id) {
+                return await db.checkInDelegate(eventId, matched.delegate_id, registrar, sessionId);
+            }
+        }
+
         // Not found — return parsed data for confirmation form
         if (parsedData && parsedData['first_name'] && parsedData['last_name'] && parsedData['district']) {
             return { success: false, message: 'Confirm delegate details below.', needsRegistration: true, scannedCode: lookupId, parsedData };
@@ -1209,24 +1320,24 @@ export const db = {
     registerDelegateFromQR: async (eventId: string, scannedCode: string, parsedData: Record<string, string>): Promise<Delegate> => {
         const externalIdValue = parsedData['reg_id'] || parsedData['RegId'] || parsedData['delegate_id'] || parsedData['external_id'] || scannedCode;
 
-        if (externalIdValue) {
+        if (externalIdValue && externalIdValue !== scannedCode) {
             const { data: existing } = await supabase.from('delegates').select('*').eq('external_id', externalIdValue).eq('event_id', eventId).maybeSingle();
             if (existing) return existing;
         }
 
-        if (parsedData['first_name'] && parsedData['last_name'] && parsedData['phone']) {
-            const fname = normalize(parsedData['first_name']);
-            const lname = normalize(parsedData['last_name']);
-            const phone = parsedData['phone'].replace(/\s+/g, '');
-            const { data: nameMatch } = await supabase.from('delegates').select('*').eq('event_id', eventId).ilike('first_name', fname).ilike('last_name', lname).eq('phone', phone).limit(1).maybeSingle();
-            if (nameMatch) return nameMatch;
+        const matched = await matchDelegateByIdentity(eventId, parsedData);
+        if (matched) {
+            const { data: existing } = await supabase.from('delegates').select('*').eq('delegate_id', matched.delegate_id).maybeSingle();
+            if (existing) return existing;
         }
+
+        const district = await canonicalizeDistrict(parsedData['district'], parsedData['delegate_type']);
 
         const record = {
             title: parsedData['title'] || '',
             first_name: parsedData['first_name'] || '',
             last_name: parsedData['last_name'] || '',
-            district: parsedData['district'] || '',
+            district,
             chapter: parsedData['chapter'] || '',
             phone: parsedData['phone'] || '',
             email: parsedData['email'] || '',
@@ -1234,13 +1345,24 @@ export const db = {
             office: parsedData['office'] || 'OTHER',
             room_number: parsedData['room_number'] || '',
             event_id: eventId,
-            external_id: (externalIdValue && externalIdValue.startsWith('CON26')) ? externalIdValue : generateRegId(),
+            external_id: (externalIdValue && externalIdValue !== scannedCode) ? externalIdValue : generateRegId(),
             qr_hash: generateQrHash(),
             registration_source: 'qr_scan' as const
         };
-        const { data, error } = await supabase.from('delegates').insert(record).select().single();
-        if (error) throw error;
-        return data;
+        try {
+            const { data, error } = await supabase.from('delegates').insert(record).select().single();
+            if (error) throw error;
+            return data;
+        } catch (e: any) {
+            if (e.code === '23505' || (e.message || '').includes('duplicate')) {
+                const reread = await matchDelegateByIdentity(eventId, parsedData);
+                if (reread) {
+                    const { data: existing } = await supabase.from('delegates').select('*').eq('delegate_id', reread.delegate_id).maybeSingle();
+                    if (existing) return existing;
+                }
+            }
+            throw e;
+        }
     },
 
     repairExternalId: async (delegateId: string): Promise<string | null> => {

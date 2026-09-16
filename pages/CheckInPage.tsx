@@ -7,6 +7,7 @@ import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
 import { enqueueCheckIn } from '../services/offlineQueue';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
+import { resolveDistrictShortCode } from '../services/utils';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -177,11 +178,12 @@ const CheckInPage = () => {
           setFeedback(null);
           setCode(res.scannedCode || '');
           setPendingReg({ scannedCode: res.scannedCode || codeVal, parsedData: res.parsedData || null });
+          const qrDistrict = resolveDistrictShortCode(res.parsedData?.['district'] || '');
           setRegForm({
             title: res.parsedData?.['title'] || '',
             first_name: res.parsedData?.['first_name'] || '',
             last_name: res.parsedData?.['last_name'] || '',
-            district: res.parsedData?.['district'] || '',
+            district: qrDistrict,
             chapter: res.parsedData?.['chapter'] || '',
             phone: res.parsedData?.['phone'] || '',
             email: res.parsedData?.['email'] || '',
@@ -361,10 +363,15 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
       setFeedback({ type: 'error', msg: 'First name, last name, and district are required.' });
       return;
     }
+    const district = resolveDistrictShortCode(regForm.district);
+    if (!district || !availableDistricts.some(x => x.trim().toLowerCase() === district.trim().toLowerCase())) {
+      setFeedback({ type: 'error', msg: `District "${regForm.district}" is not an official district — choose one from the list before registering.` });
+      return;
+    }
     setRegistering(true);
     setFeedback({ type: 'success', msg: 'Registering...' });
     try {
-      const newDelegate = await db.registerDelegateFromQR(activeEventId, pendingReg.scannedCode, { ...regForm });
+      const newDelegate = await db.registerDelegateFromQR(activeEventId, pendingReg.scannedCode, { ...regForm, district });
       const res = await db.checkInDelegate(activeEventId, newDelegate.delegate_id, user, selectedSessionId);
       setPendingReg(null);
       setCode('');
@@ -486,10 +493,13 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
               </div>
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">District *</label>
-                <select className="w-full p-3 border-2 border-gray-100 rounded-xl text-sm font-bold focus:border-amber-500 outline-none" value={regForm.district} onChange={e => setRegForm(f => ({...f, district: e.target.value}))}>
+                <select className={`w-full p-3 border-2 rounded-xl text-sm font-bold focus:border-amber-500 outline-none ${regForm.district && !availableDistricts.some(x => x.trim().toLowerCase() === regForm.district.trim().toLowerCase()) ? 'border-amber-400 bg-amber-50' : 'border-gray-100'}`} value={regForm.district} onChange={e => setRegForm(f => ({...f, district: e.target.value}))}>
                     <option value="">-- SELECT DISTRICT --</option>
                     {availableDistricts.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
+                {regForm.district && !availableDistricts.some(x => x.trim().toLowerCase() === regForm.district.trim().toLowerCase()) && (
+                    <p className="text-[9px] font-bold text-amber-600 mt-1">"{regForm.district}" is not an official district — select the correct district from the list before registering.</p>
+                )}
               </div>
               <div>
                 <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider block mb-1">Chapter</label>
