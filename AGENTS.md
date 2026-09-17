@@ -812,6 +812,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Consciously excluded** (chosen with product owner, Sep 2026): Reg ID, phone, email, rank, office — identity/privacy fields only; long names truncate in a fixed-height card.
 - **SessionMinistryPage note:** `handleRecord` also surfaces the snapshot for the manual-result path when the row is present in search results; it never clobbers a snapshot set by a scan (only refreshes when a row is actually found).
 
+## 51. Check-In Concurrency Hardening (v1.53)
+
+- **Guard dedupe (Change 2):** `checkInByCode` already runs `ensureEventActive` (line 1148), then calls `checkInDelegate` up to 4× (passes 1–4), each re-running the guard — an extra `events` SELECT per scan. `checkInDelegate` gained an optional 5th param `opts?: { skipGuard?: boolean }`; the 4 internal calls pass `{ skipGuard: true }`, saving ~1 request per scan. **Direct callers are untouched and still guarded:** CheckInPage manual verify + quick-register, NewDelegatePage auto-check-in, and `offlineQueue.ts`. Zero behavior change for live modules.
+- **Pass-4 email fallback indexed (Change 3):** `matchDelegateByIdentity`'s `.ilike('email', …)` fallback was an unindexed scan at 25K/event. New additive migration `supabase_migration_checkin_perf.sql` (idempotent): `idx_delegates_email_trgm` (GIN trgm, supports the existing `ilike`) + `idx_delegates_email_lower` (btree, for future eq-on-lower). No query semantics changed; the fuzzy matcher query is untouched.
+- **Deferred (not built):** the single‑RTT `check_in_by_code` SECURITY DEFINER RPC. Retained because it would fork `parseQRData`/`matchDelegateByIdentity`/district routing into a second SQL implementation with a live client fallback — a drift + dual-QA risk on the busiest page (see §49's history). If pursued later, scope it to the **identifier fast path only** (qr_hash/external_id/delegate_id) and keep needsRegistration + fuzzy on the TS path.
+- **Expected effect at 100 concurrent registrars:** with the critical indexes already present (`idx_delegates_qr_hash` unique, external_id, phone, checkins(event_id,delegate_id), same_person, name_key), DB throughput is a non-issue (~5–15 scans/s sustained); the remaining latency lever is the sequential HTTP round-trip chain, worst on portal data-rich badges (~8–11 requests).
+
 ## Code Conventions
 
 ### Naming

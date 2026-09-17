@@ -1100,10 +1100,10 @@ export const db = {
     },
 
     // Fix: Corrected variable name mismatch from event_id to eventId
-    checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+    checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string, opts?: { skipGuard?: boolean }): Promise<CheckInResult> => {
         if (!delegateId) return { success: false, message: 'Invalid delegate ID.' };
         return withRetry(async () => {
-        await ensureEventActive(eventId);
+        if (!opts?.skipGuard) await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, title, first_name, last_name, district, chapter, delegate_type').eq('delegate_id', delegateId).maybeSingle();
 
@@ -1217,19 +1217,19 @@ export const db = {
         // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
         if (code.length > 10 && code === lookupId) {
             const { data: match } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('qr_hash', code).maybeSingle();
-            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId);
+            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId, { skipGuard: true });
         }
         
         // Pass 2: External ID lookup (use extracted delegate ID, matches subsequent scans)
         if (lookupId.length > 4) {
             const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('external_id', lookupId).maybeSingle();
-            if (extMatch && extMatch.delegate_id) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId);
+            if (extMatch && extMatch.delegate_id) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId, { skipGuard: true });
         }
         
         // Pass 3: Delegate ID lookup
         if (lookupId.length > 4 && lookupId !== code) {
             const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('delegate_id', lookupId).maybeSingle();
-            if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId);
+            if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId, { skipGuard: true });
         }
         
         // Pass 4: Fuzzy identity resolution — portal/3rd-party badge payloads
@@ -1239,7 +1239,7 @@ export const db = {
         if (parsedData && (parsedData['first_name'] || parsedData['last_name'])) {
             const matched = await matchDelegateByIdentity(eventId, parsedData);
             if (matched && matched.delegate_id) {
-                return await db.checkInDelegate(eventId, matched.delegate_id, registrar, sessionId);
+                return await db.checkInDelegate(eventId, matched.delegate_id, registrar, sessionId, { skipGuard: true });
             }
         }
 
