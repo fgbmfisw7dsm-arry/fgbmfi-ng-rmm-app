@@ -514,6 +514,8 @@ export const auth = {
 };
 
 let auditEnabled = true;
+const USE_CHECKIN_RPC = true;
+let checkinRpcAvailable = true;
 
 export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
 
@@ -1145,8 +1147,33 @@ export const db = {
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
+        const rawCode = (code || '').trim();
+        if (USE_CHECKIN_RPC && checkinRpcAvailable) {
+            try {
+                const { data, error } = await supabase.rpc('check_in_by_code', {
+                    p_event_id: eventId,
+                    p_code: rawCode,
+                    p_session_id: sessionId || null,
+                    p_registrar_uid: registrar.id,
+                    p_registrar_email: registrar.email || null,
+                    p_audit_enabled: auditEnabled
+                });
+                if (error) {
+                    if ((error.message || '').toLowerCase().includes('could not find the function') || error.code === 'PGRST116') checkinRpcAvailable = false;
+                    throw error;
+                }
+                const r = (data as any) || {};
+                if (r.locked) throw new Error(r.message || 'EVENT_LOCKED: This event is currently inactive (Read-Only).');
+                if (r.ok) {
+                    return { success: true, message: r.message || 'Verified!', alreadyCheckedIn: !!r.already_checked_in, delegate: (r.delegate || undefined) as Delegate | undefined };
+                }
+                if (!r.needs_parse) throw new Error('check_in_by_code returned an unexpected result.');
+            } catch (e: any) {
+                if (e?.message?.startsWith('EVENT_LOCKED')) throw e;
+            }
+        }
         await ensureEventActive(eventId);
-        code = code.trim();
+        code = rawCode;
         
         const parseQRData = (raw: string): Record<string, string> | null => {
             try {
