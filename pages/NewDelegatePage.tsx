@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, isRegionalRole, isDistrictRole, getScopeFilter, Chapter, FieldRequirement } from '../types';
 import { AppContext } from '../context/AppContext';
-import { DIAL_CODE_OPTIONS } from '../services/utils';
+import CountryDialSelect from '../components/CountryDialSelect';
 
 
 // Fallback defaults in case settings table is empty
@@ -369,15 +369,8 @@ useEffect(() => {
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqPhone ? 'Phone *' : 'Phone'}</label>
                     <div className="flex gap-2">
-                        <select
-                            className="w-44 p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black text-xs outline-none focus:bg-white focus:border-blue-500"
-                            value={dialCode}
-                            onChange={e => setDialCode(e.target.value)}
-                            aria-label="International Dialing Code"
-                        >
-                            {DIAL_CODE_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
-                        </select>
-                        <input required={reqPhone} type="tel" className="flex-1 min-w-0 w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="080..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+                        <CountryDialSelect value={dialCode} onChange={setDialCode} />
+                        <input required={reqPhone} type="tel" className="flex-1 min-w-0 w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="803..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
                     </div>
                 </div>
 
