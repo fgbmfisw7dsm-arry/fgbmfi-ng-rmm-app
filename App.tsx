@@ -263,7 +263,7 @@ const AppContent = () => {
                      <Route path="/admin/badges" element={
                        <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><BadgePrintingModule /></ProtectedRoute>
                      } />
-                     <Route path="/help" element={<UserManualModule />} />
+                     <Route path="/help/:section?" element={<UserManualModule />} />
                     <Route path="/" element={<Navigate to="/admin" replace />} />
                  </Routes>
               </Layout>
