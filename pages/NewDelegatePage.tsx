@@ -368,9 +368,9 @@ useEffect(() => {
                 </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqPhone ? 'Phone *' : 'Phone'}</label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <CountryDialSelect value={dialCode} onChange={setDialCode} />
-                        <input required={reqPhone} type="tel" className="flex-1 min-w-0 w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="803..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+                        <input required={reqPhone} type="tel" className="flex-1 min-w-[14ch] p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="803..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
                     </div>
                 </div>
 
