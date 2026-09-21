@@ -524,7 +524,7 @@ export const exportToPDF = (
         image: { type: string; quality: number };
         html2canvas: any;
         jsPDF: { unit: string; format: string; orientation: 'portrait' | 'landscape'; compress: boolean };
-        pagebreak?: { mode: ('css' | 'legacy' | 'avoid-all')[] };
+        pagebreak?: { mode: ('css' | 'legacy' | 'avoid-all')[]; avoid?: string | string[] };
     } = {
         margin: [5, 5, 5, 5],
         filename: filename,
@@ -538,13 +538,15 @@ export const exportToPDF = (
         }
     };
 
-    // Document mode: disable html2pdf's pagebreak padding. Its css-mode reads
-    // `break-inside: avoid` and inserts near-full-page white spacer divs before
-    // any avoid element that straddles a page boundary — with tall manual sections
-    // this creates giant blank bands (blank first-page body + cascading misalignment).
+    // Document mode: disable html2pdf's css-mode pagebreak (it inserts
+    // near-full-page white spacer divs before any `break-inside: avoid` element
+    // that straddles a page boundary — with tall manual sections this created
+    // giant blank bands). Instead rely on explicit `avoid` selectors so bounded
+    // cards (rounded boxes) are pushed wholesale onto the next page instead of
+    // being sliced mid-card at the fixed page boundary.
     // Reports keep css mode (relies on `tr { page-break-inside: avoid }`).
     if (!isReport) {
-        options.pagebreak = { mode: [] };
+        options.pagebreak = { mode: [], avoid: '.rounded-xl, .rounded-2xl, .rounded-3xl' };
     }
 
     requestAnimationFrame(() => {
