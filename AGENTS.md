@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.50 (Delegate-Type → District Routing — Guest + International split)
+- **Current Version:** 1.55 (EMS Registration Enhancements — payment capture + per-type required fields + ISD phone + EMS source)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -827,6 +827,20 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Write mirrors `checkInDelegate` 1:1:** arrival cascade when `p_session_id` set, duplicate detection via `session_id IS NOT DISTINCT FROM`, partial-unique-index `ON CONFLICT ... DO NOTHING` with `GET DIAGNOSTICS ROW_COUNT`, and an `audit_log` row with identical action types (`checkin_arrival`/`checkin_session`) + summary format; audit gated by `p_audit_enabled` (module `auditEnabled`).
 - **Wrapper (`db.checkInByCode`, `supabaseService.ts`):** module consts `USE_CHECKIN_RPC` + `checkinRpcAvailable`. Tries the RPC; `locked` → throws the same `EVENT_LOCKED` message the pages render; `ok` → maps to the existing `CheckInResult` (delegate payload feeds the v1.52 snapshot); `needs_parse` / error / function-missing (`PGRST116`/"could not find the function" sets `checkinRpcAvailable=false`) → falls through to the **existing classic body verbatim**. **Pages unchanged** (`CheckInPage`, `SessionMinistryPage`, `offlineQueue`, `NewDelegatePage`, manual verify all untouched).
 - **Live contract parity note:** because the RPC is INVOKER, it inherits the same RLS as today's direct queries — whatever SELECT scope registrars have today (incl. any district scoping) applies identically to the RPC reads; no permission surface change.
+
+## 53. EMS Registration Enhancements — Payment Capture, Per-Type Required Fields, ISD Phone, EMS Source (v1.55)
+
+- **Goal:** the New Delegate Entry form (EMS) captures optional registration payment details, marks records with `registration_source='EMS'`, enforces per-delegate-type required fields (Phone / Email / Payment Amount / Payment Reference), and provides an International Dialing Code picker (default +234). No stable module or existing data field is disrupted.
+- **Schema (`supabase_migration_v1.55_payment_required_fields_ems.sql`, idempotent):**
+  - `delegates` += `payment_amount NUMERIC(15,2)` + `payment_reference TEXT` (nullable, additive — existing rows unaffected; RPCs/fallbacks select `*`, so the columns flow through automatically).
+  - `delegates_registration_source_check` rebuilt to `IN ('import','manual','qr_scan','portal','EMS')` (additive value only).
+  - `delegates_insert_scoped` RLS rebuilt **verbatim from v1.50** except both manual-source guards are now `IN ('manual','EMS')` — `EMS` is RLS-equivalent to `manual`: registrar free-guest restriction and district scoping semantics are preserved (an `EMS` insert on a restricted event is allowed only as `FREE GUEST` in the configured guest district).
+- **`registerDelegate` (supabaseService.ts) unchanged** — the form is its only caller (`NewDelegatePage.tsx:186`) and explicitly sends `registration_source:'EMS'`; the service default remains `'manual'` for safety. `registerDelegateFromQR` (source `qr_scan`), imports (`import`/`portal`), and reconcile paths are untouched.
+- **`types.ts` additive exceptions (documented):** `FieldRequirement { phone?; email?; payment_amount?; payment_reference? }`; `Delegate.payment_amount?: number|null` + `payment_reference?: string|null`; `Delegate.registration_source` widened with `'EMS'`; `Event.event_config` widened to `Record<string, boolean | string[] | Record<string, FieldRequirement>>`.
+- **Per-event required-field rules (`events.event_config.required_fields`):** user-facing config in **Events & Config → "Required Fields by Delegate Type"** (checkbox grid keyed on `system_settings.delegate_types`). A "Show Payment Fields (EMS)" toggle (`event_config.show_payment_fields`) controls whether the payment inputs render. `NewDelegatePage` resolves `requiredFor(type)` = `event_config.required_fields[type]` merged over the **module-level `DEFAULT_REQUIRED_FIELDS`** (the current live-event rule: Phone + Payment Amount + Payment Reference required for Member / National Guest / International / Dependant-Adult / -Teen / -Children, everything optional for Free Guest). **Validation applies only to the New Delegate form** — QR quick-register and bulk import remain lenient by design.
+- **Phone ISD picker:** `services/utils.ts` exports `DIAL_CODE_OPTIONS` (curated list, `+234` default). The form combines `dialCode + localNumber` before submit; the existing `normalizePhone` canonicalizes (`+234803… → 08…`), so dedup keys (`phone_normalized`), badges, check-in and reports are byte-identical to pre-v1.55. Applied to the New Delegate form only.
+- **Master List payment columns:** a **"Show Payment Details" toggle** (default OFF, persisted in `localStorage['fgbmfi_ml_show_payments']`) renders Payment (`formatCurrency`) + Payment Ref columns in both the per-district sections and unified tables; non-EMS rows show `—`. The toggle renders only when the active event captures payments (`show_payment_fields !== false`). PDF/CSV export column sets unchanged.
+- **Non-disruption:** `CheckInPage`, `SessionMinistryPage`, `ImportModule`, `DataModule`, `BadgePrintingModule`, `ReportsPage`, `FinancialsPage`, `UsersModule`, badge canvas/PDF generators, all RPCs and storage are untouched. The 4 `tsc --noEmit` warnings (App.tsx / supabaseService.ts `UserAppMetadata` casts, a nullable `data`) are pre-existing and non-blocking (Vite/esbuild build passes).
 
 ## Code Conventions
 

@@ -1,13 +1,27 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, isRegionalRole, isDistrictRole, getScopeFilter, Chapter } from '../types';
+import { Delegate, SystemSettings, Rank, Office, UserRole, isRegistrarRole, isRegionalRole, isDistrictRole, getScopeFilter, Chapter, FieldRequirement } from '../types';
 import { AppContext } from '../context/AppContext';
+import { DIAL_CODE_OPTIONS } from '../services/utils';
 
 
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
 const FREE_GUEST_CHAPTER = 'Guest';
 const ROUTED_TYPES = ['Free Guest', 'National Guest', 'International'];
+
+// v1.55 (EMS): default required-field rules per delegate type, effective for
+// the current live event. Overridable per event from Events & Config ->
+// "Required Fields by Delegate Type" (events.event_config.required_fields).
+const DEFAULT_REQUIRED_FIELDS: Record<string, FieldRequirement> = {
+    'Member': { phone: true, payment_amount: true, payment_reference: true },
+    'National Guest': { phone: true, payment_amount: true, payment_reference: true },
+    'International': { phone: true, payment_amount: true, payment_reference: true },
+    'Dependant-Adult': { phone: true, payment_amount: true, payment_reference: true },
+    'Dependant-Teen': { phone: true, payment_amount: true, payment_reference: true },
+    'Dependant-Children': { phone: true, payment_amount: true, payment_reference: true },
+    'Free Guest': {},
+};
 
 const NewDelegatePage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -18,11 +32,23 @@ const NewDelegatePage = () => {
   const isRegionalScoped = isRegionalRole(role) && !!user?.region;
   const initialDistrict = isDistrictScoped ? (user?.district || '') : '';
 
-  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, unknown>;
   const showRank = eventConfig.show_rank !== false;
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
+  const showPaymentFields = eventConfig.show_payment_fields !== false;
   const freeGuestLocked = isRegistrarRole(role) && eventConfig.restrict_registrar_to_free_guest === true;
+
+  // v1.55: per-type required-field resolution (Events & Config override wins;
+  // falls back to DEFAULT_REQUIRED_FIELDS for the current live event).
+  const requiredMap = (eventConfig.required_fields || {}) as Record<string, FieldRequirement>;
+  const requiredFor = (type?: string): FieldRequirement => {
+    const t = (type || '').trim();
+    return {
+      ...(DEFAULT_REQUIRED_FIELDS[t] || { phone: true, payment_amount: true, payment_reference: true }),
+      ...(requiredMap[t] || {}),
+    };
+  };
 
   const [form, setForm] = useState<Partial<Delegate>>({ 
     title: 'Mr', first_name: '', last_name: '', phone: '', email: '', 
@@ -30,6 +56,15 @@ const NewDelegatePage = () => {
   });
   
   const [loading, setLoading] = useState(false);
+  const [dialCode, setDialCode] = useState('+234'); // v1.55: ISD picker, Nigeria default
+  const [paymentAmount, setPaymentAmount] = useState(''); // v1.55: stored on the delegate
+  const [paymentRef, setPaymentRef] = useState('');       // v1.55: stored on the delegate
+
+  const req = requiredFor(form.delegate_type);
+  const reqPhone = req.phone === true;
+  const reqEmail = req.email === true;
+  const reqAmount = req.payment_amount === true;
+  const reqRef = req.payment_reference === true;
   const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
   const [availableTitles, setAvailableTitles] = useState<string[]>(DEFAULT_TITLES);
   const [availableRanks, setAvailableRanks] = useState<string[]>([]);
@@ -108,10 +143,37 @@ useEffect(() => {
         return;
     }
     if(loading) return;
+
+    const need = requiredFor(form.delegate_type);
+    if (need.phone === true && !(form.phone || '').trim()) {
+        alert(`Phone number is required for ${form.delegate_type} delegates.`);
+        return;
+    }
+    if (need.email === true && !(form.email || '').trim()) {
+        alert(`Email address is required for ${form.delegate_type} delegates.`);
+        return;
+    }
+    if (showPaymentFields && need.payment_amount === true && paymentAmount.trim() === '') {
+        alert(`Payment Amount is required for ${form.delegate_type} delegates.`);
+        return;
+    }
+    if (showPaymentFields && need.payment_reference === true && paymentRef.trim() === '') {
+        alert(`Payment Reference is required for ${form.delegate_type} delegates.`);
+        return;
+    }
     
     setLoading(true);
     try {
-        const payload = { ...form, event_id: activeEventId };
+        const composedPhone = (form.phone || '').trim() ? `${dialCode}${String(form.phone).trim()}` : '';
+        const parsedAmount = Number(paymentAmount);
+        const payload: Partial<Delegate> = {
+            ...form,
+            phone: composedPhone,
+            payment_amount: showPaymentFields && paymentAmount.trim() !== '' && !Number.isNaN(parsedAmount) ? parsedAmount : undefined,
+            payment_reference: showPaymentFields && paymentRef.trim() !== '' ? paymentRef.trim() : undefined,
+            registration_source: 'EMS',
+            event_id: activeEventId
+        };
         if (freeGuestLocked) {
             payload.delegate_type = 'Free Guest';
             payload.district = routedDistrict('Free Guest') || form.district;
@@ -154,6 +216,8 @@ useEffect(() => {
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
             district: freeGuestLocked ? (routedDistrict('Free Guest') || '') : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
         });
+        setPaymentAmount('');
+        setPaymentRef('');
         
     } catch (e: any) { 
         console.error("Registration Error:", e);
@@ -303,14 +367,36 @@ useEffect(() => {
                     )}
                 </div>
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Phone *</label>
-                    <input required type="tel" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqPhone ? 'Phone *' : 'Phone'}</label>
+                    <div className="flex gap-2">
+                        <select
+                            className="w-44 p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black text-xs outline-none focus:bg-white focus:border-blue-500"
+                            value={dialCode}
+                            onChange={e => setDialCode(e.target.value)}
+                            aria-label="International Dialing Code"
+                        >
+                            {DIAL_CODE_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
+                        </select>
+                        <input required={reqPhone} type="tel" className="flex-1 min-w-0 w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="080..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+                    </div>
                 </div>
 
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Email Address</label>
-                    <input type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqEmail ? 'Email Address *' : 'Email Address'}</label>
+                    <input required={reqEmail} type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                 </div>
+                {showPaymentFields && (
+                <>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqAmount ? 'Payment Amount (₦) *' : 'Payment Amount (₦)'}</label>
+                    <input required={reqAmount} type="number" min="0" step="0.01" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="0.00" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqRef ? 'Payment Reference *' : 'Payment Reference'}</label>
+                    <input required={reqRef} className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="e.g. BANK-2026-0001" value={paymentRef} onChange={e => setPaymentRef(e.target.value)} />
+                </div>
+                </>
+                )}
                 {showRank && (
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rank</label>

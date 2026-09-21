@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS delegates (
     name_last_key TEXT,
     event_id UUID REFERENCES events(event_id) ON DELETE SET NULL,
     external_id TEXT,
-    registration_source TEXT DEFAULT 'import' CHECK (registration_source IN ('import', 'manual', 'qr_scan')),
+    registration_source TEXT DEFAULT 'import' CHECK (registration_source IN ('import', 'manual', 'qr_scan', 'portal', 'EMS')),
+    payment_amount NUMERIC(15,2), -- v1.55: EMS registration payment (additive, nullable)
+    payment_reference TEXT,       -- v1.55: EMS registration payment reference (additive, nullable)
     badge_printed BOOLEAN NOT NULL DEFAULT false,
     badge_printed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -1537,6 +1539,7 @@ CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated US
 -- inserts ONLY as 'Free Guest' in the CONFIGURED guest district; district-scoped manual inserts
 -- are disabled on restricted events. v1.50: the guest district is resolved dynamically from
 -- system_settings.delegate_type_districts (get_delegate_type_district) — no literal labels.
+-- v1.55: 'EMS' (New Delegate form) is RLS-equivalent to 'manual' — both manual-tier sources.
 -- QR-scan/import sources remain under normal district scoping.
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
@@ -1548,7 +1551,7 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
         WHERE e.event_id = delegates.event_id
           AND COALESCE(e.event_config->>'restrict_registrar_to_free_guest', 'false') = 'true'
       )
-      AND COALESCE(delegates.registration_source, 'manual') = 'manual'
+      AND COALESCE(delegates.registration_source, 'manual') IN ('manual', 'EMS')
     )
     AND (district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)
   )
@@ -1559,7 +1562,7 @@ CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated
       WHERE e.event_id = delegates.event_id
         AND COALESCE(e.event_config->>'restrict_registrar_to_free_guest', 'false') = 'true'
     )
-    AND COALESCE(delegates.registration_source, 'manual') = 'manual'
+    AND COALESCE(delegates.registration_source, 'manual') IN ('manual', 'EMS')
     AND UPPER(COALESCE(delegates.delegate_type, '')) = 'FREE GUEST'
     AND delegates.district ILIKE COALESCE(get_delegate_type_district('Free Guest'), '')
   ));

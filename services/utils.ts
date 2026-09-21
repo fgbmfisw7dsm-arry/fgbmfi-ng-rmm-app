@@ -5,6 +5,27 @@ export const formatCurrency = (amount: number) => {
     }).format(amount);
 };
 
+// v1.55: International dialing codes for the EMS New Delegate phone picker.
+// Nigerian (+234) is the default. Stored phone remains the canonical national
+// format (normalizePhone strips the code: +234803... -> 08...).
+export const DIAL_CODE_OPTIONS: { code: string; label: string }[] = [
+    { code: '+234', label: 'Nigeria (+234)' },
+    { code: '+233', label: 'Ghana (+233)' },
+    { code: '+27', label: 'South Africa (+27)' },
+    { code: '+254', label: 'Kenya (+254)' },
+    { code: '+256', label: 'Uganda (+256)' },
+    { code: '+255', label: 'Tanzania (+255)' },
+    { code: '+44', label: 'United Kingdom (+44)' },
+    { code: '+1', label: 'USA / Canada (+1)' },
+    { code: '+91', label: 'India (+91)' },
+    { code: '+971', label: 'UAE (+971)' },
+    { code: '+49', label: 'Germany (+49)' },
+    { code: '+33', label: 'France (+33)' },
+    { code: '+86', label: 'China (+86)' },
+    { code: '+61', label: 'Australia (+61)' },
+    { code: '+65', label: 'Singapore (+65)' },
+];
+
 /**
  * Generates a UUID v4 for QR hash (primary identifier).
  * Used when creating new delegates or regenerating lost badges.

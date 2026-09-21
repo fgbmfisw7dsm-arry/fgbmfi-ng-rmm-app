@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole } from '../types';
-import { exportToPDF, exportToCSV } from '../services/utils';
+import { exportToPDF, exportToCSV, formatCurrency } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
@@ -43,12 +43,18 @@ const MasterListModule = () => {
             </div>
         );
     }
-    const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+    const eventConfig = (activeEvent?.event_config || {}) as Record<string, unknown>;
     const canDelete = canManage && eventConfig.delegate_deletion_enabled === true;
     const scope = getScopeFilter(user);
     const showRank = eventConfig.show_rank !== false;
     const showOffice = eventConfig.show_office !== false;
     const showDelegateType = eventConfig.show_delegate_type !== false;
+    // v1.55: payment columns apply to EMS registrations only; shown via a
+    // persisted toggle rendered only when the active event captures payments.
+    const paymentEnabled = eventConfig.show_payment_fields !== false;
+    const [showPaymentCols, setShowPaymentCols] = useState<boolean>(() => {
+        try { return localStorage.getItem('fgbmfi_ml_show_payments') === '1'; } catch { return false; }
+    });
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
@@ -498,6 +504,22 @@ const MasterListModule = () => {
                         <option value="web">Web</option>
                         <option value="manual">Manual</option>
                     </select>
+                    {paymentEnabled && (
+                        <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-all ${showPaymentCols ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
+                            title="EMS registrations capture Payment Amount & Reference. Toggle to show these columns.">
+                            <input
+                                type="checkbox"
+                                checked={showPaymentCols}
+                                onChange={e => {
+                                    const next = e.target.checked;
+                                    setShowPaymentCols(next);
+                                    try { localStorage.setItem('fgbmfi_ml_show_payments', next ? '1' : '0'); } catch {}
+                                }}
+                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">Show Payment Details</span>
+                        </label>
+                    )}
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
                     <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
@@ -528,7 +550,7 @@ const MasterListModule = () => {
                             const secPages = sec?.pages || 0;
                             const secLoading = sec?.loading ?? true;
                             const secTotal = sec?.total || count;
-                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0);
                             const isOfficial = isValueOfficial(district, officialDistricts);
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
@@ -539,7 +561,7 @@ const MasterListModule = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-[10px] text-left min-w-[1000px]">
                                             <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                                <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                                <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {secLoading ? (
@@ -560,6 +582,10 @@ const MasterListModule = () => {
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
+                                                            {showPaymentCols && <>
+                                                                <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
+                                                                <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
+                                                            </>}
 <td className="p-3 no-print text-center">
                                     <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                     {canManage && (
@@ -614,7 +640,7 @@ const MasterListModule = () => {
                         <div className="overflow-x-auto">
                             <table className="w-full text-[10px] text-left min-w-[1000px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th><th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {delegates.map((d, i) => (
@@ -630,6 +656,10 @@ const MasterListModule = () => {
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
+                                            {showPaymentCols && <>
+                                                <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
+                                                <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
+                                            </>}
                                             <td className="p-3 no-print text-center">
                                                 <button onClick={() => startEditing(d)} className="text-blue-600 font-black uppercase text-[9px] border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-600 hover:text-white transition-all">Edit</button>
                                                 {canManage && (
@@ -647,7 +677,7 @@ const MasterListModule = () => {
                                     ))}
                                     {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
                                         <tr key={`__pad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
                                         </tr>
                                     ))}
                                 </tbody>

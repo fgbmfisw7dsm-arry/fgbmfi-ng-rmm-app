@@ -31,6 +31,15 @@ export type PaymentMode = typeof PAYMENT_MODES[number];
 
 export type RegType = 'manual' | 'portal' | 'web';
 
+// v1.55 (additive exception): per delegate-type required-field configuration,
+// stored per event in `events.event_config.required_fields`.
+export interface FieldRequirement {
+  phone?: boolean;
+  email?: boolean;
+  payment_amount?: boolean;
+  payment_reference?: boolean;
+}
+
 export enum UserRole {
   NATIONAL_ADMIN = 'national_admin',
   REGIONAL_ADMIN = 'regional_admin',
@@ -90,10 +99,13 @@ export interface Delegate {
   qr_hash: string;
   external_id: string;
   event_id: string;
-  registration_source: 'import' | 'manual' | 'qr_scan' | 'portal';
+  // v1.55 (additive): 'EMS' = New Delegate Entry form channel (payment-bearing).
+  registration_source: 'import' | 'manual' | 'qr_scan' | 'portal' | 'EMS';
   reg_type?: RegType;
   badge_printed?: boolean;
   badge_printed_at?: string | null;
+  payment_amount?: number | null;   // v1.55 (additive): EMS registration payment
+  payment_reference?: string | null; // v1.55 (additive): EMS registration payment reference
   created_at: string;
 }
 
@@ -113,7 +125,8 @@ export interface Event {
   start_date: string;
   end_date: string;
   is_active: boolean;
-  event_config?: Record<string, boolean | string[]>;
+  // v1.55 (additive): value union widened to carry per-type required-field maps.
+  event_config?: Record<string, boolean | string[] | Record<string, FieldRequirement>>;
 }
 
 export interface Session {

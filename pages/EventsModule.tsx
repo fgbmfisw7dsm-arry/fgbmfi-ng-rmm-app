@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { db } from '../services/supabaseService';
-import { Event, Session, isAdminRole } from '../types';
+import { Event, Session, isAdminRole, FieldRequirement } from '../types';
 import { AppContext } from '../context/AppContext';
 import { isStripeKeyDetected } from '../services/supabaseClient';
+
+// v1.55: per-type required-field editor labels + default type list
+const REQUIRED_FIELD_LABELS: Record<keyof FieldRequirement, string> = {
+    phone: 'Phone',
+    email: 'Email',
+    payment_amount: 'Payment Amount',
+    payment_reference: 'Payment Reference',
+};
+const DEFAULT_DELEGATE_TYPES = ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'];
 
 const toDatetimeLocal = (utcStr?: string) => {
     if (!utcStr) return '';
@@ -31,6 +40,13 @@ const EventsModule = () => {
     const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
     const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
+    const [delegateTypes, setDelegateTypes] = useState<string[]>(DEFAULT_DELEGATE_TYPES);
+
+    useEffect(() => {
+        db.getSettings().then(s => {
+            if (s && Array.isArray(s.delegate_types) && s.delegate_types.length > 0) setDelegateTypes(s.delegate_types as string[]);
+        }).catch(() => {});
+    }, []);
 
     const userRole = (user?.role || '').toLowerCase();
     const isAdmin = isAdminRole(userRole);
@@ -77,9 +93,31 @@ const EventsModule = () => {
         } finally { setLoading(false); }
     };
 
-    type EventConfig = Record<string, boolean | string[]>;
+    type EventConfig = Record<string, boolean | string[] | Record<string, FieldRequirement>>;
     const getPledgeNames = (config: EventConfig = {}): string[] =>
         Array.isArray(config.pledge_names) ? (config.pledge_names as string[]) : [];
+
+    // v1.55: per-type required-field map helpers
+    const getRequiredFields = (config: EventConfig = {}): Record<string, FieldRequirement> => {
+        const raw = config.required_fields;
+        return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, FieldRequirement>) : {};
+    };
+    const toggleRequiredField = (type: string, field: keyof FieldRequirement) => {
+        setForm(prev => {
+            const config = (prev.event_config || {}) as EventConfig;
+            const req = getRequiredFields(config);
+            const cur = req[type] || {};
+            const next: FieldRequirement = { ...cur, [field]: !(cur[field] === true) };
+            const cleaned: FieldRequirement = {};
+            for (const k of Object.keys(next) as (keyof FieldRequirement)[]) {
+                if (next[k] === true) cleaned[k] = true;
+            }
+            const nextReq = { ...req };
+            if (Object.keys(cleaned).length > 0) nextReq[type] = cleaned;
+            else delete nextReq[type];
+            return { ...prev, event_config: { ...config, required_fields: nextReq } };
+        });
+    };
 
     const addPledgeName = () => {
         const name = pledgeNameInput.trim();
@@ -268,6 +306,7 @@ const EventsModule = () => {
                             { key: 'show_rank', label: 'Show Rank' },
                             { key: 'show_office', label: 'Show Office' },
                             { key: 'show_delegate_type', label: 'Show Delegate Type' },
+                            { key: 'show_payment_fields', label: 'Show Payment Fields (EMS)' },
                         ].map(toggle => {
                             const config = (form.event_config || {}) as Record<string, boolean>;
                             const checked = config[toggle.key] !== false;
@@ -283,6 +322,35 @@ const EventsModule = () => {
                                 </label>
                             );
                         })}
+                    </div>
+
+                    <div className="space-y-2 p-4 bg-violet-50/50 rounded-xl border border-violet-100">
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Required Fields by Delegate Type</label>
+                        <p className="text-[9px] font-bold text-violet-700/70 uppercase mb-2">Which fields the EMS registration form requires for each delegate type. Leave all unchecked = optional.</p>
+                        {(() => {
+                            const config = (form.event_config || {}) as EventConfig;
+                            const req = getRequiredFields(config);
+                            return (
+                                <div className="space-y-2">
+                                    {delegateTypes.map(type => {
+                                        const cur = req[type] || {};
+                                        return (
+                                            <div key={type} className="rounded-xl border border-violet-100 bg-white p-3">
+                                                <div className="font-black uppercase text-[10px] text-violet-800 mb-2">{type}</div>
+                                                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                                    {(Object.keys(REQUIRED_FIELD_LABELS) as (keyof FieldRequirement)[]).map(f => (
+                                                        <label key={f} className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="checkbox" checked={cur[f] === true} onChange={() => toggleRequiredField(type, f)} className="w-3.5 h-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
+                                                            <span className="text-[9px] font-bold uppercase text-gray-500">{REQUIRED_FIELD_LABELS[f]}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     <div className="space-y-2 p-4 bg-amber-50/50 rounded-xl border border-amber-100">
