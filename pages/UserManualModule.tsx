@@ -840,7 +840,7 @@ const UserManualModule = () => {
             <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Sidebar &middot; {g.label}</span>
           </div>
           {secs.map(s => (
-            <section key={s.id} id={s.id} className="mb-12 break-inside-avoid">
+            <section key={s.id} id={s.id} className="mb-12">
               <h2 className="text-xl font-black text-blue-900 uppercase mb-4 flex items-center gap-3 border-b pb-2">
                 <span className="bg-blue-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm font-mono">{s.number}</span>
                 <span>{s.title}</span>

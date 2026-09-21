@@ -518,7 +518,14 @@ export const exportToPDF = (
         html2canvasConfig.onclone = documentOnclone;
     }
 
-    const options = {
+    const options: {
+        margin: number[];
+        filename: string;
+        image: { type: string; quality: number };
+        html2canvas: any;
+        jsPDF: { unit: string; format: string; orientation: 'portrait' | 'landscape'; compress: boolean };
+        pagebreak?: { mode: ('css' | 'legacy' | 'avoid-all')[] };
+    } = {
         margin: [5, 5, 5, 5],
         filename: filename,
         image: { type: 'jpeg', quality: 0.98 },
@@ -530,6 +537,15 @@ export const exportToPDF = (
             compress: true
         }
     };
+
+    // Document mode: disable html2pdf's pagebreak padding. Its css-mode reads
+    // `break-inside: avoid` and inserts near-full-page white spacer divs before
+    // any avoid element that straddles a page boundary — with tall manual sections
+    // this creates giant blank bands (blank first-page body + cascading misalignment).
+    // Reports keep css mode (relies on `tr { page-break-inside: avoid }`).
+    if (!isReport) {
+        options.pagebreak = { mode: [] };
+    }
 
     requestAnimationFrame(() => {
         setTimeout(() => {
