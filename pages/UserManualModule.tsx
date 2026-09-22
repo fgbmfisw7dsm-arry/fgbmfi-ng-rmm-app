@@ -941,7 +941,7 @@ const UserManualModule = () => {
         <div ref={manualRef} className="flex-1 min-w-0 bg-white p-10 md:p-14 rounded-[2.5rem] shadow-sm border min-h-screen text-slate-800 leading-relaxed">
           <div className="text-center mb-12 border-b-4 border-blue-900 pb-10">
             <h1 className="text-4xl font-black uppercase text-blue-900 mb-2 tracking-tighter">{activeTab === 'manual' ? 'Operations Manual' : 'Volunteer Training Guide'}</h1>
-            <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">{activeTab === 'manual' ? 'Regional Events Management System (EMS)' : 'Scenario-Based Workflow & Procedures'}</p>
+            <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">{activeTab === 'manual' ? 'Events Management System (EMS)' : 'Scenario-Based Workflow & Procedures'}</p>
             <div className="mt-6 flex justify-center gap-4">
               <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
               <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">{activeTab === 'manual' ? 'Version 3.0' : 'Volunteer Handout'}</span>
