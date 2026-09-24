@@ -326,16 +326,16 @@ const FinancialsPage = () => {
     };
 
     const exportPledgesCSV = () => {
-        const cols = ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
-        const rows: Record<string, any>[] = pledges.map(p => ({ 'Donor Name': p.donor_name, District: p.district, 'Pledge Name': p.pledge_name || 'General', Pledged: Number(p.amount_pledged) || 0, Redeemed: Number(p.amount_redeemed) || 0, Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0) }));
-        rows.push({ 'Donor Name': 'GRAND TOTAL', District: '', 'Pledge Name': '', Pledged: pledgeTotalPledged, Redeemed: pledgeTotalRedeemed, Balance: pledgeTotalBalance });
+        const cols = ['Donor Name', 'District', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+        const rows: Record<string, any>[] = pledges.map(p => ({ 'Donor Name': p.donor_name, District: p.district, Phone: p.phone || '', Email: p.email || '', 'Pledge Name': p.pledge_name || 'General', Pledged: Number(p.amount_pledged) || 0, Redeemed: Number(p.amount_redeemed) || 0, Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0) }));
+        rows.push({ 'Donor Name': 'GRAND TOTAL', District: '', Phone: '', Email: '', 'Pledge Name': '', Pledged: pledgeTotalPledged, Redeemed: pledgeTotalRedeemed, Balance: pledgeTotalBalance });
         exportToCSV(rows, `FGBMFI_Pledges_${safeEventName}_${dateStamp}.csv`, cols);
     };
 
     const exportPledgesPDF = () => {
-        const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(p.amount_redeemed), formatCurrency((Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0))] }));
-        rows.push({ cells: ['Grand Total', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], kind: 'grand' });
-        exportTablePdf(buildPdfHtml(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [3, 4, 5]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`);
+        const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, p.phone || '-', p.email || '-', p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(p.amount_redeemed), formatCurrency((Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0))] }));
+        rows.push({ cells: ['Grand Total', '', '', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [5, 6, 7]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`);
     };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Active Event</div>;
@@ -570,6 +570,14 @@ const FinancialsPage = () => {
                                 <input className="w-full p-3 border rounded-xl font-bold bg-white" placeholder="Required" value={pForm.district} onChange={e => setPForm({ ...pForm, district: e.target.value })} />
                             </div>
                             <div className="space-y-1">
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Phone (Optional)</label>
+                                <input className="w-full p-3 border rounded-xl font-bold bg-white" placeholder="Optional" value={pForm.phone || ''} onChange={e => setPForm({ ...pForm, phone: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Email (Optional)</label>
+                                <input className="w-full p-3 border rounded-xl font-bold bg-white" placeholder="Optional" value={pForm.email || ''} onChange={e => setPForm({ ...pForm, email: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Pledge Amount (NGN)</label>
                                 <input type="number" className="w-full p-3 border rounded-xl font-black text-2xl text-blue-600 bg-blue-50/30" placeholder="0.00" value={pForm.amount_pledged || ''} onChange={e => setPForm({ ...pForm, amount_pledged: parseFloat(e.target.value) })} />
                             </div>
@@ -596,16 +604,18 @@ const FinancialsPage = () => {
                             </div>
                         </div>
                         <div className="text-[10px] font-black uppercase text-gray-400 mb-2">Showing {pledgePage.from}–{pledgePage.to} of {pledgePage.total} pledges</div>
-                        <table className="w-full text-xs text-left min-w-[500px]">
-                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">District</th><th className="p-4">Pledge Name</th><th className="p-4 text-right">Pledged</th><th className="p-4 text-right">Redeemed</th><th className="p-4 text-right">Balance</th></tr></thead>
+                        <table className="w-full text-xs text-left min-w-[720px]">
+                            <thead><tr className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400"><th className="p-4">Donor Name</th><th className="p-4">District</th><th className="p-4">Phone</th><th className="p-4">Email</th><th className="p-4">Pledge Name</th><th className="p-4 text-right">Pledged</th><th className="p-4 text-right">Redeemed</th><th className="p-4 text-right">Balance</th></tr></thead>
                             <tbody className="divide-y">
                                 {pledgePage.rows.length === 0 && (
-                                    <tr><td colSpan={6} className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">No pledges recorded</td></tr>
+                                    <tr><td colSpan={8} className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">No pledges recorded</td></tr>
                                 )}
                                 {pledgePage.rows.map(p => (
                                     <tr key={p.id} className="hover:bg-gray-50">
                                         <td className="p-4 font-black text-gray-800 uppercase text-[11px]">{p.donor_name}</td>
                                         <td className="p-4 text-gray-500 font-black uppercase text-[9px]">{p.district}</td>
+                                        <td className="p-4 text-gray-500 font-bold text-[10px]">{p.phone || '-'}</td>
+                                        <td className="p-4 text-gray-500 font-bold text-[10px]">{p.email || '-'}</td>
                                         <td className="p-4 text-purple-700 font-black uppercase text-[9px]">{p.pledge_name || 'General'}</td>
                                         <td className="p-4 font-bold text-right">{formatCurrency(p.amount_pledged)}</td>
                                         <td className="p-4 text-green-700 font-bold text-right">{formatCurrency(p.amount_redeemed)}</td>
@@ -616,7 +626,7 @@ const FinancialsPage = () => {
                             {pledges.length > 0 && (
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black">
-                                        <td colSpan={3} className="p-4 uppercase">Grand Total</td>
+                                        <td colSpan={5} className="p-4 uppercase">Grand Total</td>
                                         <td className="p-4 text-right">{formatCurrency(pledgeTotalPledged)}</td>
                                         <td className="p-4 text-right">{formatCurrency(pledgeTotalRedeemed)}</td>
                                         <td className="p-4 text-right">{formatCurrency(pledgeTotalBalance)}</td>

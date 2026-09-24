@@ -240,7 +240,7 @@ const ReportsPage = () => {
         }
 
         if (activeTab === 'pledgeList') {
-            const cols = ['District', 'Donor', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+            const cols = ['District', 'Donor', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
             const rows: Record<string, any>[] = [];
             officialDistricts.forEach(dist => {
                 const ps = pledges.filter((p: any) => norm(p.district) === norm(dist)).sort((a: any, b: any) => (a.donor_name || '').localeCompare(b.donor_name || ''));
@@ -248,6 +248,8 @@ const ReportsPage = () => {
                     rows.push({
                         District: dist,
                         Donor: p.donor_name,
+                        Phone: p.phone || '',
+                        Email: p.email || '',
                         'Pledge Name': p.pledge_name || 'General',
                         Pledged: Number(p.amount_pledged) || 0,
                         Redeemed: Number(p.amount_redeemed) || 0,
@@ -763,12 +765,14 @@ const ReportsPage = () => {
                                         <div className="bg-slate-800 text-white p-2 font-black uppercase text-[10px] rounded-t-lg" style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>{dist} Detailed Pledges</div>
                                         <table className="w-full text-[10px] border">
                                             <thead className="bg-gray-50 uppercase font-black">
-                                                <tr><th className="p-2 border">Donor</th><th className="p-2 border">Pledge Name</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>
+                                                <tr><th className="p-2 border">Donor</th><th className="p-2 border">Phone</th><th className="p-2 border">Email</th><th className="p-2 border">Pledge Name</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>
                                             </thead>
                                             <tbody>
                                                 {ps.map(p => (
                                                     <tr key={p.id} className="border-b">
                                                         <td className="p-2 border font-bold uppercase">{p.donor_name}</td>
+                                                        <td className="p-2 border font-bold uppercase">{p.phone || '-'}</td>
+                                                        <td className="p-2 border font-bold">{p.email || '-'}</td>
                                                         <td className="p-2 border font-bold uppercase text-purple-700">{p.pledge_name || 'General'}</td>
                                                         <td className="p-2 border text-right">{formatCurrency(p.amount_pledged)}</td>
                                                         <td className="p-2 border text-right text-green-700">{formatCurrency(p.amount_redeemed)}</td>
