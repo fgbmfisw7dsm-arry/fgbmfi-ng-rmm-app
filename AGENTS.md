@@ -477,6 +477,7 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - `[createUser] app_users upsert failed:` — profile insertion failed after auth creation
 
 ### 17. Pledge Name (per-event categories)
+- **v1.59 UI label:** the user-facing label is now **"Pledge Type"** everywhere (chip editor "Pledge Types", New Pledge dropdown + table column, Reports "By Pledge Type"/Pledge List, User Manual). This is a **display-only relabel** — the storage keys are unchanged: `pledges.pledge_name` column and `event_config.pledge_names` array. Management stays **admin-only in Events & Config** (chip editor); `event_admin`/`finance` cannot write pledge types (events UPDATE RLS is `is_admin_user()` only). Search for "Pledge Type" when looking for this feature.
 - Pledge names are **configured per event** in EventsModule as `events.event_config.pledge_names` (a `string[]` JSONB array), edited via a chip editor in the "Delegate Form Fields" config box.
 - Each chip supports **inline rename** (pencil → save/cancel, Enter/Escape keys) and **remove** (×). Add box at the top; duplicates are rejected.
 - All `pledge_names` state updates use functional `setForm` to prevent stale-closure clobbering when multiple names are added quickly.

@@ -239,14 +239,14 @@ const ReportsPage = () => {
                 nameTotals.set(key, cur);
             });
             Array.from(nameTotals.entries()).sort((a, b) => b[1].pld - a[1].pld).forEach(([name, t]) => {
-                rows.push({ Group: 'Pledge Name', Name: name, Pledges: t.count, Pledged: t.pld, Redeemed: t.red, Balance: t.pld - t.red });
+                rows.push({ Group: 'Pledge Type', Name: name, Pledges: t.count, Pledged: t.pld, Redeemed: t.red, Balance: t.pld - t.red });
             });
             exportToCSV(rows, filename, cols);
             return;
         }
 
         if (activeTab === 'pledgeList') {
-            const cols = ['District', 'Donor', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+            const cols = ['District', 'Donor', 'Phone', 'Email', 'Pledge Type', 'Pledged', 'Redeemed', 'Balance'];
             const rows: Record<string, any>[] = [];
             officialDistricts.forEach(dist => {
                 const ps = pledges.filter((p: any) => norm(p.district) === norm(dist)).sort((a: any, b: any) => (a.donor_name || '').localeCompare(b.donor_name || ''));
@@ -256,7 +256,7 @@ const ReportsPage = () => {
                         Donor: p.donor_name,
                         Phone: p.phone || '',
                         Email: p.email || '',
-                        'Pledge Name': p.pledge_name || 'General',
+                        'Pledge Type': p.pledge_name || 'General',
                         Pledged: Number(p.amount_pledged) || 0,
                         Redeemed: Number(p.amount_redeemed) || 0,
                         Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0),
@@ -750,10 +750,10 @@ const ReportsPage = () => {
                                 if (rows.length === 0) return null;
                                 return (
                                     <div className="mt-6">
-                                        <h4 className="font-black uppercase text-[10px] text-gray-400 tracking-widest mb-2">By Pledge Name</h4>
+                                        <h4 className="font-black uppercase text-[10px] text-gray-400 tracking-widest mb-2">By Pledge Type</h4>
                                         <table className="w-full text-sm border min-w-max">
                                             <thead className="bg-slate-100 uppercase font-black text-[10px]">
-                                                <tr><th className="p-3 border">Pledge Name</th><th className="p-3 border text-right">Pledges</th><th className="p-3 border text-right">Pledged</th><th className="p-3 border text-right">Redeemed</th><th className="p-3 border text-right">Balance</th></tr>
+                                                <tr><th className="p-3 border">Pledge Type</th><th className="p-3 border text-right">Pledges</th><th className="p-3 border text-right">Pledged</th><th className="p-3 border text-right">Redeemed</th><th className="p-3 border text-right">Balance</th></tr>
                                             </thead>
                                             <tbody>
                                                 {rows.map(([name, t]) => (
@@ -782,7 +782,7 @@ const ReportsPage = () => {
                                         <div className="bg-slate-800 text-white p-2 font-black uppercase text-[10px] rounded-t-lg" style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>{dist} Detailed Pledges</div>
                                         <table className="w-full text-[10px] border">
                                             <thead className="bg-gray-50 uppercase font-black">
-                                                <tr><th className="p-2 border">Donor</th><th className="p-2 border">Phone</th><th className="p-2 border">Email</th><th className="p-2 border">Pledge Name</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>
+                                                <tr><th className="p-2 border">Donor</th><th className="p-2 border">Phone</th><th className="p-2 border">Email</th><th className="p-2 border">Pledge Type</th><th className="p-2 border text-right">Pledged</th><th className="p-2 border text-right">Redeemed</th><th className="p-2 border text-right">Balance</th></tr>
                                             </thead>
                                             <tbody>
                                                 {ps.map(p => (

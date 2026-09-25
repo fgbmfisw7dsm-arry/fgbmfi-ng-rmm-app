@@ -333,7 +333,7 @@ const MANUAL_SECTIONS: DocSection[] = [
         </div>
         <div className="p-5 border rounded-2xl bg-gray-50">
           <h4 className="text-xs font-black text-blue-900 uppercase mb-2">New Pledges</h4>
-          <p className="text-xs text-gray-600">In the "New Pledge" tab, search for the donor by name, select a <strong>Pledge Name</strong> (configured per event), enter the total promised amount, and save. This creates an active debt record.</p>
+          <p className="text-xs text-gray-600">In the "New Pledge" tab, search for the donor by name, select a <strong>Pledge Type</strong> (configured per event), enter the total promised amount, and save. This creates an active debt record.</p>
         </div>
         <div className="p-5 border rounded-2xl bg-gray-50">
           <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Redemption (Payments)</h4>

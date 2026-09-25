@@ -394,7 +394,8 @@ const EventsModule = () => {
                     </div>
 
                     <div className="space-y-2 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
-                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Pledge Names (per-event categories)</label>
+                        <label className="text-[10px] font-black text-gray-400 uppercase block mb-2">Pledge Types (per-event categories)</label>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase">Add/edit/delete the Pledge Type choices in the New Pledge Entry dropdown (blank = General)</p>
                         <div className="flex gap-2">
                             <input
                                 className="flex-1 p-2 border rounded-lg bg-white font-bold text-xs"
