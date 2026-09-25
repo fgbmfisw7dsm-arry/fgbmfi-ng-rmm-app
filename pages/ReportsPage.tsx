@@ -170,6 +170,8 @@ const ReportsPage = () => {
             const vdOf = (sid: string) => (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === sid).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
             const offOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const redOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+            const masterOff = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+            const masterRed = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const rows: Record<string, any>[] = sessions.map(s => {
                 const offering = offOf(s.session_id);
                 const redemption = redOf(s.session_id);
@@ -188,16 +190,17 @@ const ReportsPage = () => {
             });
             const totals: Record<string, any> = { Session: 'Totals' };
             (['Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD'] as const).forEach(k => totals[k] = rows.reduce((s, r) => s + Number(r[k]) || 0, 0));
-            totals['Offering'] = sessions.reduce((s, sess) => s + offOf(sess.session_id), 0);
-            totals['Pledge Redemption'] = sessions.reduce((s, sess) => s + redOf(sess.session_id), 0);
+            totals['Offering'] = sessions.reduce((s, sess) => s + offOf(sess.session_id), 0) + masterOff;
+            totals['Pledge Redemption'] = sessions.reduce((s, sess) => s + redOf(sess.session_id), 0) + masterRed;
             totals['Financial Total'] = totals['Offering'] + totals['Pledge Redemption'];
+            rows.push({ Session: 'Full Event (Master)', Attendance: '-', FT: '-', SLV: '-', MI: '-', HGB: '-', VD: '-', Offering: masterOff, 'Pledge Redemption': masterRed, 'Financial Total': masterOff + masterRed });
             rows.push(totals);
             exportToCSV(rows, filename, cols);
             return;
         }
 
         if (activeTab === 'financialMatrix') {
-            const cols = ['Category', ...sessions.map(s => s.title), 'Total'];
+            const cols = ['Category', ...sessions.map(s => s.title), 'Full Event (Master)', 'Total'];
             const rows: Record<string, any>[] = [FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
                 const row: Record<string, any> = { Category: type.replace('_', ' ') };
                 let total = 0;
@@ -206,6 +209,9 @@ const ReportsPage = () => {
                     total += amt;
                     row[s.title] = amt;
                 });
+                const master = reportData.financials.filter((f: any) => f.type === type && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+                total += master;
+                row['Full Event (Master)'] = master;
                 row['Total'] = total;
                 return row;
             });
@@ -652,6 +658,14 @@ const ReportsPage = () => {
                                             </tr>
                                         );
                                     })}
+                                    <tr className="bg-yellow-50 font-black">
+                                        <td className="p-3 border font-black uppercase text-xs">Full Event (Master)</td>
+                                        <td className="p-3 border text-center">-</td>
+                                        <td colSpan={5} className="p-3 border"></td>
+                                        <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                    </tr>
                                 </tbody>
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
@@ -662,9 +676,9 @@ const ReportsPage = () => {
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length, 0)}</td>
                                         <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
-                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
-                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
-                                        <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0))}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                     </tr>
                                 </tfoot>
                             </table>
@@ -675,11 +689,13 @@ const ReportsPage = () => {
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-sm border min-w-max">
                                 <thead className="bg-slate-100 uppercase font-black text-[10px]">
-                                    <tr><th className="p-3 border text-left">Category</th>{sessions.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right bg-blue-50">Total</th></tr>
+                                    <tr><th className="p-3 border text-left">Category</th>{sessions.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right">Full Event (Master)</th><th className="p-3 border text-right bg-blue-50">Total</th></tr>
                                 </thead>
                                 <tbody className="divide-y">
                                     {[FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
                                         let rowSum = 0;
+                                        const master = financials.filter((f:any) => f.type === type && !f.session_id).reduce((sum:number, f:any) => sum + (Number(f.amount)||0), 0);
+                                        rowSum += master;
                                         return (
                                             <tr key={type} className="hover:bg-gray-50">
                                                 <td className="p-3 border font-black uppercase text-xs">{type.replace('_', ' ')}</td>
@@ -688,6 +704,7 @@ const ReportsPage = () => {
                                                     rowSum += amt;
                                                     return <td key={s.session_id} className="p-3 border text-right font-bold">{formatCurrency(amt)}</td>;
                                                 })}
+                                                <td className="p-3 border text-right font-bold">{formatCurrency(master)}</td>
                                                 <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(rowSum)}</td>
                                             </tr>
                                         );

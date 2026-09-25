@@ -175,6 +175,7 @@ export interface CheckInResult {
 export interface Pledge {
   id: string;
   event_id: string;
+  session_id?: string; // v1.58 (additive exception): Event Session where the pledge was made
   donor_name: string;
   district: string;
   chapter: string;

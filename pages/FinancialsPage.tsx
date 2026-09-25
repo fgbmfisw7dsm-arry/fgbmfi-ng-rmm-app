@@ -112,8 +112,18 @@ const FinancialsPage = () => {
 
     const [selectedPledge, setSelectedPledge] = useState<Pledge | null>(null);
     const [tForm, setTForm] = useState<Partial<FinancialEntry>>({ amount: 0, type: FinancialType.OFFERING, session_id: '', payment_mode: '', remarks: '' });
-    const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
-    const [rForm, setRForm] = useState({ amount: 0, payment_mode: '', remarks: 'Pledge Redemption' });
+    const [pForm, setPForm] = useState<Partial<Pledge>>({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '', session_id: '' });
+    const [rForm, setRForm] = useState({ amount: 0, payment_mode: '', session_id: '', remarks: 'Pledge Redemption' });
+
+    const redeemedByPledge = useMemo(() => {
+        const m = new Map<string, number>();
+        entries.forEach(e => {
+            if (e.type !== FinancialType.PLEDGE_REDEMPTION || !e.pledge_id) return;
+            m.set(e.pledge_id, (m.get(e.pledge_id) || 0) + (Number(e.amount) || 0));
+        });
+        return m;
+    }, [entries]);
+    const redeemedOf = (p: Pledge): number => redeemedByPledge.get(p.id) || 0;
 
     useEffect(() => {
         if (!activeEventId) return;
@@ -160,7 +170,8 @@ const FinancialsPage = () => {
             phone: d.phone || '',
             email: d.email || '',
             amount_pledged: pForm.amount_pledged,
-            pledge_name: pForm.pledge_name
+            pledge_name: pForm.pledge_name,
+            session_id: pForm.session_id
         });
         setSearchTerm('');
         setSearchResults([]);
@@ -168,7 +179,7 @@ const FinancialsPage = () => {
 
     const handleSelectPledge = (p: Pledge) => {
         setSelectedPledge(p);
-        setRForm({ amount: p.amount_pledged - p.amount_redeemed, payment_mode: '', remarks: 'Pledge Redemption' });
+        setRForm({ amount: p.amount_pledged - redeemedOf(p), payment_mode: '', session_id: p.session_id || '', remarks: 'Pledge Redemption' });
         setRedemptionSearch('');
         setRedemptionResults([]);
     };
@@ -197,7 +208,7 @@ const FinancialsPage = () => {
             await db.createPledge({ ...pForm, event_id: activeEventId });
             alert("Pledge Recorded Successfully!");
             refreshFinancials();
-            setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '' });
+            setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '', session_id: '' });
         } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
     };
 
@@ -213,6 +224,7 @@ const FinancialsPage = () => {
                 amount: rForm.amount,
                 pledge_id: selectedPledge.id,
                 payer_name: selectedPledge.donor_name,
+                session_id: rForm.session_id || undefined,
                 payment_mode: rForm.payment_mode || undefined,
                 remarks: rForm.remarks
             });
@@ -250,7 +262,7 @@ const FinancialsPage = () => {
     const offeringTotal = useMemo(() => offeringEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0), [offeringEntries]);
     const redemptionTotal = useMemo(() => redemptionEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0), [redemptionEntries]);
     const pledgeTotalPledged = useMemo(() => pledges.reduce((s, p) => s + (Number(p.amount_pledged) || 0), 0), [pledges]);
-    const pledgeTotalRedeemed = useMemo(() => pledges.reduce((s, p) => s + (Number(p.amount_redeemed) || 0), 0), [pledges]);
+    const pledgeTotalRedeemed = useMemo(() => pledges.reduce((s, p) => s + redeemedOf(p), 0), [pledges, redeemedByPledge]);
     const pledgeTotalBalance = pledgeTotalPledged - pledgeTotalRedeemed;
 
     const offeringTotalsBySession = useMemo(() => {
@@ -313,29 +325,29 @@ const FinancialsPage = () => {
     };
 
     const exportRedemptionsCSV = () => {
-        const cols = ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'];
-        const rows: Record<string, any>[] = redemptionEntries.map(e => ({ 'Donor Name': e.payer_name || '-', 'Payment Mode': e.payment_mode || 'Unspecified', Amount: Number(e.amount) || 0, Date: dateStr(e.created_at), Remarks: e.remarks || '' }));
-        rows.push({ 'Donor Name': 'GRAND TOTAL', 'Payment Mode': '', Amount: redemptionTotal, Date: '', Remarks: '' });
+        const cols = ['Session', 'Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'];
+        const rows: Record<string, any>[] = redemptionEntries.map(e => ({ Session: sessionTitle(e.session_id), 'Donor Name': e.payer_name || '-', 'Payment Mode': e.payment_mode || 'Unspecified', Amount: Number(e.amount) || 0, Date: dateStr(e.created_at), Remarks: e.remarks || '' }));
+        rows.push({ Session: '', 'Donor Name': 'GRAND TOTAL', 'Payment Mode': '', Amount: redemptionTotal, Date: '', Remarks: '' });
         exportToCSV(rows, `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.csv`, cols);
     };
 
     const exportRedemptionsPDF = () => {
-        const rows: PdfRow[] = redemptionEntries.map(e => ({ cells: [e.payer_name || '-', e.payment_mode || 'Unspecified', formatCurrency(e.amount), dateStr(e.created_at), e.remarks || '-'] }));
-        rows.push({ cells: ['Grand Total', '', formatCurrency(redemptionTotal), '', ''], kind: 'grand' });
-        exportTablePdf(buildPdfHtml(eventTitle, `Pledge Redemptions · ${dateRange}`, ['Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'], rows, [2]), `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.pdf`);
+        const rows: PdfRow[] = redemptionEntries.map(e => ({ cells: [sessionTitle(e.session_id), e.payer_name || '-', e.payment_mode || 'Unspecified', formatCurrency(e.amount), dateStr(e.created_at), e.remarks || '-'] }));
+        rows.push({ cells: ['', 'Grand Total', '', formatCurrency(redemptionTotal), '', ''], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Pledge Redemptions · ${dateRange}`, ['Session', 'Donor Name', 'Payment Mode', 'Amount', 'Date', 'Remarks'], rows, [3]), `FGBMFI_Redemptions_${safeEventName}_${dateStamp}.pdf`);
     };
 
     const exportPledgesCSV = () => {
-        const cols = ['Donor Name', 'District', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
-        const rows: Record<string, any>[] = pledges.map(p => ({ 'Donor Name': p.donor_name, District: p.district, Phone: p.phone || '', Email: p.email || '', 'Pledge Name': p.pledge_name || 'General', Pledged: Number(p.amount_pledged) || 0, Redeemed: Number(p.amount_redeemed) || 0, Balance: (Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0) }));
-        rows.push({ 'Donor Name': 'GRAND TOTAL', District: '', Phone: '', Email: '', 'Pledge Name': '', Pledged: pledgeTotalPledged, Redeemed: pledgeTotalRedeemed, Balance: pledgeTotalBalance });
+        const cols = ['Donor Name', 'District', 'Session', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'];
+        const rows: Record<string, any>[] = pledges.map(p => ({ 'Donor Name': p.donor_name, District: p.district, Session: sessionTitle(p.session_id), Phone: p.phone || '', Email: p.email || '', 'Pledge Name': p.pledge_name || 'General', Pledged: Number(p.amount_pledged) || 0, Redeemed: redeemedOf(p), Balance: (Number(p.amount_pledged) || 0) - redeemedOf(p) }));
+        rows.push({ 'Donor Name': 'GRAND TOTAL', District: '', Session: '', Phone: '', Email: '', 'Pledge Name': '', Pledged: pledgeTotalPledged, Redeemed: pledgeTotalRedeemed, Balance: pledgeTotalBalance });
         exportToCSV(rows, `FGBMFI_Pledges_${safeEventName}_${dateStamp}.csv`, cols);
     };
 
     const exportPledgesPDF = () => {
-        const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, p.phone || '-', p.email || '-', p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(p.amount_redeemed), formatCurrency((Number(p.amount_pledged) || 0) - (Number(p.amount_redeemed) || 0))] }));
-        rows.push({ cells: ['Grand Total', '', '', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], kind: 'grand' });
-        exportTablePdf(buildPdfHtml(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [5, 6, 7]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`);
+        const rows: PdfRow[] = pledges.map(p => ({ cells: [p.donor_name, p.district, sessionTitle(p.session_id), p.phone || '-', p.email || '-', p.pledge_name || 'General', formatCurrency(p.amount_pledged), formatCurrency(redeemedOf(p)), formatCurrency((Number(p.amount_pledged) || 0) - redeemedOf(p))] }));
+        rows.push({ cells: ['Grand Total', '', '', '', '', '', formatCurrency(pledgeTotalPledged), formatCurrency(pledgeTotalRedeemed), formatCurrency(pledgeTotalBalance)], kind: 'grand' });
+        exportTablePdf(buildPdfHtml(eventTitle, `Pledges · ${dateRange}`, ['Donor Name', 'District', 'Session', 'Phone', 'Email', 'Pledge Name', 'Pledged', 'Redeemed', 'Balance'], rows, [6, 7, 8]), `FGBMFI_Pledges_${safeEventName}_${dateStamp}.pdf`);
     };
 
     if (!activeEventId) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Select Active Event</div>;
@@ -469,7 +481,7 @@ const FinancialsPage = () => {
                                                     <div className="text-[9px] text-gray-400 uppercase font-black">{p.district} DISTRICT</div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className="font-black text-red-600 text-sm">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</div>
+                                                    <div className="font-black text-red-600 text-sm">{formatCurrency(p.amount_pledged - redeemedOf(p))}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -486,9 +498,16 @@ const FinancialsPage = () => {
                                     <button type="button" onClick={() => setSelectedPledge(null)} className="text-white text-[9px] font-black uppercase bg-blue-800 px-3 py-1.5 rounded-lg">Change</button>
                                 </div>
                                 <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Event Session</label>
+                                    <select className="w-full p-3 border rounded-xl bg-gray-50 font-bold" value={rForm.session_id} onChange={e => setRForm({ ...rForm, session_id: e.target.value })}>
+                                        <option value="">Full Event (Master)</option>
+                                        {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
                                     <label className="text-[10px] font-black text-gray-400 uppercase">Payment Amount</label>
                                     <input type="number" className="w-full p-4 border rounded-xl font-black text-2xl text-green-700 bg-green-50/30" value={rForm.amount} onChange={e => setRForm({ ...rForm, amount: parseFloat(e.target.value) })} />
-                                    <div className="text-[10px] text-red-600 font-black text-right mt-1">Bal: {formatCurrency(selectedPledge.amount_pledged - selectedPledge.amount_redeemed)}</div>
+                                    <div className="text-[10px] text-red-600 font-black text-right mt-1">Bal: {formatCurrency(selectedPledge.amount_pledged - redeemedOf(selectedPledge))}</div>
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-black text-gray-400 uppercase">Payment Mode (Optional)</label>
@@ -562,6 +581,13 @@ const FinancialsPage = () => {
                         </div>
                         <form onSubmit={submitPledge} className="space-y-5">
                             <div className="space-y-1">
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Event Session</label>
+                                <select className="w-full p-3 border rounded-xl bg-gray-50 font-bold" value={pForm.session_id || ''} onChange={e => setPForm({ ...pForm, session_id: e.target.value })}>
+                                    <option value="">Full Event (Master)</option>
+                                    {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1">
                                 <label className="text-[10px] font-black text-gray-400 uppercase">Donor Name</label>
                                 <input className="w-full p-3 border rounded-xl font-bold bg-white" placeholder="Required" value={pForm.donor_name} onChange={e => setPForm({ ...pForm, donor_name: e.target.value })} />
                             </div>
@@ -618,8 +644,8 @@ const FinancialsPage = () => {
                                         <td className="p-4 text-gray-500 font-bold text-[10px]">{p.email || '-'}</td>
                                         <td className="p-4 text-purple-700 font-black uppercase text-[9px]">{p.pledge_name || 'General'}</td>
                                         <td className="p-4 font-bold text-right">{formatCurrency(p.amount_pledged)}</td>
-                                        <td className="p-4 text-green-700 font-bold text-right">{formatCurrency(p.amount_redeemed)}</td>
-                                        <td className="p-4 text-right text-red-600 font-black">{formatCurrency(p.amount_pledged - p.amount_redeemed)}</td>
+                                        <td className="p-4 text-green-700 font-bold text-right">{formatCurrency(redeemedOf(p))}</td>
+                                        <td className="p-4 text-right text-red-600 font-black">{formatCurrency(p.amount_pledged - redeemedOf(p))}</td>
                                     </tr>
                                 ))}
                             </tbody>

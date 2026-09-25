@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS checkins (
 CREATE TABLE IF NOT EXISTS pledges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     event_id UUID REFERENCES events(event_id) ON DELETE CASCADE,
+    session_id UUID REFERENCES sessions(session_id) ON DELETE SET NULL,
     donor_name TEXT NOT NULL,
     district TEXT NOT NULL,
     chapter TEXT,
@@ -698,6 +699,7 @@ DROP INDEX IF EXISTS idx_financials_event;
 CREATE INDEX idx_financials_event ON financial_entries(event_id);
 DROP INDEX IF EXISTS idx_pledges_event;
 CREATE INDEX idx_pledges_event ON pledges(event_id);
+CREATE INDEX IF NOT EXISTS idx_pledges_event_session ON pledges(event_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_delegates_event_id ON delegates(event_id);
 CREATE INDEX IF NOT EXISTS idx_delegates_external_id ON delegates(external_id) WHERE external_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_delegates_badge_printed ON delegates(event_id, badge_printed);
