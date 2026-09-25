@@ -81,6 +81,7 @@ const FinancialsPage = () => {
     const pledgeNames = Array.isArray(pledgeNameConfig) ? (pledgeNameConfig as string[]) : [];
     const [activeTab, setActiveTab] = useState<'transactions' | 'redemptions' | 'pledges'>('transactions');
     const [loading, setLoading] = useState(false);
+    const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
     const [page, setPage] = useState(1);
     const queryClient = useQueryClient();
 
@@ -188,35 +189,46 @@ const FinancialsPage = () => {
         e.preventDefault();
         if (isLocked) return;
         if (!activeEventId) return;
-        if ((tForm.amount || 0) <= 0) return alert("Enter valid amount.");
+        if ((tForm.amount || 0) <= 0) { setFeedback({ kind: 'error', text: 'Enter a valid amount.' }); return; }
         setLoading(true);
+        const t0 = performance.now();
         try {
-            await db.addFinancialEntry({ ...tForm, event_id: activeEventId });
-            alert("Offering Recorded!");
+            await db.addFinancialEntry({ ...tForm, event_id: activeEventId, entry_id: crypto.randomUUID() });
+            console.log(`[submitTransaction] OK in ${(performance.now() - t0).toFixed(0)}ms`);
+            setFeedback({ kind: 'success', text: 'Offering Recorded!' });
             refreshFinancials();
             setTForm({ amount: 0, type: FinancialType.OFFERING, session_id: '', payment_mode: '', remarks: '' });
-        } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
+        } catch (err: any) {
+            console.error('[submitTransaction] FAILED', err?.message || err);
+            setFeedback({ kind: 'error', text: 'Save Failed: ' + (err?.message || 'Unknown error') });
+        } finally { setLoading(false); }
     };
 
     const submitPledge = async (e: React.FormEvent) => {
         e.preventDefault();
         if (isLocked) return;
         if (!activeEventId) return;
-        if (!pForm.donor_name || !pForm.district || (pForm.amount_pledged || 0) <= 0) return alert("Donor Name, District, and Amount are required.");
+        if (!pForm.donor_name || !pForm.district || (pForm.amount_pledged || 0) <= 0) { setFeedback({ kind: 'error', text: 'Donor Name, District, and Amount are required.' }); return; }
         setLoading(true);
+        const t0 = performance.now();
         try {
-            await db.createPledge({ ...pForm, event_id: activeEventId });
-            alert("Pledge Recorded Successfully!");
+            await db.createPledge({ ...pForm, event_id: activeEventId, id: crypto.randomUUID() });
+            console.log(`[submitPledge] OK in ${(performance.now() - t0).toFixed(0)}ms`);
+            setFeedback({ kind: 'success', text: 'Pledge Recorded Successfully!' });
             refreshFinancials();
             setPForm({ donor_name: '', district: '', chapter: '', phone: '', email: '', amount_pledged: 0, pledge_name: '', session_id: '' });
-        } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
+        } catch (err: any) {
+            console.error('[submitPledge] FAILED', err?.message || err);
+            setFeedback({ kind: 'error', text: 'Save Failed: ' + (err?.message || 'Unknown error') });
+        } finally { setLoading(false); }
     };
 
     const submitRedemption = async (e: React.FormEvent) => {
         e.preventDefault();
         if (isLocked) return;
-        if (!activeEventId || !selectedPledge || rForm.amount <= 0) return alert("Invalid entry.");
+        if (!activeEventId || !selectedPledge || rForm.amount <= 0) { setFeedback({ kind: 'error', text: 'Invalid entry.' }); return; }
         setLoading(true);
+        const t0 = performance.now();
         try {
             await db.addFinancialEntry({
                 event_id: activeEventId,
@@ -226,12 +238,17 @@ const FinancialsPage = () => {
                 payer_name: selectedPledge.donor_name,
                 session_id: rForm.session_id || undefined,
                 payment_mode: rForm.payment_mode || undefined,
-                remarks: rForm.remarks
+                remarks: rForm.remarks,
+                entry_id: crypto.randomUUID()
             });
-            alert("Redemption Recorded!");
+            console.log(`[submitRedemption] OK in ${(performance.now() - t0).toFixed(0)}ms`);
+            setFeedback({ kind: 'success', text: 'Redemption Recorded!' });
             setSelectedPledge(null);
             refreshFinancials();
-        } catch (err: any) { alert("Save Failed: " + err.message); } finally { setLoading(false); }
+        } catch (err: any) {
+            console.error('[submitRedemption] FAILED', err?.message || err);
+            setFeedback({ kind: 'error', text: 'Save Failed: ' + (err?.message || 'Unknown error') });
+        } finally { setLoading(false); }
     };
 
     const offeringEntries = useMemo(() => entries.filter(e => e.type === FinancialType.OFFERING), [entries]);
@@ -358,6 +375,13 @@ const FinancialsPage = () => {
                 <div className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700">
                     <span className="text-xl">🔒</span>
                     <span className="text-xs font-black uppercase tracking-widest">Read-Only Mode: Financial Ledger Locked</span>
+                </div>
+            )}
+
+            {feedback && (
+                <div className={`flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-xl ${feedback.kind === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+                    <span>{feedback.text}</span>
+                    <button type="button" onClick={() => setFeedback(null)} className="opacity-70 hover:opacity-100 text-base leading-none">×</button>
                 </div>
             )}
 

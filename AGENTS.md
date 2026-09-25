@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.58 (Pledge Event Session + Financial Matrix: per-pledge session capture, session-bucketed redemptions, Full Event (Master) bucket, live-computed redeemed amounts)
+- **Current Version:** 1.59 (Financial Write Resilience: withRetry + global fetch timeout + idempotent entry_id/id + record_financial_entry RPC + inline status banner)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -863,6 +863,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **`ReportsPage.tsx`:** Financial Matrix **and** its CSV export gained a **"Full Event (Master)"** column summing entries with `session_id` null/unknown, folded into each category's Total (money is never silently omitted). Sessions Summary gained a yellow **Full Event (Master)** subtotal row (Offering / Pledge Redemption / Financial Total) and the Totals row now includes unassigned amounts (view + CSV export).
 - **Deploy order:** run the migration FIRST (Supabase SQL editor), then deploy the frontend. Historical session-less redemptions/pledges display under "Full Event (Master)".
 - **Verification:** `npx tsc --noEmit` → only the 4 pre-existing non-blocking warnings (App.tsx / supabaseService.ts); `npm run build` passes.
+
+## 56. Financial Write Resilience — Retry + Timeout + Idempotent RPC (v1.59)
+
+- **Problem solved (live incident, Sep 2026):** a finance officer's "Record Offering" (Bank Transfer selected) silently did nothing for three clicks on a fast 5G connection, then worked minutes later. **Diagnosis:** no code path branches on payment mode (plain `TEXT` column, no DB constraint, no branching) — the fault was a transient write-path failure with zero resilience: (1) `addFinancialEntry`/`createPledge` had **no client timeout** (Supabase `fetch` could stall for ~75s with the button pinned on the page-wide shared `loading` → dead green button, no feedback), (2) **no retry** (`withRetry` existed but was only wired into check-in/session paths), and (3) feedback was **alert()-only** — a single missed/missed-recorded state was indistinguishable from "nothing happened".
+- **`supabaseClient.ts` — global fetch timeout:** `globalThis.fetch` wrapped with an `AbortController` (25s) that ONLY applies when the caller did not supply their own signal (image fetches with 5s AbortControllers are untouched). A stalled request now fails fast instead of hanging silently.
+- **`supabaseService.ts` — `withRetry` retryable set widened** to match timeout/abort signals (`timed out|timeout|aborted|AbortError|signal`) in addition to `Connection failed|network error|Failed to fetch`. `addFinancialEntry`, `createPledge`, and the financial RPC path are now wrapped in `withRetry` (3 attempts, 1s/2s backoff; `EVENT_LOCKED`/`SESSION_EXPIRED` still non-retried).
+- **Idempotent writes (no data migration):** `submitTransaction`/`submitRedemption` generate `entry_id` and `submitPledge` generates `id` via `crypto.randomUUID()` (columns already exist as PKs). On insert, a `23505` conflict triggers a fetch-and-return of the existing row — a response-lost retry (whether by `withRetry` or the new RPC's `ON CONFLICT DO NOTHING`) can never double-record.
+- **Single-round-trip RPC (`record_financial_entry`, new `supabase_migration_v1.59_financial_entry_rpc.sql` + `supabase_schema.sql` §12i):** SECURITY INVOKER (caller RLS governs → financial writes stay admin/event_admin/finance only), bundles event-active guard + idempotent INSERT + returns the row; `p_entry_id` supplied by the client. Client wrapper `db.addFinancialEntry` tries the RPC first (`USE_FINANCIAL_RPC` module flag), falls back to the classic insert on any error (function-missing auto-detected like `checkInByCode`; `EVENT_LOCKED` rethrown). Deploy order: migration → frontend (frontend-first is non-breaking via fallback).
+  - `createPledge` stays on the hardened classic path (retry + idempotent `id` only) — the offering/RPC pattern can be extended to pledges later if needed.
+- **Diagnostics (FinancialsPage):** `submitTransaction`/`submitPledge`/`submitRedemption` now write timing + errors to the console (`[submitTransaction] OK/FAILED`, `[submitTransaction] OK in Nms`, `[createPledge]`, `[addFinancialEntry]`) and surface success/error via a dismissible **inline status banner** (green/red, replaces the success `alert()`s and unmissable-blocking failure dialogs). Validation messages (invalid amount, missing fields) also route to the banner.
+- **Known trade-offs:** (1) a 25s global fetch timeout now applies to Supabase storage downloads too (badge PDFs) — acceptable safety net; large downloads on very slow links will error instead of hanging. (2) The idempotent RPC is scoped to `financial_entries`; a manual user re-click after a response-lost save is treated as a NEW record (correct for the offering workflow). (3) `tsc --noEmit` still reports the 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 

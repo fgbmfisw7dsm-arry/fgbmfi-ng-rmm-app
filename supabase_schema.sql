@@ -1582,6 +1582,60 @@ DROP POLICY IF EXISTS "deleted_users_admin_all" ON deleted_users;
 CREATE POLICY "deleted_users_select_own" ON deleted_users FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY "deleted_users_admin_all" ON deleted_users FOR ALL TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 
+-- 12i. record_financial_entry (v1.59): single-round-trip financial write.
+--      SECURITY INVOKER → caller RLS governs (admin / event_admin / finance only).
+--      Idempotent: supplied p_entry_id + ON CONFLICT (entry_id) DO NOTHING.
+CREATE OR REPLACE FUNCTION public.record_financial_entry(
+    p_event_id UUID,
+    p_entry_type TEXT,
+    p_amount DECIMAL,
+    p_payment_mode TEXT DEFAULT NULL,
+    p_session_id UUID DEFAULT NULL,
+    p_remarks TEXT DEFAULT NULL,
+    p_pledge_id UUID DEFAULT NULL,
+    p_payer_name TEXT DEFAULT NULL,
+    p_entry_id UUID DEFAULT NULL
+)
+RETURNS SETOF public.financial_entries
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+    v_entry_id UUID := COALESCE(p_entry_id, gen_random_uuid());
+    v_is_active BOOLEAN;
+    v_row_count INT;
+    v_row public.financial_entries%ROWTYPE;
+BEGIN
+    IF p_event_id IS NULL THEN
+        RAISE EXCEPTION 'Missing event_id';
+    END IF;
+    IF p_entry_type IS NULL OR p_amount IS NULL THEN
+        RAISE EXCEPTION 'Missing entry type or amount';
+    END IF;
+
+    SELECT is_active INTO v_is_active FROM public.events WHERE event_id = p_event_id;
+
+    IF v_is_active IS NULL THEN
+        RAISE EXCEPTION 'EVENT_NOT_FOUND';
+    END IF;
+    IF v_is_active = false THEN
+        RAISE EXCEPTION 'EVENT_LOCKED: This event is currently inactive (Read-Only).';
+    END IF;
+
+    INSERT INTO public.financial_entries (entry_id, event_id, session_id, pledge_id, amount, type, payer_name, payment_mode, remarks)
+    VALUES (v_entry_id, p_event_id, p_session_id, p_pledge_id, p_amount, p_entry_type, p_payer_name, p_payment_mode, p_remarks)
+    ON CONFLICT (entry_id) DO NOTHING;
+
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+
+    SELECT * INTO v_row FROM public.financial_entries WHERE entry_id = v_entry_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'financial_entries conflict but row missing for entry_id=%', v_entry_id;
+    END IF;
+    RETURN NEXT v_row;
+END;
+$$;
+
 -- 13. FUNCTION GRANT LOCKDOWN (mirrors live + hardening pass1)
 --     Revoke EXECUTE on ALL public functions from anon/PUBLIC/authenticated,
 --     then re-grant to the roles the application uses. check_login_account is

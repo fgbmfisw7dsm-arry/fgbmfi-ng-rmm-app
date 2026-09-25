@@ -187,6 +187,10 @@ const withRetry = async <T>(
   maxRetries: number = 3,
   baseDelay: number = 1000
 ): Promise<T> => {
+  const isRetryable = (message?: string) => {
+    if (!message) return false;
+    return /Connection failed|network error|Failed to fetch|timed out|timeout|aborted|AbortError|signal/i.test(message);
+  };
   let lastError: any;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -194,7 +198,7 @@ const withRetry = async <T>(
     } catch (e: any) {
       lastError = e;
       if (e.message === 'SESSION_EXPIRED' || e.message?.startsWith('EVENT_LOCKED')) throw e;
-      if (attempt < maxRetries && (e.message?.includes('Connection failed') || e.message?.includes('network error') || e.message?.includes('Failed to fetch'))) {
+      if (attempt < maxRetries && isRetryable(e?.message)) {
         await new Promise(resolve => setTimeout(resolve, baseDelay * attempt));
         continue;
       }
@@ -516,6 +520,8 @@ export const auth = {
 let auditEnabled = true;
 const USE_CHECKIN_RPC = true;
 let checkinRpcAvailable = true;
+const USE_FINANCIAL_RPC = true;
+let financialRpcAvailable = true;
 
 export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
 
@@ -1723,17 +1729,76 @@ export const db = {
     },
 
     addFinancialEntry: async (entry: Partial<FinancialEntry>) => {
+        const entryId = entry.entry_id || crypto.randomUUID();
+        const t0 = performance.now();
         if (entry.event_id) await ensureEventActive(entry.event_id);
-        const result = handleSupabaseError(await supabase.from('financial_entries').insert(entry).select().single());
+        const attemptClassic = async () => {
+            const { data, error } = await supabase.from('financial_entries').insert({ ...entry, entry_id: entryId }).select().single();
+            if (error && error.code === '23505') {
+                const { data: existing } = await supabase.from('financial_entries').select('*').eq('entry_id', entryId).maybeSingle();
+                if (existing) return existing;
+            }
+            return handleSupabaseError({ data, error });
+        };
+        const attemptRpc = async () => {
+            const { data, error } = await supabase.rpc('record_financial_entry', {
+                p_event_id: entry.event_id,
+                p_entry_type: entry.type ?? FinancialType.OFFERING,
+                p_amount: entry.amount ?? 0,
+                p_payment_mode: entry.payment_mode ?? null,
+                p_session_id: entry.session_id ?? null,
+                p_remarks: entry.remarks ?? null,
+                p_pledge_id: entry.pledge_id ?? null,
+                p_payer_name: entry.payer_name ?? null,
+                p_entry_id: entryId
+            });
+            if (error) {
+                if ((error.message || '').toLowerCase().includes('could not find the function') || error.code === 'PGRST116' || error.code === 'PGRST202') financialRpcAvailable = false;
+                throw error;
+            }
+            const rows = (data || []) as FinancialEntry[];
+            if (!rows || rows.length === 0) throw new Error('record_financial_entry returned no row');
+            return rows[0];
+        };
+        let result: any;
+        if (USE_FINANCIAL_RPC && financialRpcAvailable) {
+            try {
+                result = await withRetry(attemptRpc);
+            } catch (err: any) {
+                if (err?.message?.startsWith('EVENT_LOCKED')) throw err;
+                console.warn('[addFinancialEntry] RPC failed, falling back to classic insert:', err?.message || err);
+                result = await withRetry(attemptClassic);
+            }
+        } else {
+            result = await withRetry(attemptClassic);
+        }
+        console.log(`[addFinancialEntry] OK — ${entry.type} ${Number(result.amount).toLocaleString()} (${(performance.now() - t0).toFixed(0)}ms) entry_id=${entryId}${financialRpcAvailable ? '' : ' [RPC unavailable, classic path]'}`);
         const typeLabel = entry.type === FinancialType.OFFERING ? 'Offering' : 'Pledge Redemption';
         const labelName = entry.type === FinancialType.OFFERING ? (result.payment_mode || 'N/A') : (result.payer_name || 'N/A');
-        recordAuditLog(result.event_id, `financial_${entry.type?.toLowerCase() || 'entry'}`, `${typeLabel}: ${labelName} — ₦${Number(result.amount).toLocaleString()}`, null, 'financial', result.id);
+        recordAuditLog(result.event_id, `financial_${entry.type?.toLowerCase() || 'entry'}`, `${typeLabel}: ${labelName} — ₦${Number(result.amount).toLocaleString()}`, null, 'financial', result.entry_id || result.id);
         return result;
     },
 
     createPledge: async (pledge: Partial<Pledge>) => {
+        const pledgeId = pledge.id || crypto.randomUUID();
+        const t0 = performance.now();
         if (pledge.event_id) await ensureEventActive(pledge.event_id);
-        const result = handleSupabaseError(await supabase.from('pledges').insert(pledge).select().single());
+        const attempt = async () => {
+            const { data, error } = await supabase.from('pledges').insert({ ...pledge, id: pledgeId }).select().single();
+            if (error && error.code === '23505') {
+                const { data: existing } = await supabase.from('pledges').select('*').eq('id', pledgeId).maybeSingle();
+                if (existing) return existing;
+            }
+            return handleSupabaseError({ data, error });
+        };
+        let result;
+        try {
+            result = await withRetry(attempt);
+        } catch (err: any) {
+            console.error(`[createPledge] FAILED after retries (${(performance.now() - t0).toFixed(0)}ms):`, err?.message || err);
+            throw err;
+        }
+        console.log(`[createPledge] OK — ${result.donor_name} (${(performance.now() - t0).toFixed(0)}ms) id=${pledgeId}`);
         recordAuditLog(result.event_id, 'pledge_create', `Pledge: ${result.donor_name} — ₦${Number(result.amount_pledged).toLocaleString()}`, null, 'pledge', result.id);
         return result;
     },

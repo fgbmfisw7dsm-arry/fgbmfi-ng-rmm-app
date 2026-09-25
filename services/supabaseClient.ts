@@ -1,6 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
 // =================================================================================
+// GLOBAL FETCH TIMEOUT (safety net)
+// =================================================================================
+// Prevents a stalled request (dead-zone mobile network, saturated connection pool,
+// hung TLS handshake) from leaving a "SAVING..." button stuck silently for minutes.
+// Callers that pass their own AbortSignal (e.g. image fetches with 5s timeouts)
+// are not overridden.
+const FETCH_TIMEOUT_MS = 25_000;
+const _originalFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init && init.signal) return _originalFetch(input, init);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    return _originalFetch(input, init ? { ...init, signal: controller.signal } : { signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
+// =================================================================================
 // PROJECT CONFIGURATION
 // =================================================================================
 // Your specific Supabase Project URL
