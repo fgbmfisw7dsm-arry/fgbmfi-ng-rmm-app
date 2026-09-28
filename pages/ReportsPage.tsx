@@ -5,6 +5,11 @@ import { UserRole, FinancialType, Session, Event, SystemSettings, Pledge, Financ
 import { AppContext } from '../context/AppContext';
 import { formatCurrency, exportToPDF, exportToCSV } from '../services/utils';
 
+const sessionFinancialTotal = (financials: FinancialEntry[], sid: string): number =>
+    financials
+        .filter((f: any) => f.session_id === sid && [FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].includes(f.type))
+        .reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+
 const ReportsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const isLocked = activeEvent?.is_active === false;
@@ -200,18 +205,25 @@ const ReportsPage = () => {
         }
 
         if (activeTab === 'financialMatrix') {
-            const cols = ['Category', ...sessions.map(s => s.title), 'Full Event (Master)', 'Total'];
+            const csvMatrixSessions = sessions.filter(s => sessionFinancialTotal(reportData.financials, s.session_id) > 0);
+            const csvMasterTotal = reportData.financials.filter((f: any) => !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+            const csvShowMaster = csvMasterTotal > 0;
+            if (csvMatrixSessions.length === 0 && !csvShowMaster) {
+                alert("No session-level or master financial figures (>0) exist for this event — nothing to export.");
+                return;
+            }
+            const cols = ['Category', ...csvMatrixSessions.map(s => s.title), ...(csvShowMaster ? ['Full Event (Master)'] : []), 'Total'];
             const rows: Record<string, any>[] = [FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
                 const row: Record<string, any> = { Category: type.replace('_', ' ') };
                 let total = 0;
-                sessions.forEach(s => {
+                csvMatrixSessions.forEach(s => {
                     const amt = reportData.financials.filter((f: any) => f.type === type && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
                     total += amt;
                     row[s.title] = amt;
                 });
                 const master = reportData.financials.filter((f: any) => f.type === type && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
                 total += master;
-                row['Full Event (Master)'] = master;
+                if (csvShowMaster) row['Full Event (Master)'] = master;
                 row['Total'] = total;
                 return row;
             });
@@ -455,6 +467,11 @@ const ReportsPage = () => {
 
     const { attendedDelegates, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges } = reportData;
 
+    const matrixSessions = sessions.filter(s => sessionFinancialTotal(financials, s.session_id) > 0);
+    const matrixMasterTotal = reportData.financials.filter((f: any) => !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
+    const showMatrixMaster = matrixMasterTotal > 0;
+    const excludedMatrixSessions = sessions.length - matrixSessions.length;
+
     const renderAttendanceList = () => {
         const unrecognizedDists: string[] = [];
         attendedDelegates.forEach(d => {
@@ -686,10 +703,16 @@ const ReportsPage = () => {
                     )}
                     
                     {activeTab === 'financialMatrix' && (
+                        matrixSessions.length === 0 && !showMatrixMaster ? (
+                            <div className="p-8 text-center text-gray-400 font-mono text-xs uppercase">No financial entries recorded for this event</div>
+                        ) : (
                         <div className="overflow-x-auto w-full">
+                            {excludedMatrixSessions > 0 && (
+                                <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">{excludedMatrixSessions} session(s) with no financial activity excluded</p>
+                            )}
                             <table className="w-full text-sm border min-w-max">
                                 <thead className="bg-slate-100 uppercase font-black text-[10px]">
-                                    <tr><th className="p-3 border text-left">Category</th>{sessions.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}<th className="p-3 border text-right">Full Event (Master)</th><th className="p-3 border text-right bg-blue-50">Total</th></tr>
+                                    <tr><th className="p-3 border text-left">Category</th>{matrixSessions.map(s => <th key={s.session_id} className="p-3 border text-right">{s.title}</th>)}{showMatrixMaster && <th className="p-3 border text-right">Full Event (Master)</th>}<th className="p-3 border text-right bg-blue-50">Total</th></tr>
                                 </thead>
                                 <tbody className="divide-y">
                                     {[FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].map(type => {
@@ -699,12 +722,12 @@ const ReportsPage = () => {
                                         return (
                                             <tr key={type} className="hover:bg-gray-50">
                                                 <td className="p-3 border font-black uppercase text-xs">{type.replace('_', ' ')}</td>
-                                                {sessions.map(s => {
+                                                {matrixSessions.map(s => {
                                                     const amt = financials.filter((f:any) => f.type === type && f.session_id === s.session_id).reduce((s:number, f:any) => s + (Number(f.amount)||0), 0);
                                                     rowSum += amt;
                                                     return <td key={s.session_id} className="p-3 border text-right font-bold">{formatCurrency(amt)}</td>;
                                                 })}
-                                                <td className="p-3 border text-right font-bold">{formatCurrency(master)}</td>
+                                                {showMatrixMaster && <td className="p-3 border text-right font-bold">{formatCurrency(master)}</td>}
                                                 <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(rowSum)}</td>
                                             </tr>
                                         );
@@ -712,6 +735,7 @@ const ReportsPage = () => {
                                 </tbody>
                             </table>
                         </div>
+                        )
                     )}
                     {activeTab === 'pledgeSummary' && (
                         <div className="overflow-x-auto w-full">

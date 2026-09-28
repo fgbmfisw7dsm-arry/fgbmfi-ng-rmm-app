@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.63 (Master List Export — Payment columns when "Show Payment Details")
+- **Current Version:** 1.64 (Financial Matrix — only funded sessions + PDF right-edge clip fix)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -913,6 +913,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - **PDF:** `headerCells` + rows push `Payment` / `Payment Ref` columns (after Reg ID, matching the on-screen order at §58/§table) — `formatCurrency(payment_amount)` with `'—'` for nulls, raw `payment_reference`; `colSpan` numerator includes the 2 columns.
   - **CSV:** `if (showPaymentCols) cols.push('payment_amount', 'payment_reference')` — raw snake_case keys consistent with the other CSV columns (`exportToCSV` prints header from key names).
 - **Non-disruption:** export data source (`fetchAllDelegatesForExport`) unchanged and already returns payment fields; filter/search/source prefix logic untouched. No DB migration or `types.ts` change. `tsc --noEmit` → same 4 pre-existing non-blocking warnings; `npm run build` passes.
+
+## 61. Financial Matrix — Only Funded Sessions + PDF Right-Edge Clip Fix (v1.64)
+
+- **Problem solved (Sep 2026):** (1) the **Financial Matrix** rendered EVERY session as a column (on-screen table + CSV export + PDF-via-DOM-clone) even when a session had zero `financial_entries` — empty columns bloated the report. (2) Exported **PDF** clipped a "considerable number of columns on the right-end": `exportToPDF` captured at a fixed `viewportWidth` (ReportsPage passed 1600px), and the matrix's unbreakable currency cells made the table wider than 1600px → html2canvas cut off everything past the right edge (CSV files were always complete; the perceived CSV truncation was the same over-long report viewed in a spreadsheet).
+- **Filter (`pages/ReportsPage.tsx`):** module helper `sessionFinancialTotal(financials, session_id)` = OFFERING + PLEDGE_REDEMPTION for a session. `matrixSessions = sessions.filter(s => total > 0)` now drives the **on-screen matrix**, the **CSV** financial-matrix branch (`handleExportCSV`), and — via the DOM snapshot — the **PDF**. "Full Event (Master)" is hidden when `masterTotal <= 0` (contributing 0 to each category `Total`, so no money is dropped); `Total` always remains. A gray note reports "N session(s) with no financial activity excluded". Empty state ("No financial entries recorded for this event") when `matrixSessions` is empty AND master is 0; the CSV handler alerts and returns in that case. Sessions Summary / Pledge Summary / attendance tabs unchanged.
+- **PDF width fix (`services/utils.ts` — `exportToPDF`, report mode only):** after appending the clone, measure the widest table's `scrollWidth` and set `captureWidth = max(viewportWidth, min(widest, 2600))`; feed it to the print container width + `html2canvasConfig.width/windowWidth`. Single landscape sheet, ~0.61× text at the 2600 cap; `document` mode and the exported signature are untouched. Benefits every wide report (Financial Matrix, Sessions Summary, attendance matrices), not just the matrix.
+- **Non-disruption:** no `types.ts`/service/DB/RPC changes; PDF/CSV export plumbing unchanged (`forceViewportWidth` still honored; auto-detect is additive). `tsc --noEmit` → same 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 

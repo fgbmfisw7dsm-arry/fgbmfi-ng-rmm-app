@@ -460,6 +460,14 @@ export const exportToPDF = (
     printContainer.appendChild(nodeToPrint);
     document.body.appendChild(printContainer);
 
+    let captureWidth = viewportWidth;
+    if (isReport) {
+        const tables = Array.from(nodeToPrint.querySelectorAll('table'));
+        const widest = tables.reduce((m, t) => Math.max(m, t.scrollWidth || 0), 0);
+        captureWidth = Math.max(viewportWidth, Math.min(widest, 2600));
+        printContainer.style.width = `${captureWidth}px`;
+    }
+
     const reportOnclone = (clonedDoc: Document) => {
         clonedDoc.querySelectorAll('.overflow-x-auto, .overflow-hidden').forEach(el => {
             (el as HTMLElement).style.overflow = 'visible';
@@ -511,8 +519,8 @@ export const exportToPDF = (
     };
 
     if (isReport) {
-        html2canvasConfig.width = viewportWidth;
-        html2canvasConfig.windowWidth = viewportWidth;
+        html2canvasConfig.width = captureWidth;
+        html2canvasConfig.windowWidth = captureWidth;
         html2canvasConfig.onclone = reportOnclone;
     } else {
         html2canvasConfig.onclone = documentOnclone;
