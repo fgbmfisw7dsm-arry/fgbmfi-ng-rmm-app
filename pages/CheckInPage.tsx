@@ -246,14 +246,16 @@ const CheckInPage = () => {
     }
   };
 
-  const handleBadge = async (delegate: Delegate) => {
+  const handleBadge = async (delegate: Delegate, feeOverRide?: FeeCategory) => {
     try {
       let target = delegate;
       if (!delegate.external_id?.startsWith('CON26') && activeEvent?.is_active === true) {
         const repaired = await db.repairExternalId(delegate.delegate_id);
         if (repaired) target = { ...delegate, external_id: repaired };
       }
-      const { badgeUrl } = await generateBadgeImage(target, { showRank, showOffice, feeCategory: badgeFeeCategory });
+      // feeOverRide lets the toggle switch apply on the FIRST click (the state
+      // setter hasn't flushed when handleBadge re-runs) — no double-click needed.
+      const { badgeUrl } = await generateBadgeImage(target, { showRank, showOffice, feeCategory: feeOverRide ?? badgeFeeCategory });
 
       setBadgeCanvasUrl(badgeUrl);
       setBadgeDelegate(target);
@@ -693,7 +695,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                         key={cat}
                         onClick={() => {
                           setBadgeFeeCategory(cat);
-                          if (badgeDelegate) handleBadge(badgeDelegate);
+                          if (badgeDelegate) handleBadge(badgeDelegate, cat);
                         }}
                         className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
                           badgeFeeCategory === cat ? 'bg-blue-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'

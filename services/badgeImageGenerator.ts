@@ -250,7 +250,8 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     const cx = z.stampCX * bw;
     const cy = z.stampCY * bh;
     const maxW = Math.max(10, z.stampMaxW * bw - 3 * k);
-    let stampSize = 9 * k;
+    // 10*k px — one point larger than the default, mirroring the PDF (fix3).
+    let stampSize = 10 * k;
     ctx.font = 'bold ' + stampSize + 'px sans-serif';
     while (stampSize > 5 * k && ctx.measureText(stampLabel).width > maxW) {
       stampSize -= 0.25;

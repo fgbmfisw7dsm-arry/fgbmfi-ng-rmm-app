@@ -787,6 +787,9 @@ const BadgePrintingModule = () => {
 
   return (
     <div className="space-y-6">
+      {layout === 'a6-single' && (
+        <style>{`@media print { @page { size: 105mm 148mm; margin: 0; } }`}</style>
+      )}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-black text-blue-900 uppercase tracking-tighter">
@@ -1364,8 +1367,14 @@ const BadgePrintingModule = () => {
                       const fileName = buildBatchFileName();
                       const originalTitle = document.title;
                       document.title = fileName;
-                      const iframe = document.querySelector('iframe[title="Badge PDF Preview"]') as HTMLIFrameElement | null;
-                      iframe?.contentWindow?.print();
+                      if (layout === 'a6-single' && pdfPreviewUrl) {
+                        // A6 pages: hand the PDF to the browser's viewer so the
+                        // print dialog defaults to the PDF's A6 media box.
+                        window.open(pdfPreviewUrl, '_blank');
+                      } else {
+                        const iframe = document.querySelector('iframe[title="Badge PDF Preview"]') as HTMLIFrameElement | null;
+                        iframe?.contentWindow?.print();
+                      }
                       window.addEventListener('afterprint', () => { document.title = originalTitle; }, { once: true });
                       setTimeout(() => { document.title = originalTitle; }, 15000);
                     }}

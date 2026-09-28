@@ -1,4 +1,5 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { db } from '../services/supabaseService';
 import { Delegate, getScopeFilter, isAdminRole, isEventAdminRole } from '../types';
@@ -33,6 +34,13 @@ const IndividualBadgePrint = () => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Flag the page for A6-only printing: while mounted, Print hides the ENTIRE app
+  // shell (via #root) and shows only the A6 sheet, with @page locked to 105×148mm.
+  useEffect(() => {
+    document.body.classList.add('a6-print-active');
+    return () => document.body.classList.remove('a6-print-active');
+  }, []);
 
   const handleClose = () => {
     if (window.history.length > 1) {
@@ -213,6 +221,15 @@ const IndividualBadgePrint = () => {
 
   return (
     <>
+    <style>{`
+      @media print {
+        @page { size: 105mm 148mm; margin: 0; }
+        html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
+        body.a6-print-active > #root > * { display: none !important; }
+        #a6-print-sheet { display: none; }
+        body.a6-print-active #a6-print-sheet { display: flex !important; align-items: center; justify-content: center; }
+      }
+    `}</style>
     <div className="space-y-6 print:hidden">
       <div className="flex justify-between items-center">
         <div>
@@ -376,18 +393,15 @@ const IndividualBadgePrint = () => {
       )}
     </div>
 
-    {a6PrintImageUrl && (
-      <div className="hidden print:block">
-        <style>{`@media print {
-              @page { size: 105mm 148mm; margin: 0; }
-              html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
-            }`}</style>
+    {a6PrintImageUrl && createPortal(
+      <div id="a6-print-sheet">
         <img
           src={a6PrintImageUrl}
           alt="A6 Badge"
-          style={{ width: '100mm', height: '140mm', display: 'block', margin: '0 auto', boxShadow: 'none' }}
+          style={{ width: '100mm', height: '140mm', display: 'block', boxShadow: 'none' }}
         />
-      </div>
+      </div>,
+      document.body
     )}
     </>
   );

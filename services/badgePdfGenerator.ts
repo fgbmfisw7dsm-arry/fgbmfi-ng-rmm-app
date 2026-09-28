@@ -133,7 +133,9 @@ function drawStampTextCentered(
   color: ReturnType<typeof rgb>
 ) {
   if (!label || maxW <= 0) return;
-  let size = 9;
+  // 10pt — one point larger than the default 9pt so REGULAR reads beside the
+  // bold baked EARLY BIRD (v1.65-fix3).
+  let size = 10;
   while (size > 4.5 && font.widthOfTextAtSize(label, size) > maxW) size -= 0.25;
   const textW = font.widthOfTextAtSize(label, size);
   page.drawText(label, { x: cx - textW / 2, y: cy - size * 0.38, size, font, color, maxWidth: Math.max(1, maxW) });
@@ -442,17 +444,20 @@ function drawV2Content(
     const [trFx, trFy] = V2_ZONES.stampTR;
     const [tlFx, tlFy] = V2_ZONES.stampTL;
     const xOf = (fx: number) => badgeLeft + fx * bw;
-    const yOf = (fy: number) => imgY + imgH * (1 - fy);
+    const yUpOf = (fy: number) => imgY + imgH * (1 - fy);
+    // pdf-lib's drawSvgPath applies scale(1,-1) ("SVG path Y axis is opposite
+    // pdf-lib's"), so path coordinates are TOP-DOWN — negate the y-up value.
+    const ySvgOf = (fy: number) => -yUpOf(fy);
     // Fill the slanted trapezoid with the design navy to erase the baked text.
     const path =
-      `M ${xOf(blFx)} ${yOf(blFy)} ` +
-      `L ${xOf(brFx)} ${yOf(brFy)} ` +
-      `L ${xOf(trFx)} ${yOf(trFy)} ` +
-      `L ${xOf(tlFx)} ${yOf(tlFy)} Z`;
-    page.drawSvgPath(path, { color: STAMP_BOX_FILL });
-    // "REGULAR" centered on the trapezoid centroid.
+      `M ${xOf(blFx)} ${ySvgOf(blFy)} ` +
+      `L ${xOf(brFx)} ${ySvgOf(brFy)} ` +
+      `L ${xOf(trFx)} ${ySvgOf(trFy)} ` +
+      `L ${xOf(tlFx)} ${ySvgOf(tlFy)} Z`;
+    page.drawSvgPath(path, { x: 0, y: 0, color: STAMP_BOX_FILL });
+    // "REGULAR" centered on the trapezoid centroid (drawText IS y-up).
     const cxAbs = xOf(V2_ZONES.stampCX);
-    const cyAbs = yOf(V2_ZONES.stampCY);
+    const cyAbs = yUpOf(V2_ZONES.stampCY);
     const maxTextW = Math.max(mmToPt(4), V2_ZONES.stampMaxW * bw - mmToPt(1));
     drawStampTextCentered(page, cxAbs, cyAbs, maxTextW, 'REGULAR', fontBold, STAMP_LIGHT);
   }
