@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, Chapter } from '../types';
+import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, Chapter, FeeCategory } from '../types';
 import { AppContext } from '../context/AppContext';
 import QRCode from 'qrcode';
 import QRScanner from '../components/QRScanner';
@@ -21,6 +21,8 @@ const CheckInPage = () => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
   const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
+  // v1.65: EARLY BIRD / REGULAR fee stamp for the E-Badge (default Regular — post-Early-Bird era).
+  const [badgeFeeCategory, setBadgeFeeCategory] = useState<FeeCategory>('regular');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);
@@ -251,7 +253,7 @@ const CheckInPage = () => {
         const repaired = await db.repairExternalId(delegate.delegate_id);
         if (repaired) target = { ...delegate, external_id: repaired };
       }
-      const { badgeUrl } = await generateBadgeImage(target, { showRank, showOffice });
+      const { badgeUrl } = await generateBadgeImage(target, { showRank, showOffice, feeCategory: badgeFeeCategory });
 
       setBadgeCanvasUrl(badgeUrl);
       setBadgeDelegate(target);
@@ -678,10 +680,30 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
          <>
            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 print:hidden" onClick={closeBadgeModal}>
              <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 animate-in zoom-in" onClick={e => e.stopPropagation()}>
-               <div className="flex justify-between items-start mb-6">
-                 <h3 className="text-lg font-black text-blue-900 uppercase tracking-tighter">E-Badge</h3>
-                 <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-               </div>
+<div className="flex justify-between items-start mb-6">
+                   <h3 className="text-lg font-black text-blue-900 uppercase tracking-tighter">E-Badge</h3>
+                   <button onClick={closeBadgeModal} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+                </div>
+
+                <div className="mb-4">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Fee Category Stamp</p>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+                    {(['early_bird', 'regular'] as FeeCategory[]).map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => {
+                          setBadgeFeeCategory(cat);
+                          if (badgeDelegate) handleBadge(badgeDelegate);
+                        }}
+                        className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                          badgeFeeCategory === cat ? 'bg-blue-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {cat === 'early_bird' ? 'Early Bird' : 'Regular'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                   <div id="badge-print-area" className="bg-white border-2 border-blue-900 rounded-xl overflow-hidden" style={{ width: '65mm', height: '90.8mm', position: 'relative', backgroundColor: '#ffffff' }}>
                     {badgeCanvasUrl && (

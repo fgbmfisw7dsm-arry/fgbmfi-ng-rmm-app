@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress } from '../types';
+import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
 import { AppContext } from '../context/AppContext';
 import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +17,7 @@ const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '8-up-portrait', label: '8-up Portrait (63×90mm)' },
   { value: '4-up-3x4', label: '4-up 3×4″ Portrait (76×102mm)' },
   { value: '4-up-portrait', label: '4-up Portrait Full-Design (100×140mm)' },
+  { value: 'a6-single', label: 'A6 Single (100×140mm on A6 shell — banner/footer pre-printed)' },
 ];
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
@@ -70,6 +71,9 @@ const BadgePrintingModule = () => {
 
   const [sortBy, setSortBy] = useState<BadgeSortField>('surname');
   const [layout, setLayout] = useState<BadgeLayout>('8-up');
+  // v1.65: EARLY BIRD / REGULAR stamp. Default Early Bird preserves the state of
+  // every batch printed so far; operators switch to Regular for the post-Early-Bird runs.
+  const [feeCategory, setFeeCategory] = useState<FeeCategory>('early_bird');
   const [batchSize, setBatchSize] = useState<BadgeBatchSize>(500);
   const [batchesPerRun, setBatchesPerRun] = useState(1);
   const [skipAlreadyPrinted, setSkipAlreadyPrinted] = useState(true);
@@ -423,7 +427,8 @@ const BadgePrintingModule = () => {
               total: Math.max(runDelegatesCount, 1),
               phase: pg.phase,
             } as unknown as BadgeGenerationProgress);
-          }
+          },
+          feeCategory
         );
 
         if (cancellationRef.current) break;
@@ -447,6 +452,7 @@ const BadgePrintingModule = () => {
             filters: filtersForBatch,
             status: 'generating',
             generated_by: user.id,
+            fee_category: feeCategory,
           });
 
           const districtSlug = (filters.district || 'All-Districts')
@@ -524,6 +530,7 @@ const BadgePrintingModule = () => {
     filters,
     sortBy,
     layout,
+    feeCategory,
     batchSize,
     batchesPerRun,
     skipAlreadyPrinted,
@@ -738,13 +745,14 @@ const BadgePrintingModule = () => {
     }
   };
 
-  const handleReprintBatch = async (batchId: string) => {
-    await db.updateBadgeBatchStatus(batchId, 'printing');
+  const handleReprintBatch = async (batch: BadgeBatch) => {
+    await db.updateBadgeBatchStatus(batch.batch_id, 'printing');
     loadBatches();
     setActiveTab('generate');
+    if (batch.fee_category) setFeeCategory(batch.fee_category);
     setFeedback({
       type: 'success',
-      msg: `Batch ${batchId} queued for reprint. Use the Generate tab to reprint.`,
+      msg: `Batch #${batch.batch_number} queued for reprint (${FEE_CATEGORY_LABELS[batch.fee_category || 'early_bird']}). Use the Generate tab to reprint.`,
     });
   };
 
@@ -1166,6 +1174,34 @@ const BadgePrintingModule = () => {
                 </p>
               </div>
             </div>
+
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">
+                    Fee Category Stamp
+                  </p>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-xl max-w-md">
+                    {(['early_bird', 'regular'] as FeeCategory[]).map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setFeeCategory(cat)}
+                        className={`flex-1 py-2.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                          feeCategory === cat ? 'bg-blue-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {cat === 'early_bird' ? 'Early Bird' : 'Regular'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[8px] text-gray-400 leading-tight max-w-xs text-right">
+                  {feeCategory === 'early_bird'
+                    ? 'Every batch printed so far is EARLY BIRD. Kept as default for reprints.'
+                    : 'Early Bird has ended — remaining unprinted badges stamp REGULAR (full charges).'}
+                </p>
+              </div>
+            </div>
           </div>
 
           <BadgePreview
@@ -1392,6 +1428,7 @@ const BadgePrintingModule = () => {
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Badges</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Pages</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Layout</th>
+                    <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Fee</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Date</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                     <th className="p-3 text-[8px] font-black text-gray-400 uppercase tracking-widest">Actions</th>
@@ -1414,6 +1451,15 @@ const BadgePrintingModule = () => {
                       <td className="p-3 text-xs font-bold text-gray-600">{batch.badge_count}</td>
                       <td className="p-3 text-xs font-bold text-gray-600">{batch.page_count}</td>
                       <td className="p-3 text-[9px] font-bold text-gray-500 uppercase">{batch.layout}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${
+                          batch.fee_category === 'regular'
+                            ? 'bg-sky-100 text-sky-700'
+                            : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {FEE_CATEGORY_LABELS[batch.fee_category || 'early_bird']}
+                        </span>
+                      </td>
                       <td className="p-3 text-[9px] text-gray-500">{formatDate(batch.created_at)}</td>
                       <td className="p-3">
                         <BatchStatusBadge status={batch.status} />
@@ -1446,7 +1492,7 @@ const BadgePrintingModule = () => {
                           )}
                           {(batch.status === 'printed' || batch.status === 'failed') && (
                             <button
-                              onClick={() => handleReprintBatch(batch.batch_id)}
+                              onClick={() => handleReprintBatch(batch)}
                               className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
                             >
                               Reprint
@@ -1506,7 +1552,7 @@ const BadgePrintingModule = () => {
                         </p>
                       </div>
                       <button
-                        onClick={() => handleReprintBatch(batch.batch_id)}
+                        onClick={() => handleReprintBatch(batch)}
                         disabled={isLocked}
                         className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 text-white font-bold rounded-xl text-[9px] uppercase tracking-wider"
                       >

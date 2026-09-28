@@ -33,6 +33,14 @@ export type PaymentMode = typeof PAYMENT_MODES[number];
 // stored in delegates.reg_type to drive the Master List Source filter/export.
 export type RegType = 'manual' | 'portal' | 'web' | 'ems';
 
+// v1.65 (additive exception): badge fee-category stamp (EARLY BIRD / REGULAR).
+// Run-level choice persisted on badge_batches; drives the badge stamp text.
+export type FeeCategory = 'early_bird' | 'regular';
+export const FEE_CATEGORY_LABELS: Record<FeeCategory, string> = {
+  early_bird: 'EARLY BIRD',
+  regular: 'REGULAR',
+};
+
 // v1.55 (additive exception): per delegate-type required-field configuration,
 // stored per event in `events.event_config.required_fields`.
 export interface FieldRequirement {
@@ -53,20 +61,26 @@ export enum UserRole {
   REGISTRAR = 'registrar',
   FINANCE = 'finance',
   EVENT_ADMIN = 'event_admin',
-  EXECUTIVE_ADMIN = 'executive_admin'
+  EXECUTIVE_ADMIN = 'executive_admin',
+  // v1.65: Exec Registrar = national-registrar access, registers ALL delegate
+  // types (bypasses the Free-Guest restriction) + prints individual badges.
+  EXEC_REGISTRAR = 'exec_registrar'
 }
+
+export const isExecRegistrarRole = (role: string): boolean =>
+  role === UserRole.EXEC_REGISTRAR;
 
 export const isAdminRole = (role: string): boolean =>
   role === UserRole.NATIONAL_ADMIN || role === UserRole.REGIONAL_ADMIN || role === UserRole.DISTRICT_ADMIN || role === UserRole.ADMIN;
 
 export const isRegistrarRole = (role: string): boolean =>
-  role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR || role === UserRole.EXECUTIVE_ADMIN;
+  role === UserRole.NATIONAL_REGISTRAR || role === UserRole.REGIONAL_REGISTRAR || role === UserRole.DISTRICT_REGISTRAR || role === UserRole.REGISTRAR || role === UserRole.EXECUTIVE_ADMIN || role === UserRole.EXEC_REGISTRAR;
 
 export const isEventAdminRole = (role: string): boolean =>
   role === UserRole.EVENT_ADMIN;
 
 export const isNationalRole = (role: string): boolean =>
-  role === UserRole.NATIONAL_ADMIN || role === UserRole.NATIONAL_REGISTRAR || role === UserRole.EXECUTIVE_ADMIN;
+  role === UserRole.NATIONAL_ADMIN || role === UserRole.NATIONAL_REGISTRAR || role === UserRole.EXECUTIVE_ADMIN || role === UserRole.EXEC_REGISTRAR;
 
 export const isRegionalRole = (role: string): boolean =>
   role === UserRole.REGIONAL_ADMIN || role === UserRole.REGIONAL_REGISTRAR;
@@ -305,7 +319,7 @@ export interface MinistryExportData {
   attendance: { session_id: string; session_title: string; attendance: number }[];
 }
 
-export type BadgeLayout = '8-up' | '10-up' | '6-up-portrait' | '9-up-portrait' | '8-up-portrait' | '4-up-3x4' | '4-up-portrait';
+export type BadgeLayout = '8-up' | '10-up' | '6-up-portrait' | '9-up-portrait' | '8-up-portrait' | '4-up-3x4' | '4-up-portrait' | 'a6-single';
 export type BadgeBatchSize = 250 | 500 | 1000;
 export type BatchStatus = 'pending' | 'generating' | 'ready' | 'printing' | 'printed' | 'failed';
 export type BadgeSortField = 'delegate_number' | 'surname' | 'district' | 'chapter' | 'category' | 'registration_date';
@@ -337,6 +351,8 @@ export interface BadgeBatch {
   generated_by: string;
   generated_at: string | null;
   created_at: string;
+  // v1.65 (additive exception): EARLY BIRD / REGULAR stamp selected for the run.
+  fee_category?: FeeCategory;
 }
 
 export interface BadgePrintLog {
@@ -363,6 +379,9 @@ export interface BadgeLayoutConfig {
   badgeW: number;
   badgeH: number;
   cutGap: number;
+  // v1.65 (additive exception): per-layout page-size override (mm) for A6 single.
+  pageW?: number;
+  pageH?: number;
 }
 
 export interface AuditLog {

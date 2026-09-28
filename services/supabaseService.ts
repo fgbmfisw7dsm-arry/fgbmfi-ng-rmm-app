@@ -230,7 +230,8 @@ const ensureEventActive = async (eventId: string) => {
 };
 
 // Registrar restriction guard: when an event config has restrict_registrar_to_free_guest,
-// registrar-tier (non-admin, non-event-admin) callers may only persist manual Free Guest rows.
+// registrar-tier (non-admin, non-event-admin, non-exec-registrar) callers may only
+// persist manual Free Guest rows. Exec Registrar is exempt (registers all types).
 const isRegistrarFreeGuestRestricted = async (eventId: string): Promise<boolean> => {
     if (!eventId) return false;
     const { data: ev } = await supabase.from('events').select('event_config').eq('event_id', eventId).maybeSingle();
@@ -240,7 +241,7 @@ const isRegistrarFreeGuestRestricted = async (eventId: string): Promise<boolean>
     if (!user) return false;
     const { data: profile } = await supabase.from('app_users').select('role').eq('id', user.id).maybeSingle();
     const role = profile?.role || '';
-    return isRegistrarRole(role) && !isAdminRole(role);
+    return isRegistrarRole(role) && !isAdminRole(role) && role !== UserRole.EXEC_REGISTRAR;
 };
 
 const normKey = (s?: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/[^A-Z0-9 ]/g, '');
@@ -913,6 +914,15 @@ export const db = {
 
     bulkDeactivateEventUsers: async () => 
         handleRpcResponse(await supabase.rpc('deactivate_all_event_users'), 'deactivate_all_event_users'),
+
+    getDelegateById: async (delegateId: string, eventId?: string): Promise<Delegate | null> => {
+        if (!delegateId) return null;
+        let q = supabase.from('delegates').select('*').eq('delegate_id', delegateId);
+        if (eventId) q = q.eq('event_id', eventId);
+        const { data, error } = await q.maybeSingle();
+        if (error || !data) return null;
+        return data as Delegate;
+    },
 
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean })[]> => {
         if (!eventId) return [];
@@ -3201,6 +3211,15 @@ export const db = {
         const cleared = (updated || []).length;
         recordAuditLog(eventId, 'badge_clear_printed_flags', `Badge printed flags cleared (${cleared} delegates)`, null, 'event', eventId, { cleared });
         return cleared;
+    },
+
+    // v1.65: individual desk print — flags one delegate printed via the
+    // mark_delegate_badge_printed SECURITY DEFINER RPC (admin/event_admin/exec_registrar).
+    markDelegateBadgePrinted: async (delegateId: string, eventId: string, action: 'generated' | 'reprinted' = 'reprinted'): Promise<boolean> => {
+        await ensureEventActive(eventId);
+        const { data, error } = await supabase.rpc('mark_delegate_badge_printed', { p_delegate_id: delegateId, p_event_id: eventId, p_action: action });
+        handleSupabaseError({ data, error }, 'Failed to mark delegate badge as printed');
+        return data === true;
     },
 
     getBadgePrintLogs: async (eventId: string, delegateId?: string): Promise<BadgePrintLog[]> => {

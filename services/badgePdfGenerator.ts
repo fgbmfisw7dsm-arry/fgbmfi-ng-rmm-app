@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, PDFPage } from 'pdf-lib';
-import { Delegate, Event, BadgeLayout, BadgeLayoutConfig, BadgeGenerationProgress } from '../types';
+import { Delegate, Event, BadgeLayout, BadgeLayoutConfig, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
 import QRCode from 'qrcode';
 
 const PT_PER_MM = 72 / 25.4;
@@ -15,6 +15,10 @@ const LAYOUTS: Record<BadgeLayout, BadgeLayoutConfig> = {
   '8-up-portrait': { cols: 4, rows: 2, badgeW: 63, badgeH: 90, cutGap: 3 },
   '4-up-3x4': { cols: 2, rows: 2, badgeW: 76.2, badgeH: 101.6, cutGap: 3 },
   '4-up-portrait': { cols: 2, rows: 2, badgeW: 100, badgeH: 139.7, cutGap: 3 },
+  // v1.65: single badge per A6 page on pre-cut shell stock (105x148mm); content
+  // adopts the 4-up-portrait (100x140mm) geometry except it leaves the banner and
+  // footer zones blank (they are pre-printed on the shell).
+  'a6-single': { cols: 1, rows: 1, badgeW: 100, badgeH: 139.7, cutGap: 0, pageW: 105, pageH: 148 },
 };
 
 const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
@@ -25,6 +29,7 @@ const IS_PORTRAIT: Record<BadgeLayout, boolean> = {
   '8-up-portrait': true,
   '4-up-3x4': true,
   '4-up-portrait': true,
+  'a6-single': true,
 };
 
 const ZONES = {
@@ -50,6 +55,12 @@ export const V2_ZONES = {
   qrX0: 0.585,
   qrX1: 0.945,
   qrCX: 0.765,       // QR horizontal center
+  // v1.65: EARLY BIRD / REGULAR fee stamp box (bottom-left slashed rectangle baked
+  // into the design footer). Calibrate against a printed card like the v1.45 zones.
+  stampX0: 0.045,
+  stampX1: 0.40,
+  stampY0: 0.895,
+  stampY1: 0.985,
 };
 
 const BAND_COLORS: Record<string, readonly [number, number, number]> = {
@@ -74,6 +85,37 @@ const TEXT_SECONDARY = rgb(0.39, 0.45, 0.55);
 const QR_DARK = rgb(0.12, 0.16, 0.22);
 const CROP_COLOR = rgb(0, 0, 0);
 const HEADER_STRIP_BG = rgb(0.027, 0.000, 0.000);
+// v1.65: fee-category stamp ink. STAMP_LIGHT renders on the design's navy slashed
+// box and dark bands; STAMP_DARK renders code-chosen against light bands.
+const STAMP_LIGHT = rgb(1, 1, 1);
+const STAMP_DARK = rgb(0.06, 0.09, 0.16);
+const DESIGN_V2_ASPECT = 0.716; // badge-design-v2.png 1207x1686 fallback
+
+// Auto-fit uppercase stamp text ("EARLY BIRD" / "REGULAR") inside a box.
+function drawStampText(
+  page: PDFPage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  label: string,
+  font: any,
+  color: ReturnType<typeof rgb>
+) {
+  if (!label || w <= 0 || h <= 0) return;
+  const pad = mmToPt(0.5);
+  let size = Math.min(9, h * 0.88);
+  while (size > 4.5 && font.widthOfTextAtSize(label, size) > w - pad * 2) size -= 0.25;
+  const textW = font.widthOfTextAtSize(label, size);
+  const tx = x + Math.max(0, (w - textW) / 2);
+  const ty = y + Math.max(0, (h - size) / 2);
+  page.drawText(label, { x: tx, y: ty, size, font, color, maxWidth: Math.max(1, w - pad * 2) });
+}
+
+const bandTextColor = (band: readonly [number, number, number]) => {
+  const lum = 0.299 * band[0] + 0.587 * band[1] + 0.114 * band[2];
+  return lum > 0.55 ? STAMP_DARK : STAMP_LIGHT;
+};
 
 function encodeQRData(delegate: Delegate, event: Event): string {
   return delegate.qr_hash || delegate.delegate_id;
@@ -267,6 +309,109 @@ function drawQRCode(
   }
 }
 
+// v1.65: shared v2 full-design content — name, labelled detail lines left, QR
+// right, plus the EARLY BIRD / REGULAR fee stamp in the bottom-left slashed box.
+// Used by the 4-up/6-up design path AND the A6 shell path so desk-printed badges
+// align exactly with batch-printed ones.
+function drawV2Content(
+  page: PDFPage,
+  delegate: Delegate,
+  badgeLeft: number,
+  badgeBottom: number,
+  bw: number,
+  bh: number,
+  imgY: number,
+  imgH: number,
+  event: Event,
+  fontBold: any,
+  font: any,
+  feeCategory: FeeCategory,
+  showRank: boolean,
+  showOffice: boolean
+) {
+  const yFromTop = (f: number) => imgY + imgH * (1 - f);
+  const isLarge = bw >= mmToPt(70);
+  const nameMaxSize = isLarge ? 13.0 : 10.5;
+  const nameMinSize = isLarge ? 6.0 : 5.0;
+  const fieldSize = isLarge ? 8.0 : 6.5;
+  const labelSize = isLarge ? 7.0 : 5.5;
+
+  const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
+  const nameMaxW = bw - mmToPt(4);
+  const nameAvail = yFromTop(V2_ZONES.nameTop) - yFromTop(V2_ZONES.nameBottom);
+  const fitted = fitNameToSpace(fullName, fontBold, nameMaxW, Math.max(mmToPt(3), nameAvail), nameMaxSize, nameMinSize, 1.15);
+  if (!fitted.lines.length) fitted.lines = [fullName];
+  let nameTy = Math.min(yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1, yFromTop(V2_ZONES.nameClearTop) - fitted.fontSize * 0.75);
+  const fauxBoldOff = [-0.18, 0, 0.18];
+  for (let i = 0; i < fitted.lines.length; i++) {
+    const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
+    const nX = badgeLeft + Math.max(0, (bw - lw) / 2);
+    const drawWithBold = fitted.fontSize >= 6;
+    for (const off of (drawWithBold ? fauxBoldOff : [0])) {
+      page.drawText(fitted.lines[i], {
+        x: nX + off,
+        y: nameTy,
+        size: fitted.fontSize,
+        font: fontBold,
+        color: TEXT_PRIMARY,
+        maxWidth: nameMaxW,
+      });
+    }
+    nameTy -= fitted.fontSize * 1.1;
+  }
+
+  const bandTop = yFromTop(V2_ZONES.detailsTop);
+  const bandBot = yFromTop(V2_ZONES.rowBottom);
+  const bandHgt = bandTop - bandBot;
+
+  const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92, mmToPt(30));
+  const qrX = badgeLeft + bw * V2_ZONES.qrCX - qrSize / 2;
+  const qrY = bandBot + (bandHgt - qrSize) / 2;
+  drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
+
+  const detailX = badgeLeft + bw * V2_ZONES.detailsX;
+  const detailW = badgeLeft + bw * V2_ZONES.qrX0 - detailX - mmToPt(1.5);
+  const fields: [string, string][] = [
+    ['District', delegate.district || 'N/A'],
+    ['Chapter', delegate.chapter || 'N/A'],
+    ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
+  ];
+  if (showRank && delegate.rank && delegate.rank !== 'CP') fields.push(['Rank', delegate.rank]);
+  if (showOffice && delegate.office && delegate.office !== 'OTHER') fields.push(['Office', delegate.office]);
+
+  const fittedFields = fitPriorityFields(fields.length, bandHgt, fieldSize, 5, [0, 1, 0]);
+  const fSizes = fittedFields.sizes;
+  const lSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
+  if (fields[2] && fields[2][0] === 'ID') {
+    const idCut = isLarge ? 0.5 : 1.0;
+    fSizes[2] = Math.max(5, fSizes[2] - idCut);
+    lSizes[2] = Math.max(4, lSizes[2] - idCut);
+    const idValue = fields[2][1];
+    const idLW = fontBold.widthOfTextAtSize('ID: ', lSizes[2]);
+    while (font.widthOfTextAtSize(idValue, fSizes[2]) > detailW - idLW - mmToPt(1) && fSizes[2] > 4.5) {
+      fSizes[2] -= 0.25;
+    }
+  }
+  const spacing = fittedFields.spacing;
+  const totalH = fSizes.reduce((sum, s) => sum + s * spacing, 0);
+  let fy = bandTop - fSizes[0] * spacing * 0.5 - (bandHgt - totalH) / 2;
+  for (let fi = 0; fi < fields.length; fi++) {
+    const [label, value] = fields[fi];
+    const labelText = label + ': ';
+    const lW = fontBold.widthOfTextAtSize(labelText, lSizes[fi]);
+    page.drawText(labelText, { x: detailX, y: fy, size: lSizes[fi], font: fontBold, color: TEXT_SECONDARY });
+    page.drawText(value, { x: detailX + lW, y: fy, size: fSizes[fi], font: font, color: TEXT_PRIMARY, maxWidth: Math.max(1, detailW - lW) });
+    fy -= fSizes[fi] * spacing;
+  }
+
+  const sTop = yFromTop(V2_ZONES.stampY0);
+  const sBot = yFromTop(V2_ZONES.stampY1);
+  const sBoxH = Math.max(mmToPt(2), sTop - sBot);
+  const sX = badgeLeft + bw * V2_ZONES.stampX0;
+  const sW = Math.max(mmToPt(4), bw * (V2_ZONES.stampX1 - V2_ZONES.stampX0));
+  drawStampText(page, sX, sBot, sW, sBoxH, FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD', fontBold, STAMP_LIGHT);
+}
+
 function drawBadge(
   page: PDFPage,
   delegate: Delegate,
@@ -288,14 +433,16 @@ function drawBadge(
   badgeDesignV2?: ReturnType<PDFDocument['embedPng']> extends Promise<infer T> ? T : never,
   isPortrait: boolean = false,
   showRank: boolean = true,
-  showOffice: boolean = true
+  showOffice: boolean = true,
+  feeCategory: FeeCategory = 'early_bird',
+  isShell: boolean = false
 ) {
   const badgeBottom = by;
   const badgeLeft = bx;
 
   try {
 
-  if (badgeDesignV2 && isPortrait) {
+  if (badgeDesignV2 && isPortrait && !isShell) {
     const iw = badgeDesignV2.width;
     const ih = badgeDesignV2.height;
     let imgW = bw;
@@ -314,84 +461,29 @@ function drawBadge(
       page.drawImage(badgeDesignV2 as any, { x: imgX, y: imgY, width: imgW, height: imgH });
     } catch {}
 
-    const yFromTop = (f: number) => imgY + imgH * (1 - f);
-    const isLarge = bw >= mmToPt(70);
-    const nameMaxSize = isLarge ? 13.0 : 10.5;
-    const nameMinSize = isLarge ? 6.0 : 5.0;
-    const fieldSize = isLarge ? 8.0 : 6.5;
-    const labelSize = isLarge ? 7.0 : 5.5;
+    drawV2Content(page, delegate, badgeLeft, badgeBottom, bw, bh, imgY, imgH, event, fontBold, font, feeCategory, showRank, showOffice);
+    return;
+  }
 
-    // Name — centered at top of the white panel
-    const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-    const nameMaxW = bw - mmToPt(4);
-    const nameAvail = yFromTop(V2_ZONES.nameTop) - yFromTop(V2_ZONES.nameBottom);
-    const fitted = fitNameToSpace(fullName, fontBold as any, nameMaxW, Math.max(mmToPt(3), nameAvail), nameMaxSize, nameMinSize, 1.15);
-    if (!fitted.lines.length) fitted.lines = [fullName];
-    let nameTy = Math.min(yFromTop(V2_ZONES.nameBottom) + fitted.lines.length * fitted.fontSize * 1.1, yFromTop(V2_ZONES.nameClearTop) - fitted.fontSize * 0.75);
-    const fauxBoldOff = [-0.18, 0, 0.18];
-    for (let i = 0; i < fitted.lines.length; i++) {
-      const lw = fontBold.widthOfTextAtSize(fitted.lines[i], fitted.fontSize);
-      const nX = badgeLeft + Math.max(0, (bw - lw) / 2);
-      const drawWithBold = fitted.fontSize >= 6;
-      for (const off of (drawWithBold ? fauxBoldOff : [0])) {
-        page.drawText(fitted.lines[i], {
-          x: nX + off,
-          y: nameTy,
-          size: fitted.fontSize,
-          font: fontBold as any,
-          color: TEXT_PRIMARY,
-          maxWidth: nameMaxW,
-        });
-      }
-      nameTy -= fitted.fontSize * 1.1;
+  if (isShell && isPortrait) {
+    // A6 single-badge path: the banner + footer zones are PRE-PRINTED on the
+    // cut shell — NEVER print the design image here, regardless of loaded assets.
+    // Only the name/detail/QR/stamp content is drawn, using the exact 4-up
+    // V2_ZONES geometry so desk prints align with the batch prints.
+    const designAspect = badgeDesignV2 ? badgeDesignV2.width / badgeDesignV2.height : DESIGN_V2_ASPECT;
+    let imgW = bw;
+    let imgH = imgW / designAspect;
+    let imgX = badgeLeft;
+    let imgY = badgeBottom;
+    if (imgH > bh) {
+      const scale = bh / imgH;
+      imgW = bw * scale;
+      imgH = bh;
+      imgX = badgeLeft + (bw - imgW) / 2;
+    } else {
+      imgY = badgeBottom + (bh - imgH) / 2;
     }
-
-    // Body row — details left, QR right (side by side)
-    const bandTop = yFromTop(V2_ZONES.detailsTop);
-    const bandBot = yFromTop(V2_ZONES.rowBottom);
-    const bandHgt = bandTop - bandBot;
-
-    const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92, mmToPt(30));
-    const qrX = badgeLeft + bw * V2_ZONES.qrCX - qrSize / 2;
-    const qrY = bandBot + (bandHgt - qrSize) / 2;
-    drawQRCode(page, encodeQRData(delegate, event), qrX, qrY, qrSize);
-
-    const detailX = badgeLeft + bw * V2_ZONES.detailsX;
-    const detailW = badgeLeft + bw * V2_ZONES.qrX0 - detailX - mmToPt(1.5);
-    const fields: [string, string][] = [
-      ['District', delegate.district || 'N/A'],
-      ['Chapter', delegate.chapter || 'N/A'],
-      ['ID', delegate.external_id?.startsWith('CON26') ? delegate.external_id : delegate.delegate_id.slice(0, 8)],
-    ];
-    if (showRank && delegate.rank && delegate.rank !== 'CP') fields.push(['Rank', delegate.rank]);
-    if (showOffice && delegate.office && delegate.office !== 'OTHER') fields.push(['Office', delegate.office]);
-
-    const fittedFields = fitPriorityFields(fields.length, bandHgt, fieldSize, 5, [0, 1, 0]);
-    const fSizes = fittedFields.sizes;
-    const lSizes = fittedFields.sizes.map((s) => Math.max(4, s - 1));
-    // ID row shrunk (0.5pt large / 1.0pt small) so long IDs don't crowd the QR edge,
-    // with a width-fit cap as a no-touch guarantee for very long external_ids
-    if (fields[2] && fields[2][0] === 'ID') {
-      const idCut = isLarge ? 0.5 : 1.0;
-      fSizes[2] = Math.max(5, fSizes[2] - idCut);
-      lSizes[2] = Math.max(4, lSizes[2] - idCut);
-      const idValue = fields[2][1];
-      const idLW = fontBold.widthOfTextAtSize('ID: ', lSizes[2]);
-      while (font.widthOfTextAtSize(idValue, fSizes[2]) > detailW - idLW - mmToPt(1) && fSizes[2] > 4.5) {
-        fSizes[2] -= 0.25;
-      }
-    }
-    const spacing = fittedFields.spacing;
-    const totalH = fSizes.reduce((sum, s) => sum + s * spacing, 0);
-    let fy = bandTop - fSizes[0] * spacing * 0.5 - (bandHgt - totalH) / 2;
-    for (let fi = 0; fi < fields.length; fi++) {
-      const [label, value] = fields[fi];
-      const labelText = label + ': ';
-      const lW = fontBold.widthOfTextAtSize(labelText, lSizes[fi]);
-      page.drawText(labelText, { x: detailX, y: fy, size: lSizes[fi], font: fontBold as any, color: TEXT_SECONDARY });
-      page.drawText(value, { x: detailX + lW, y: fy, size: fSizes[fi], font: font as any, color: TEXT_PRIMARY, maxWidth: detailW - lW });
-      fy -= fSizes[fi] * spacing;
-    }
+    drawV2Content(page, delegate, badgeLeft, badgeBottom, bw, bh, imgY, imgH, event, fontBold, font, feeCategory, showRank, showOffice);
     return;
   }
 
@@ -516,6 +608,19 @@ function drawBadge(
       }
     }
 
+    // v1.65: fee stamp in the legacy design's baked bottom band
+    const legacyBandH = bodyBottom - badgeBottom;
+    drawStampText(
+      page,
+      badgeLeft + mmToPt(2),
+      badgeBottom + mmToPt(1),
+      Math.min(bw * 0.8, mmToPt(70)),
+      Math.max(mmToPt(3), legacyBandH - mmToPt(1)),
+      FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD',
+      fontBold,
+      STAMP_LIGHT
+    );
+
     return;
   }
 
@@ -604,6 +709,16 @@ function drawBadge(
       const dt = delegate.delegate_type || 'Member';
       const bc = BAND_COLORS[dt] || DEFAULT_BAND;
       page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
+      drawStampText(
+        page,
+        badgeLeft + mmToPt(2),
+        badgeBottom + mmToPt(1),
+        Math.min(bw * 0.7, mmToPt(60)),
+        Math.max(mmToPt(2.5), bandH - mmToPt(2)),
+        FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD',
+        fontBold,
+        bandTextColor(bc)
+      );
       return;
     }
 
@@ -707,6 +822,16 @@ function drawBadge(
     const dt = delegate.delegate_type || 'Member';
     const bc = BAND_COLORS[dt] || DEFAULT_BAND;
     page.drawRectangle({ x: badgeLeft, y: badgeBottom, width: bw, height: bandH, color: rgb(bc[0], bc[1], bc[2]) });
+    drawStampText(
+      page,
+      badgeLeft + mmToPt(2),
+      badgeBottom + mmToPt(1),
+      Math.min(bw * 0.7, mmToPt(60)),
+      Math.max(mmToPt(2.5), bandH - mmToPt(2)),
+      FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD',
+      fontBold,
+      bandTextColor(bc)
+    );
     return;
   }
 
@@ -896,6 +1021,18 @@ function drawBadge(
     height: bandH,
     color: rgb(bandColor[0], bandColor[1], bandColor[2]),
   });
+
+  // v1.65: fee stamp in the landscape footer band
+  drawStampText(
+    page,
+    badgeLeft + mmToPt(2),
+    badgeBottom + mmToPt(1),
+    Math.min(bw * 0.7, mmToPt(60)),
+    Math.max(mmToPt(2.5), bandH - mmToPt(2)),
+    FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD',
+    fontBold,
+    bandTextColor(bandColor)
+  );
   } catch (badgeErr: any) {
     console.error('drawBadge failed:', badgeErr?.message || badgeErr);
     try {
@@ -915,7 +1052,8 @@ export async function generateBadgePDF(
   badgeBannerBytes?: Uint8Array,
   badgeDesignBytes?: Uint8Array,
   badgeDesignV2Bytes?: Uint8Array,
-  onProgress?: (progress: BadgeGenerationProgress) => void
+  onProgress?: (progress: BadgeGenerationProgress) => void,
+  feeCategory: FeeCategory = 'early_bird'
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -979,13 +1117,15 @@ export async function generateBadgePDF(
   const totalH = config.rows * badgeH + (config.rows - 1) * cutGapH;
 
   const useLandscape = totalW > A4.w;
-  const pageW = useLandscape ? A4.h : A4.w;
-  const pageH = useLandscape ? A4.w : A4.h;
+  // v1.65: per-layout page override (a6-single → 105x148mm A6) else auto A4 orientation
+  const pageW = config.pageW ? mmToPt(config.pageW) : (useLandscape ? A4.h : A4.w);
+  const pageH = config.pageH ? mmToPt(config.pageH) : (useLandscape ? A4.w : A4.h);
   const marginX = (pageW - totalW) / 2;
   const marginY = (pageH - totalH) / 2;
 
   const totalPages = Math.ceil(delegates.length / (config.cols * config.rows));
   const badgesPerPage = config.cols * config.rows;
+  const isShell = layout === 'a6-single';
 
   onProgress?.({ current: 0, total: totalPages, phase: 'composing_pages' });
 
@@ -1023,9 +1163,12 @@ export async function generateBadgePDF(
         badgeDesignV2 as any,
         IS_PORTRAIT[layout],
         showRank,
-        showOffice
+        showOffice,
+        feeCategory,
+        isShell
       );
-      drawCropMarks(page, bx, by, badgeW, badgeH);
+      // v1.65: A6 shell paper is pre-cut — no crop marks needed
+      if (!isShell) drawCropMarks(page, bx, by, badgeW, badgeH);
     }
 
     onProgress?.({ current: pageIdx + 1, total: totalPages, phase: 'composing_pages' });
@@ -1054,6 +1197,18 @@ export function getBadgePageCount(
 ): number {
   const config = LAYOUTS[layout];
   return Math.ceil(delegateCount / (config.cols * config.rows));
+}
+
+// v1.65: single A6 badge for the venue desk. Fonts-only (no design/banner assets)
+// because the shell's banner + footer zones are pre-printed; the 4-up content
+// geometry is used so desk prints align with batch prints. Also stamps the
+// EARLY BIRD / REGULAR fee category.
+export async function generateSingleBadgePDF(
+  delegate: Delegate,
+  event: Event,
+  feeCategory: FeeCategory = 'early_bird'
+): Promise<Uint8Array> {
+  return generateBadgePDF([delegate], 'a6-single', event, undefined, undefined, undefined, undefined, undefined, undefined, feeCategory);
 }
 
 export { LAYOUTS, encodeQRData };

@@ -27,6 +27,7 @@ import DataModule from './pages/DataModule';
 import UserManualModule from './pages/UserManualModule';
 import SessionMinistryPage from './pages/SessionMinistryPage';
 import BadgePrintingModule from './pages/BadgePrintingModule';
+import IndividualBadgePrint from './pages/IndividualBadgePrint';
 import StorageModule from './pages/StorageModule';
 import AuditLogPage from './pages/AuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -36,7 +37,7 @@ const ALL_ADMIN_ROLES: UserRole[] = [
 ];
 const ADMIN_AND_REGISTRAR: UserRole[] = [
   ...ALL_ADMIN_ROLES,
-  UserRole.NATIONAL_REGISTRAR, UserRole.REGIONAL_REGISTRAR, UserRole.DISTRICT_REGISTRAR, UserRole.REGISTRAR, UserRole.EXECUTIVE_ADMIN
+  UserRole.NATIONAL_REGISTRAR, UserRole.REGIONAL_REGISTRAR, UserRole.DISTRICT_REGISTRAR, UserRole.REGISTRAR, UserRole.EXECUTIVE_ADMIN, UserRole.EXEC_REGISTRAR
 ];
 const ADMIN_AND_FINANCE: UserRole[] = [
   ...ALL_ADMIN_ROLES, UserRole.FINANCE
@@ -49,6 +50,10 @@ const ADMIN_FINANCE_AND_EVENT_ADMIN: UserRole[] = [
 ];
 const ADMIN_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
   ...ADMIN_AND_REGISTRAR, UserRole.EVENT_ADMIN
+];
+// v1.65: Individual Delegate Badge printing — admins + Exec Registrar + Event Admin.
+const ADMIN_EXEC_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
+  ...ALL_ADMIN_ROLES, UserRole.EXEC_REGISTRAR, UserRole.EVENT_ADMIN
 ];
 
 const AppContent = () => {
@@ -235,6 +240,9 @@ const AppContent = () => {
                      } />
                      <Route path="/register-new" element={
                        <ProtectedRoute allowedRoles={ADMIN_REGISTRAR_AND_EVENT_ADMIN}><NewDelegatePage /></ProtectedRoute>
+                    } />
+                    <Route path="/print-badge" element={
+                       <ProtectedRoute allowedRoles={ADMIN_EXEC_REGISTRAR_AND_EVENT_ADMIN}><IndividualBadgePrint /></ProtectedRoute>
                     } />
                     <Route path="/admin/delegates" element={
                       <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><MasterListModule /></ProtectedRoute>

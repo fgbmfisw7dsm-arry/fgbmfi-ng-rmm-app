@@ -42,7 +42,8 @@ const NewDelegatePage = () => {
   const showOffice = eventConfig.show_office !== false;
   const showDelegateType = eventConfig.show_delegate_type !== false;
   const showPaymentFields = eventConfig.show_payment_fields !== false;
-  const freeGuestLocked = isRegistrarRole(role) && eventConfig.restrict_registrar_to_free_guest === true;
+  // v1.65: Exec Registrar registers ALL delegate types — never Free-Guest-locked.
+  const freeGuestLocked = isRegistrarRole(role) && role !== UserRole.EXEC_REGISTRAR && eventConfig.restrict_registrar_to_free_guest === true;
 
   // v1.55: per-type required-field resolution (Events & Config override wins;
   // falls back to DEFAULT_REQUIRED_FIELDS for the current live event).
@@ -301,6 +302,15 @@ useEffect(() => {
                     className="w-full py-5 bg-orange-600 hover:bg-orange-700 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-2xl transition-all active:scale-95"
                  >
                     {loading ? 'VERIFYING...' : 'VERIFY ARRIVAL NOW'}
+                 </button>
+             )}
+
+             {!isLocked && (
+                 <button 
+                    onClick={() => { window.location.hash = `#/print-badge?delegate=${successData.id}`; }}
+                    className="w-full py-5 bg-blue-900 hover:bg-blue-800 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-2xl transition-all active:scale-95"
+                 >
+                    PRINT A6 BADGE NOW
                  </button>
              )}
 

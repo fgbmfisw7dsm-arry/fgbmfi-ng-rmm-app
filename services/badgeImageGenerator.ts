@@ -1,10 +1,11 @@
 import QRCode from 'qrcode';
-import { Delegate } from '../types';
+import { Delegate, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
 import { V2_ZONES } from './badgePdfGenerator';
 
 export interface BadgeImageOptions {
   showRank: boolean;
   showOffice: boolean;
+  feeCategory?: FeeCategory;
 }
 
 export interface BadgeImageResult {
@@ -78,7 +79,7 @@ const wrapCanvasText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: n
 };
 
 const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDataUrl: string, options: BadgeImageOptions): Promise<string> => {
-  const { showRank, showOffice } = options;
+  const { showRank, showOffice, feeCategory } = options;
   const mmToPx = 3.779527559;
   const scale = 3;
   const bw = Math.round(65 * mmToPx);
@@ -215,6 +216,24 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     ctx.fillText(value, detailX + lW, textY, maxValW);
     textY += lineGap;
   }
+
+  // v1.65: EARLY BIRD / REGULAR fee stamp in the design's bottom-left slashed box
+  const stampTop = yFromTop(z.stampY0);
+  const stampBot = yFromTop(z.stampY1);
+  const stampH = stampTop - stampBot;
+  const stampX = bw * z.stampX0;
+  const stampW = bw * (z.stampX1 - z.stampX0);
+  const stampLabel = feeCategory ? FEE_CATEGORY_LABELS[feeCategory] : 'EARLY BIRD';
+  let stampSize = 9;
+  ctx.font = 'bold ' + stampSize + 'px sans-serif';
+  while (stampSize > 5 && ctx.measureText(stampLabel).width > stampW - 3) {
+    stampSize -= 0.25;
+    ctx.font = 'bold ' + stampSize + 'px sans-serif';
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.fillText(stampLabel, stampX + stampW / 2, stampBot + stampH / 2 + stampSize * 0.35, stampW);
+  ctx.textAlign = 'left';
 
   return canvas.toDataURL('image/png');
 };

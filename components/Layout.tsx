@@ -1,5 +1,5 @@
 import React, { useContext, useState, useRef, useEffect } from 'react';
-import { User, UserRole, isAdminRole, isRegistrarRole, isEventAdminRole, isNationalRole, isRegionalRole, isDistrictRole } from '../types';
+import { User, UserRole, isAdminRole, isRegistrarRole, isEventAdminRole, isNationalRole, isRegionalRole, isDistrictRole, isExecRegistrarRole } from '../types';
 import { Link, useLocation } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import ConnectionStatus from './ConnectionStatus';
@@ -62,6 +62,7 @@ const getRoleLabel = () => {
 case UserRole.FINANCE: return 'Finance Admin';
             case UserRole.EVENT_ADMIN: return 'Event Admin';
             case UserRole.EXECUTIVE_ADMIN: return 'Executive Admin';
+            case UserRole.EXEC_REGISTRAR: return 'Exec Registrar';
             default: return 'User';
        }
    };
@@ -70,10 +71,12 @@ case UserRole.FINANCE: return 'Finance Admin';
    const adminRole = isAdminRole(role);
    const registrarRole = isRegistrarRole(role);
    const eventAdminRole = isEventAdminRole(role);
+   const execRegistrarRole = isExecRegistrarRole(role);
    const showAdminTools = adminRole;
    const showFinanceModule = adminRole || role === UserRole.FINANCE || eventAdminRole;
    const showCheckInModule = adminRole || registrarRole || eventAdminRole;
    const showBadgeModule = adminRole || eventAdminRole;
+   const showSingleBadgePrint = adminRole || execRegistrarRole || eventAdminRole;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row print:bg-white">
@@ -112,6 +115,11 @@ case UserRole.FINANCE: return 'Finance Admin';
                   <Link to="/register-new" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/register-new')}`}>
                     New Delegate
                   </Link>
+                  {showSingleBadgePrint && (
+                    <Link to="/print-badge" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/print-badge')}`}>
+                      Print Delegate Badge
+                    </Link>
+                  )}
                 </>
              )}
              {showBadgeModule && (
