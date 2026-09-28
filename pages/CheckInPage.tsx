@@ -21,8 +21,8 @@ const CheckInPage = () => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [badgeDelegate, setBadgeDelegate] = useState<Delegate | null>(null);
   const [badgeCanvasUrl, setBadgeCanvasUrl] = useState<string>('');
-  // v1.65: EARLY BIRD / REGULAR fee stamp for the E-Badge (default Regular — post-Early-Bird era).
-  const [badgeFeeCategory, setBadgeFeeCategory] = useState<FeeCategory>('regular');
+  // v1.65-fix2: default EARLY BIRD — the baked design text shows (no drawing). Switch to Regular only for post-Early-Bird registrations.
+  const [badgeFeeCategory, setBadgeFeeCategory] = useState<FeeCategory>('early_bird');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingReg, setPendingReg] = useState<{ scannedCode: string; parsedData: Record<string,string> | null } | null>(null);

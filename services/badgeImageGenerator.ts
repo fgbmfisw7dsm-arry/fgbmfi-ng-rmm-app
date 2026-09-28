@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { Delegate, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
+import { Delegate, FeeCategory } from '../types';
 import { V2_ZONES } from './badgePdfGenerator';
 
 export interface BadgeImageOptions {
@@ -230,28 +230,35 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     textY += lineGap;
   }
 
-  // v1.65-fix: the design PNG bakes a bold 'EARLY BIRD' in the bottom-left box.
-  // Early Bird keeps the baked text (nothing drawn on top). REGULAR neutralizes
-  // the box with the design navy (#003040) then prints the white 'REGULAR'.
-  const stampTop = yFromTop(z.stampY0);
-  const stampBot = yFromTop(z.stampY1);
-  const stampH = stampTop - stampBot;
-  const stampX = bw * z.stampX0;
-  const stampW = bw * (z.stampX1 - z.stampX0);
-  if (isShellPrint || feeCategory === 'regular') {
-    const stampLabel = feeCategory ? FEE_CATEGORY_LABELS[feeCategory] : 'REGULAR';
-    ctx.globalCompositeOperation = 'source-over';
+  // v1.65-fix2: fee stamp ONLY on full-design badges when the category is REGULAR —
+// EARLY BIRD is already baked into the design's navy box. REGULAR fills the
+// slanted navy box (trapezoid) with the design navy to erase the baked text,
+// then prints white 'REGULAR' on the box centroid. The A6 SHELL print
+// (isShellPrint) prints NO stamp — the fee category is pre-printed on the
+// template.
+  if (!isShellPrint && feeCategory === 'regular') {
     ctx.fillStyle = '#003040';
-    ctx.fillRect(stampX, stampTop, stampW, stampH);
+    ctx.beginPath();
+    ctx.moveTo(z.stampBL[0] * bw, z.stampBL[1] * bh);
+    ctx.lineTo(z.stampBR[0] * bw, z.stampBR[1] * bh);
+    ctx.lineTo(z.stampTR[0] * bw, z.stampTR[1] * bh);
+    ctx.lineTo(z.stampTL[0] * bw, z.stampTL[1] * bh);
+    ctx.closePath();
+    ctx.fill();
+
+    const stampLabel = 'REGULAR';
+    const cx = z.stampCX * bw;
+    const cy = z.stampCY * bh;
+    const maxW = Math.max(10, z.stampMaxW * bw - 3 * k);
     let stampSize = 9 * k;
     ctx.font = 'bold ' + stampSize + 'px sans-serif';
-    while (stampSize > 5 * k && ctx.measureText(stampLabel).width > stampW - 3 * k) {
+    while (stampSize > 5 * k && ctx.measureText(stampLabel).width > maxW) {
       stampSize -= 0.25;
       ctx.font = 'bold ' + stampSize + 'px sans-serif';
     }
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText(stampLabel, stampX + stampW / 2, stampBot + stampH / 2 + stampSize * 0.35, stampW);
+    ctx.fillText(stampLabel, cx, cy + stampSize * 0.35, maxW);
     ctx.textAlign = 'left';
   }
 

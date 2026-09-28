@@ -55,12 +55,20 @@ export const V2_ZONES = {
   qrX0: 0.585,
   qrX1: 0.945,
   qrCX: 0.765,       // QR horizontal center
-  // v1.65: EARLY BIRD / REGULAR fee stamp box (bottom-left slashed rectangle baked
-  // into the design footer). Calibrate against a printed card like the v1.45 zones.
-  stampX0: 0.045,
-  stampX1: 0.40,
-  stampY0: 0.895,
-  stampY1: 0.985,
+  // v1.65-fix2: slanted navy box (bottom-left, flush with the card corner).
+  // Measured on the 100×140mm print: LEFT edge vertical = 14mm, TOP edge =
+  // 34mm, BOTTOM edge = 40mm → a trapezoid whose right edge slants inward 6mm
+  // over 14mm. Fractions (x/100 from left, y from top = 1−y_mm/140):
+  //   BL (0,0)→(0.000,1.000)  BR (40,0)→(0.400,1.000)
+  //   TR (34,14)→(0.340,0.900)  TL (0,14)→(0.000,0.900)
+  // Centroid ≈ (18.5mm, 6.8mm from bottom) → (0.185, 0.951). tunable via insets.
+  stampBL: [0.000, 1.000],
+  stampBR: [0.400, 1.000],
+  stampTR: [0.340, 0.900],
+  stampTL: [0.000, 0.900],
+  stampCX: 0.185,
+  stampCY: 0.951,   // centroid y as a from-top fraction
+  stampMaxW: 0.33,  // text width fraction at the centroid height (~33mm on 100mm)
 };
 
 const BAND_COLORS: Record<string, readonly [number, number, number]> = {
@@ -112,6 +120,23 @@ function drawStampText(
   const tx = x + Math.max(0, (w - textW) / 2);
   const ty = y + Math.max(0, (h - size) / 2);
   page.drawText(label, { x: tx, y: ty, size, font, color, maxWidth: Math.max(1, w - pad * 2) });
+}
+
+// Auto-fit white stamp text centered on a point (for the slanted box centroid).
+function drawStampTextCentered(
+  page: PDFPage,
+  cx: number,
+  cy: number,
+  maxW: number,
+  label: string,
+  font: any,
+  color: ReturnType<typeof rgb>
+) {
+  if (!label || maxW <= 0) return;
+  let size = 9;
+  while (size > 4.5 && font.widthOfTextAtSize(label, size) > maxW) size -= 0.25;
+  const textW = font.widthOfTextAtSize(label, size);
+  page.drawText(label, { x: cx - textW / 2, y: cy - size * 0.38, size, font, color, maxWidth: Math.max(1, maxW) });
 }
 
 const bandTextColor = (band: readonly [number, number, number]) => {
@@ -330,7 +355,7 @@ function drawV2Content(
   feeCategory: FeeCategory,
   showRank: boolean,
   showOffice: boolean,
-  overpaintAlways: boolean = false
+  isShell: boolean = false
 ) {
   const yFromTop = (f: number) => imgY + imgH * (1 - f);
   const isLarge = bw >= mmToPt(70);
@@ -407,19 +432,29 @@ function drawV2Content(
     fy -= fSizes[fi] * spacing;
   }
 
-  const sTop = yFromTop(V2_ZONES.stampY0);
-  const sBot = yFromTop(V2_ZONES.stampY1);
-  const sBoxH = Math.max(mmToPt(2), sTop - sBot);
-  const sX = badgeLeft + bw * V2_ZONES.stampX0;
-  const sW = Math.max(mmToPt(4), bw * (V2_ZONES.stampX1 - V2_ZONES.stampX0));
-  // v1.65-fix: the design bakes a bold 'EARLY BIRD' in the box. Early Bird keeps
-  // it (skip drawing — no double stamp). REGULAR erases it by overpainting the
-  // box with the design navy then draws white 'REGULAR'. The A6 shell
-  // (overpaintAlways) always overpaints + draws — its pre-printed stock may or
-  // may not carry baked text, neutralization is safe either way.
-  if (overpaintAlways || feeCategory === 'regular') {
-    page.drawRectangle({ x: sX, y: sBot, width: sW, height: sBoxH, color: STAMP_BOX_FILL });
-    drawStampText(page, sX, sBot, sW, sBoxH, FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD', fontBold, STAMP_LIGHT);
+  // v1.65-fix2: fee stamp — ONLY on full-design badges when the category is
+  // REGULAR. The A6 shell (isShell) does NOT print any stamp: the fee category
+  // is baked into the pre-printed card template; and EARLY BIRD keeps the bold
+  // text that is already baked into the design's bottom-left navy box.
+  if (!isShell && feeCategory === 'regular') {
+    const [blFx, blFy] = V2_ZONES.stampBL;
+    const [brFx, brFy] = V2_ZONES.stampBR;
+    const [trFx, trFy] = V2_ZONES.stampTR;
+    const [tlFx, tlFy] = V2_ZONES.stampTL;
+    const xOf = (fx: number) => badgeLeft + fx * bw;
+    const yOf = (fy: number) => imgY + imgH * (1 - fy);
+    // Fill the slanted trapezoid with the design navy to erase the baked text.
+    const path =
+      `M ${xOf(blFx)} ${yOf(blFy)} ` +
+      `L ${xOf(brFx)} ${yOf(brFy)} ` +
+      `L ${xOf(trFx)} ${yOf(trFy)} ` +
+      `L ${xOf(tlFx)} ${yOf(tlFy)} Z`;
+    page.drawSvgPath(path, { color: STAMP_BOX_FILL });
+    // "REGULAR" centered on the trapezoid centroid.
+    const cxAbs = xOf(V2_ZONES.stampCX);
+    const cyAbs = yOf(V2_ZONES.stampCY);
+    const maxTextW = Math.max(mmToPt(4), V2_ZONES.stampMaxW * bw - mmToPt(1));
+    drawStampTextCentered(page, cxAbs, cyAbs, maxTextW, 'REGULAR', fontBold, STAMP_LIGHT);
   }
 }
 

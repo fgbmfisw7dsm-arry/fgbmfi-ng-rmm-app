@@ -364,7 +364,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-5 border rounded-2xl bg-gray-50">
             <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Fee Category Stamp</h4>
-            <p className="text-xs text-gray-600">The E-Badge modal includes an <strong>Early Bird / Regular</strong> toggle; the selected category is stamped on the badge's bottom-left rectangle. New venue registrations are <strong>Regular</strong> (full charges) — switch to <strong>Early Bird</strong> only when generating for a delegate registered during the EARLY BIRD window.</p>
+            <p className="text-xs text-gray-600">The E-Badge modal includes an <strong>Early Bird / Regular</strong> toggle, <strong>defaulting to Early Bird</strong> (the baked design text shows — nothing is drawn on top). Switch to <strong>Regular</strong> for post-Early-Bird registrations: the bottom-left slanted navy box is overpainted and <strong>REGULAR</strong> is printed inside it.</p>
           </div>
           <div className="p-5 border rounded-2xl bg-gray-50">
             <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Four Export Options</h4>
@@ -411,7 +411,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FEE CATEGORY STAMP (EARLY BIRD / REGULAR)</span>
-            The <strong>Fee Category Stamp</strong> toggle selects what prints on the badge's bottom-left rectangle. Every badge produced so far was <strong>EARLY BIRD</strong> (kept as the default so reprints/stored batches stay consistent). The EARLY BIRD period has ended — new prints for remaining unprinted delegates should be set to <strong>REGULAR</strong> (full charges). The choice is saved on each batch, displayed in the Batch Queue, and restored when you <strong>Reprint</strong>.
+            The <strong>Fee Category Stamp</strong> toggle controls the stamp on the full-design (4-up/6-up portrait) badges. Every badge produced so far was <strong>EARLY BIRD</strong> (kept as the default; the bolder EARLY BIRD text already printed on the card is used, nothing extra is printed on top). The EARLY BIRD period has ended — for remaining unprinted delegates select <strong>REGULAR</strong> (full charges): the bottom-left slanted navy box is overpainted with the design navy and <strong>REGULAR</strong> is printed inside it, aligned to the box's trapezoid geometry. The choice is saved on each batch, displayed in the Batch Queue, and restored when you <strong>Reprint</strong>. The <strong>A6 Single</strong> layout prints <strong>no fee stamp</strong> — the category is pre-printed on the A6 shell template.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BATCHES PER RUN (STORAGE-SAFE ROUNDS)</span>
@@ -451,11 +451,7 @@ const MANUAL_SECTIONS: DocSection[] = [
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">A6 SHELL PAPER</span>
-            Load pre-cut A6 stock (<strong>105×148mm</strong>) with the <strong>banner and footer zones already printed</strong>. The badge content (name, details, QR) is drawn at the same 4-up portrait geometry as batch badges, so desk prints match production badges. Only the content area is filled — crop marks are omitted because the paper is pre-cut.
-          </div>
-          <div className="p-4 border rounded-xl bg-gray-50">
-            <span className="text-blue-600 block mb-1">FEE CATEGORY STAMP</span>
-            Choose <strong>Early Bird</strong> or <strong>Regular</strong> before printing; the stamp prints on the badge's bottom-left rectangle. New venue registrations are <strong>Regular</strong> (full charges).
+            Load pre-cut A6 stock (<strong>105×148mm</strong>) with the <strong>banner, footer AND fee category already printed</strong>. The badge content (name, details, QR) is drawn at the same 4-up portrait geometry as batch badges, so desk prints match production badges. Only the content area is filled — crop marks are omitted because the paper is pre-cut, and <strong>no fee stamp is printed</strong> (the category is on the template).
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">VERY IMPORTANT — NEW DELEGATE AUTO-PROMPT</span>

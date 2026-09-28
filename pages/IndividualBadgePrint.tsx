@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { db } from '../services/supabaseService';
-import { Delegate, FeeCategory, getScopeFilter, isAdminRole, isEventAdminRole } from '../types';
+import { Delegate, getScopeFilter, isAdminRole, isEventAdminRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateSingleBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
@@ -23,7 +23,6 @@ const IndividualBadgePrint = () => {
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<Delegate | null>(null);
-  const [feeCategory, setFeeCategory] = useState<FeeCategory>('regular');
 
   const [generating, setGenerating] = useState(false);
   const [generatedPdfBytes, setGeneratedPdfBytes] = useState<Uint8Array | null>(null);
@@ -99,9 +98,8 @@ const IndividualBadgePrint = () => {
 
   const buildFileName = (): string => {
     const nameSlug = `${selected?.first_name || 'delegate'}_${selected?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
-    const feeSlug = feeCategory === 'early_bird' ? 'Early-Bird' : 'Regular';
     const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
-    return `FGBMFI_Badge_A6_${nameSlug}_${feeSlug}_${timestamp}.pdf`;
+    return `FGBMFI_Badge_A6_${nameSlug}_${timestamp}.pdf`;
   };
 
   const handleGenerate = async () => {
@@ -115,7 +113,7 @@ const IndividualBadgePrint = () => {
         if (repaired) target = { ...selected, external_id: repaired };
       }
 
-      const pdfBytes = await generateSingleBadgePDF(target, activeEvent, feeCategory);
+      const pdfBytes = await generateSingleBadgePDF(target, activeEvent);
 
       await db.markDelegateBadgePrinted(target.delegate_id, activeEventId, 'reprinted');
       await db.createBadgePrintLog({
@@ -137,12 +135,12 @@ const IndividualBadgePrint = () => {
       setPdfPreviewUrl(previewUrl);
 
       // Content-only 100×140mm canvas (no design — shell banner/footer are
-      // pre-printed) used by the @page A6 print.
+      // pre-printed) used by the @page A6 print. No fee stamp: the category is
+      // pre-printed on the template.
       try {
         const { badgeUrl: a6Image } = await generateBadgeImage(target, {
           showRank,
           showOffice,
-          feeCategory,
           sizeMm: { width: 100, height: 139.7 },
           includeDesign: false,
         });
@@ -153,7 +151,7 @@ const IndividualBadgePrint = () => {
 
       setFeedback({
         type: 'success',
-        msg: `A6 badge generated for ${target.title} ${target.first_name} ${target.last_name} — ${feeCategory === 'early_bird' ? 'EARLY BIRD' : 'REGULAR'}. Print on the pre-cut A6 stock.`,
+        msg: `A6 badge generated for ${target.title} ${target.first_name} ${target.last_name}. Print on the pre-cut A6 stock.`,
       });
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -332,32 +330,12 @@ const IndividualBadgePrint = () => {
 
       {selected && (
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-          <h2 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-[0.2em]">
-            Fee Category Stamp
-          </h2>
-          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl max-w-md">
-            {(['early_bird', 'regular'] as FeeCategory[]).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setFeeCategory(cat)}
-                className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  feeCategory === cat ? 'bg-blue-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {cat === 'early_bird' ? 'Early Bird' : 'Regular'}
-              </button>
-            ))}
-          </div>
-          <p className="text-[9px] text-gray-400 leading-tight mt-2">
-            EARLY BIRD period has ended — new venue registrations use REGULAR (full charges). Select the applicable category; the stamp prints at the bottom-left rectangle.
-          </p>
-
           <button
             onClick={handleGenerate}
             disabled={generating || isLocked}
-            className="w-full mt-6 py-5 bg-blue-900 hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-500 text-white font-black rounded-2xl text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95"
+            className="w-full py-5 bg-blue-900 hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-500 text-white font-black rounded-2xl text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95"
           >
-            {generating ? 'Generating A6 Badge...' : `Print A6 Badge — ${feeCategory === 'early_bird' ? 'EARLY BIRD' : 'REGULAR'}`}
+            {generating ? 'Generating A6 Badge...' : 'Print A6 Badge'}
           </button>
         </div>
       )}
@@ -390,7 +368,7 @@ const IndividualBadgePrint = () => {
                 Download PDF
               </button>
               <p className="text-[9px] text-gray-400 text-center leading-relaxed mt-2">
-                Only the delegate details, QR code and fee stamp are printed — the banner and footer zones are pre-printed on the A6 shell.
+                Overlay prints only the delegate details and QR code — the banner, footer and fee category are already pre-printed on the A6 shell.
               </p>
             </div>
           </div>
