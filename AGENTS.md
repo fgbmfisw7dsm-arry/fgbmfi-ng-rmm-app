@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.61 (EMS Reg Type — Master List 'EMS' Source filter)
+- **Current Version:** 1.62 (Registration Data Wipe — District + Source + Date Range)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -894,6 +894,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **DataModule reclassify:** "Delegate Registration Source" now has a **"Mark All as EMS"** button + confirm (`handleSourceApply('ems')`); `reclassifyDelegateSource` syncs `registration_source='EMS'` when mode=`'ems'` (mirrors the portal mode sync). `getSourceDistribution` already counts by `reg_type` string → auto-includes `ems` (no change). Bulk **Import** source selector intentionally unchanged (Manual/Portal/Web only — EMS means "registered on the EMS form", not a bulk-upload classification).
 - **Fallback paths (`getPaginatedDelegates`/`getDistrictsWithDelegates`):** added `source==='ems' → eq('reg_type','ems')` and the `'manual'` fallback now `.neq('portal').neq('web').neq('ems')` — so the fallback query layer matches the rebuilt RPC.
 - **Non-disruption:** no data deletes; additive CHECK value; existing EMS rows are re-tagged by the backfill. QR quick-register (`registration_source='qr_scan'` → `reg_type` default `'manual'`), imports, reconcile, dedup, RLS (`delegates_insert_scoped` EMS≡manual, §53) all unchanged. `supabase_schema.sql` does not carry `reg_type` (pre-existing v1.44 state — feature lives in the migration only). `tsc --noEmit` → the same 4 pre-existing non-blocking warnings; `npm run build` passes.
+
+## 59. Registration Data Wipe — District + Source + Date Range (v1.62)
+
+- **Purpose (admin, DataModule `/admin/data`):** clear registration batches created during **training drills** — delete delegates from **All Districts or a selected district**, filtered by **Source** (one or more of `reg_type` Portal/Web/EMS/Manual) and an **inclusive begin→end date range** on `delegates.created_at` (registration time). Operator-driven scoped purge, kept as a NEW card ("Registration Data Wipe (Training Cleanup)", rose-bordered) so the existing District Master Purge module is untouched.
+- **Workbook (mirrors §32/§41/§37):** **1. Scan** (`db.countWipeTargets`) → total + per-district breakdown chips + scrollable 50-row sample table (name/district/source/registered) → **2. Backup** (`db.fetchWipeTargets`, full matching rows via `downloadJSON`) → **3. Confirm** "DELETE N RECORDS" → **4. Execute** (`db.deleteWipeTargets`). Zero-total alert blocks the flow; backup step gates the purge step; all controls disabled on locked events.
+- **Service (`supabaseService.ts`, 3 methods, all event-scoped):**
+  - `countWipeTargets(eventId, {district?, sources, from, to})` → `{total, byDistrict, samples}` — read-only paginated scan (1000/page).
+  - `fetchWipeTargets(eventId, opts)` → full matching `Delegate[]` for the JSON backup (paginated).
+  - `deleteWipeTargets(eventId, opts)` → `ensureEventActive()` → `delegates.delete().eq('event_id').in('reg_type', sources)[.ilike('district')].gte('created_at').lte('created_at')` → audit `delegate_training_wipe` (count + scope in summary/metadata) → returns count. **Cascade is DB-enforced** (`ON DELETE CASCADE` on `checkins`/`session_responses`/`badge_print_logs` `.delegate_id`) — attendance/alter-call/badge history dies with each delegate; `badge_batches` + storage PDFs stay intact (same as §District Master Purge).
+- **Semantics:** district omitted / `ALL_DISTRICTS_SENTINEL` = All Districts; `district` normalized + `.ilike` (matches §2283 purge). `reg_type IN (sources)`; a row's bucket is its stored `reg_type` (QR quick-register rows default `manual`, §42). Dates: page converts `YYYY-MM-DD` via `dateToISO` helper to local-day ISO bounds (`00:00:00.000` → `23:59:59.999`), inclusive. Both dates + ≥1 source required in the UI (`wipeScopeValid`).
+- **Non-disruption:** DataModule route + delegates DELETE RLS are already admin-only → permission surface unchanged. No DB migration (existing columns + FK cascades) and **no `types.ts` change** (`RegType` already includes `'ems'`). QR/import/reconcile/check-in paths untouched. `tsc --noEmit` → same 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 

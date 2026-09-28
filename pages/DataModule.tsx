@@ -2,11 +2,21 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { db, ALL_DISTRICTS_SENTINEL } from '../services/supabaseService';
 import { AppContext } from '../context/AppContext';
-import { SystemSettings, Event, isAdminRole } from '../types';
+import { SystemSettings, Event, isAdminRole, RegType } from '../types';
 import { downloadJSON } from '../services/utils';
 
 const isAllDistricts = (d: string) => d === ALL_DISTRICTS_SENTINEL;
 const districtLabel = (d: string) => isAllDistricts(d) ? 'ALL DISTRICTS' : d.toUpperCase();
+const WIPE_SOURCE_OPTIONS: { value: RegType; label: string }[] = [
+    { value: 'portal', label: 'Portal' },
+    { value: 'web', label: 'Web' },
+    { value: 'ems', label: 'EMS' },
+    { value: 'manual', label: 'Manual' },
+];
+const dateToISO = (dateStr: string, endOfDay: boolean) => {
+    const d = new Date(`${dateStr}T${endOfDay ? '23:59:59.999' : '00:00:00'}`);
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+};
 
 const DataModule = () => {
     const { activeEventId, user } = useContext(AppContext);
@@ -63,6 +73,18 @@ const DataModule = () => {
     const [tvMerging, setTvMerging] = useState(false);
     const [tvApproved, setTvApproved] = useState<Set<string>>(new Set());
     const [tvResult, setTvResult] = useState<{ merged: number; skipped: number } | null>(null);
+
+    // State for Registration Data Wipe (District + Source + Date Range)
+    const [wipeDistrict, setWipeDistrict] = useState('');
+    const [wipeSources, setWipeSources] = useState<RegType[]>([]);
+    const [wipeFrom, setWipeFrom] = useState('');
+    const [wipeTo, setWipeTo] = useState('');
+    const [wipeScanResult, setWipeScanResult] = useState<{ total: number; byDistrict: Record<string, number>; samples: any[] } | null>(null);
+    const [wipeScanning, setWipeScanning] = useState(false);
+    const [wipeBackupReady, setWipeBackupReady] = useState(false);
+    const [wipeConfirmText, setWipeConfirmText] = useState('');
+    const [wipeDeleting, setWipeDeleting] = useState(false);
+    const [wipeError, setWipeError] = useState<string | null>(null);
 
     useEffect(() => {
         db.getSettings().then(setSettings);
@@ -357,6 +379,70 @@ const DataModule = () => {
         }
     };
 
+    // --- LOGIC: REGISTRATION DATA WIPE (Training Cleanup) ---
+    const wipeFilters = () => {
+        const fromIso = dateToISO(wipeFrom, false);
+        const toIso = dateToISO(wipeTo, true);
+        return { district: wipeDistrict || undefined, sources: wipeSources, from: fromIso, to: toIso };
+    };
+    const wipeScopeValid = () => wipeSources.length > 0 && !!wipeFrom && !!wipeTo;
+
+    const toggleWipeSource = (rt: RegType) => {
+        setWipeSources(prev => prev.includes(rt) ? prev.filter(s => s !== rt) : [...prev, rt]);
+        setWipeBackupReady(false);
+        setWipeConfirmText('');
+        setWipeError(null);
+    };
+
+    const handleWipeScan = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        if (!wipeScopeValid()) return alert("Select at least one source and a begin/end date range.");
+        setWipeScanning(true);
+        setWipeError(null);
+        setWipeBackupReady(false);
+        setWipeConfirmText('');
+        try {
+            const res = await db.countWipeTargets(activeEventId, wipeFilters());
+            setWipeScanResult(res);
+            if (res.total === 0) alert(`No delegates match the selected scope.\n\nDistrict: ${districtLabel(wipeDistrict || ALL_DISTRICTS_SENTINEL)}\nSources: ${wipeSources.join(', ')}\nRange: ${wipeFrom} → ${wipeTo}`);
+        } catch (e: any) {
+            setWipeError("Scan failed: " + (e.message || "Database error."));
+        } finally {
+            setWipeScanning(false);
+        }
+    };
+
+    const handleWipeBackup = async () => {
+        if (!activeEventId || !wipeScanResult) return;
+        try {
+            const rows = await db.fetchWipeTargets(activeEventId, wipeFilters());
+            downloadJSON({ event_id: activeEventId, event_name: activeEvent?.name || '', exported_at: new Date().toISOString(), scope: wipeFilters(), delegates: rows }, `BACKUP_WIPE_${districtLabel(wipeDistrict || ALL_DISTRICTS_SENTINEL).replace(/\s+/g, '_')}_${wipeSources.join('-')}_${wipeFrom}_${wipeTo}.json`);
+            setWipeBackupReady(true);
+            alert(`BACKUP DOWNLOADED (${rows.length} delegate(s)). You can now proceed to the final purge.`);
+        } catch (e: any) {
+            setWipeError("Backup failed: " + (e.message || "Database error."));
+        }
+    };
+
+    const handleWipeDelete = async () => {
+        if (!activeEventId || !wipeScanResult) return;
+        const required = `DELETE ${wipeScanResult.total} RECORDS`;
+        if (wipeConfirmText !== required) return alert(`Type '${required}' exactly.`);
+        setWipeDeleting(true);
+        setWipeError(null);
+        try {
+            const count = await db.deleteWipeTargets(activeEventId, wipeFilters());
+            alert(`SUCCESS: ${count} delegate(s) removed.\n\nScope: ${districtLabel(wipeDistrict || ALL_DISTRICTS_SENTINEL)} · ${wipeSources.join(', ')} · ${wipeFrom} → ${wipeTo}\n\nCheck-ins, alter-call responses and badge history for these records were removed automatically.`);
+            setWipeScanResult(null);
+            setWipeBackupReady(false);
+            setWipeConfirmText('');
+        } catch (e: any) {
+            setWipeError("Wipe failed: " + (e.message || (e.code === '42501' ? 'Permission denied. Delete is admin-only.' : "Database error.")));
+        } finally {
+            setWipeDeleting(false);
+        }
+    };
+
     return (
         <div className="max-w-5xl mx-auto space-y-8 pb-20">
             {/* ALERT BANNER */}
@@ -573,7 +659,170 @@ const DataModule = () => {
                 </div>
             </div>
 
-            {/* MODULE 3: JUNK ROW CLEANUP */}
+            {/* MODULE 3: REGISTRATION DATA WIPE (Training Cleanup) */}
+            <div className="bg-white rounded-3xl shadow-xl border-t-8 border-rose-700 overflow-hidden">
+                <div className="p-6 bg-rose-50 border-b border-rose-100">
+                    <h3 className="text-lg font-black text-rose-900 uppercase">Registration Data Wipe <span className="text-rose-500">(Training Cleanup)</span></h3>
+                    <p className="text-[10px] font-bold text-rose-700 uppercase">Delete registrations from All Districts or a selected district, filtered by Source (Portal / Web / EMS / Manual) and a begin→end date range — e.g. clear everything registered during a training drill.</p>
+                </div>
+                <div className="p-8 space-y-6">
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">Target District</label>
+                            <select
+                                className="w-full p-4 border-2 rounded-xl bg-gray-50 font-black text-blue-900 uppercase"
+                                value={wipeDistrict}
+                                onChange={e => { setWipeDistrict(e.target.value); setWipeBackupReady(false); setWipeConfirmText(''); setWipeScanResult(null); setWipeError(null); }}
+                                disabled={wipeScanning || wipeDeleting}
+                            >
+                                <option value="">-- All Districts --</option>
+                                <option value={ALL_DISTRICTS_SENTINEL} className="bg-red-50 text-red-700">⚠ All Districts (Entire Event)</option>
+                                {settings?.districts.map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">Registration Sources <span className="text-red-500">(select one or more)</span></label>
+                            <div className="flex flex-wrap gap-2">
+                                {WIPE_SOURCE_OPTIONS.map(opt => {
+                                    const active = wipeSources.includes(opt.value);
+                                    return (
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => toggleWipeSource(opt.value)}
+                                            className={`px-4 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest border-2 transition-all ${active ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-rose-300'}`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">Begin Date <span className="text-red-500">(required)</span></label>
+                            <input
+                                type="date"
+                                className="w-full p-4 border-2 rounded-xl bg-gray-50 font-black uppercase outline-none focus:border-rose-500"
+                                value={wipeFrom}
+                                onChange={e => { setWipeFrom(e.target.value); setWipeBackupReady(false); setWipeConfirmText(''); setWipeScanResult(null); setWipeError(null); }}
+                                disabled={wipeScanning || wipeDeleting}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">End Date <span className="text-red-500">(required)</span></label>
+                            <input
+                                type="date"
+                                className="w-full p-4 border-2 rounded-xl bg-gray-50 font-black uppercase outline-none focus:border-rose-500"
+                                value={wipeTo}
+                                onChange={e => { setWipeTo(e.target.value); setWipeBackupReady(false); setWipeConfirmText(''); setWipeScanResult(null); setWipeError(null); }}
+                                disabled={wipeScanning || wipeDeleting}
+                            />
+                        </div>
+                    </div>
+
+                    <p className="text-[9px] font-bold text-gray-400 uppercase">Scope: {districtLabel(wipeDistrict || 'ALL DISTRICTS')} · {wipeSources.length > 0 ? wipeSources.map(s => s.toUpperCase()).join(' / ') : 'NO SOURCES'} · {wipeFrom && wipeTo ? `${wipeFrom} 00:00 → ${wipeTo} 23:59` : 'NO DATE RANGE'} — delegates registered on or between the dates (inclusive) are returned.</p>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span>
+                            Scan Matching Registrations
+                        </label>
+                        <button
+                            onClick={handleWipeScan}
+                            disabled={wipeScanning || wipeDeleting || !activeEventId || !wipeScopeValid()}
+                            className="w-full py-4 bg-rose-700 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-rose-800 transition-all disabled:opacity-30"
+                        >
+                            {wipeScanning ? 'SCANNING...' : '🔍 Scan Matching Registrations'}
+                        </button>
+                    </div>
+
+                    {wipeScanResult && (
+                        <div className="bg-rose-50/60 rounded-xl border border-rose-100 p-4 space-y-3">
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-black text-rose-900 uppercase">{wipeScanResult.total} Delegate(s) Match the Scope</span>
+                                <span className="text-[8px] font-bold text-rose-500 uppercase">Check-in / session / badge history will cascade</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries(wipeScanResult.byDistrict).map(([key, count]) => (
+                                    <span key={key} className="inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase bg-white border border-rose-200 text-rose-800">{key}: {count}</span>
+                                ))}
+                            </div>
+                            {wipeScanResult.samples.length > 0 && (
+                                <div className="max-h-64 overflow-y-auto rounded-xl border border-rose-100 bg-white">
+                                    <table className="w-full text-[10px]">
+                                        <thead className="sticky top-0 bg-rose-100 text-rose-900 uppercase font-black tracking-wider">
+                                            <tr>
+                                                <th className="p-2 text-left w-10">#</th>
+                                                <th className="p-2 text-left">Name</th>
+                                                <th className="p-2 text-left">District</th>
+                                                <th className="p-2 text-left">Source</th>
+                                                <th className="p-2 text-left">Registered</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {wipeScanResult.samples.map((r, i) => (
+                                                <tr key={r.delegate_id} className="border-b border-rose-100">
+                                                    <td className="p-2 font-mono text-gray-400">{i + 1}</td>
+                                                    <td className="p-2 font-mono text-rose-900">{r.title || ''} {r.first_name} {r.last_name}</td>
+                                                    <td className="p-2 font-mono text-gray-600">{r.district || '—'}</td>
+                                                    <td className="p-2 font-mono text-gray-600 uppercase">{r.reg_type || 'manual'}</td>
+                                                    <td className="p-2 font-mono text-gray-500">{new Date(r.created_at).toLocaleString()}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {wipeScanResult.samples.length < wipeScanResult.total && (
+                                        <p className="p-2 text-[9px] font-bold text-gray-400 uppercase">+ {wipeScanResult.total - wipeScanResult.samples.length} more (backup includes all)</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">2</span>
+                            Backup Matching Records
+                        </label>
+                        <button
+                            onClick={handleWipeBackup}
+                            disabled={!wipeScanResult || wipeDeleting}
+                            className="w-full py-4 bg-slate-800 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-30"
+                        >
+                            {wipeBackupReady ? '✅ Backup Downloaded' : 'Generate & Download Backup'}
+                        </button>
+                    </div>
+
+                    <div className={`space-y-2 transition-all duration-500 ${wipeBackupReady ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
+                        <label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-2">
+                            <span className="bg-red-100 w-5 h-5 rounded-full flex items-center justify-center">3</span>
+                            Type "{wipeScanResult ? `DELETE ${wipeScanResult.total} RECORDS` : 'DELETE N RECORDS'}"
+                        </label>
+                        <input
+                            className="w-full p-4 border-2 border-red-100 rounded-xl bg-red-50/30 font-black text-center text-red-600 focus:ring-4 focus:ring-red-500 outline-none"
+                            value={wipeConfirmText}
+                            onChange={e => setWipeConfirmText(e.target.value)}
+                            placeholder={wipeScanResult ? `DELETE ${wipeScanResult.total} RECORDS` : "DELETE N RECORDS"}
+                        />
+                        <button
+                            onClick={handleWipeDelete}
+                            disabled={wipeDeleting || !wipeScanResult || wipeConfirmText !== `DELETE ${wipeScanResult.total} RECORDS`}
+                            className="w-full py-5 bg-rose-700 text-white font-black rounded-xl uppercase text-sm tracking-[0.2em] shadow-2xl hover:bg-rose-800 disabled:opacity-10"
+                        >
+                            {wipeDeleting ? 'DELETING...' : `PURGE ${wipeScanResult?.total || 0} RECORD(S)`}
+                        </button>
+                    </div>
+
+                    {wipeError && (
+                        <span className="block text-[11px] font-black text-red-700 uppercase">⚠ {wipeError}</span>
+                    )}
+                </div>
+            </div>
+
+            {/* MODULE 4: JUNK ROW CLEANUP */}
             <div className="bg-white rounded-3xl shadow-xl border-t-8 border-amber-500 overflow-hidden">
                 <div className="p-6 bg-amber-50 border-b border-amber-100">
                     <h3 className="text-lg font-black text-amber-900 uppercase">Junk Row Cleanup</h3>

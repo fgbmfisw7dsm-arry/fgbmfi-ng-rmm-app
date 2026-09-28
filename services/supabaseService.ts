@@ -2287,6 +2287,79 @@ export const db = {
         const { data } = await q.select();
         return data?.length || 0; 
     },
+
+    countWipeTargets: async (eventId: string, opts: { district?: string; sources: RegType[]; from: string; to: string }): Promise<{ total: number; byDistrict: Record<string, number>; samples: Array<{ delegate_id: string; title: string; first_name: string; last_name: string; district: string; reg_type: string; created_at: string }> }> => {
+        if (!eventId || !opts.sources || opts.sources.length === 0) return { total: 0, byDistrict: {}, samples: [] };
+        const byDistrict: Record<string, number> = {};
+        const samples = [];
+        const district = opts.district && opts.district !== ALL_DISTRICTS_SENTINEL ? normalize(opts.district) : '';
+        let total = 0;
+        let from = 0;
+        while (true) {
+            let q = supabase
+                .from('delegates')
+                .select('delegate_id, title, first_name, last_name, district, reg_type, created_at')
+                .eq('event_id', eventId)
+                .in('reg_type', opts.sources)
+                .gte('created_at', opts.from)
+                .lte('created_at', opts.to);
+            if (district) q = q.ilike('district', district);
+            const { data, error } = await q.order('delegate_id').range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            total += data.length;
+            for (const d of data) {
+                const label = (d.district || '').trim() || '(blank)';
+                byDistrict[label] = (byDistrict[label] || 0) + 1;
+                if (samples.length < 50) samples.push(d);
+            }
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return { total, byDistrict, samples };
+    },
+
+    fetchWipeTargets: async (eventId: string, opts: { district?: string; sources: RegType[]; from: string; to: string }): Promise<Delegate[]> => {
+        if (!eventId || !opts.sources || opts.sources.length === 0) return [];
+        const results: Delegate[] = [];
+        const district = opts.district && opts.district !== ALL_DISTRICTS_SENTINEL ? normalize(opts.district) : '';
+        let from = 0;
+        while (true) {
+            let q = supabase
+                .from('delegates')
+                .select('*')
+                .eq('event_id', eventId)
+                .in('reg_type', opts.sources)
+                .gte('created_at', opts.from)
+                .lte('created_at', opts.to);
+            if (district) q = q.ilike('district', district);
+            const { data, error } = await q.order('delegate_id').range(from, from + 999);
+            if (error || !data || data.length === 0) break;
+            results.push(...data);
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        return results;
+    },
+
+    deleteWipeTargets: async (eventId: string, opts: { district?: string; sources: RegType[]; from: string; to: string }): Promise<number> => {
+        if (!eventId || !opts.sources || opts.sources.length === 0) return 0;
+        await ensureEventActive(eventId);
+        const district = opts.district && opts.district !== ALL_DISTRICTS_SENTINEL ? normalize(opts.district) : '';
+        let q = supabase
+            .from('delegates')
+            .delete()
+            .eq('event_id', eventId)
+            .in('reg_type', opts.sources)
+            .gte('created_at', opts.from)
+            .lte('created_at', opts.to);
+        if (district) q = q.ilike('district', district);
+        const { data, error } = await q.select();
+        if (error) throw error;
+        const count = data?.length || 0;
+        recordAuditLog(eventId, 'delegate_training_wipe', `Deleted ${count} delegate(s) [district=${opts.district || 'ALL'}, sources=${opts.sources.join(',')}, range=${opts.from}..${opts.to}]`, null, 'event', eventId, { count, district: opts.district || 'ALL', sources: opts.sources, from: opts.from, to: opts.to });
+        return count;
+    },
+
     deleteDelegatesByScope: async (scope: string) => { if (scope === 'all') { await supabase.from('checkins').delete().neq('checkin_id', '0'); await supabase.from('delegates').delete().neq('delegate_id', '0'); } },
     
     harmonizeDistricts: async (eventId?: string) => {
