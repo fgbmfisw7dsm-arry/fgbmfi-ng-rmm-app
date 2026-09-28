@@ -252,6 +252,14 @@ const MANUAL_SECTIONS: DocSection[] = [
             <h4 className="text-xs font-black uppercase text-green-700 mb-1">Step 3: Register & Verify</h4>
             <p className="text-sm text-gray-600 font-bold">Click <strong>"Complete Registration & Verify Arrival"</strong>. The system adds them to the master list and records their event arrival simultaneously. Their unique QR badge can then be printed or shared digitally.</p>
           </div>
+          <div className="border-l-4 border-blue-600 pl-6 py-2">
+            <h4 className="text-xs font-black uppercase text-blue-700 mb-1">Exec Registrars — ALL Delegate Types</h4>
+            <p className="text-sm text-gray-600"><strong>Exec Registrar</strong> accounts can register <strong>every delegate type</strong> (Member, National Guest, Free Guest, International, Dependants) — the Free Guest restriction that constrains the other registrar-tier roles is bypassed for them, on both the form and the server.</p>
+          </div>
+          <div className="border-l-4 border-blue-600 pl-6 py-2">
+            <h4 className="text-xs font-black uppercase text-blue-700 mb-1">PRINT A6 BADGE NOW (Venue Desk)</h4>
+            <p className="text-sm text-gray-600">After the form saves, the confirmation screen offers <strong>"PRINT A6 BADGE NOW"</strong> — it opens the <strong>Print Delegate Badge</strong> page (sidebar, under New Delegate) pre-loaded with the delegate so they leave the desk with their physical badge. See section <strong>8C — Individual Delegate Badge (A6 Desk Printing)</strong>.</p>
+          </div>
         </div>
       </>
     ),
@@ -364,13 +372,13 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-5 border rounded-2xl bg-gray-50">
             <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Fee Category Stamp</h4>
-            <p className="text-xs text-gray-600">The E-Badge modal includes an <strong>Early Bird / Regular</strong> toggle, <strong>defaulting to Early Bird</strong> (the baked design text shows — nothing is drawn on top). Switch to <strong>Regular</strong> for post-Early-Bird registrations: the bottom-left slanted navy box is overpainted and <strong>REGULAR</strong> is printed inside it.</p>
+            <p className="text-xs text-gray-600">The E-Badge modal includes an <strong>Early Bird / Regular</strong> toggle, <strong>defaulting to Early Bird</strong> (the bold EARLY BIRD text baked into the design shows — nothing is drawn on top). Switching to <strong>Regular</strong> (for post-Early-Bird registrations) fills the bottom-left slanted navy box with the design navy and prints <strong>REGULAR</strong> inside it, aligned to the box's trapezoid geometry and <strong>one point larger</strong> so it reads clearly. The toggle applies <strong>on a single tap</strong> — the badge regenerates immediately with the selected category.</p>
           </div>
           <div className="p-5 border rounded-2xl bg-gray-50">
             <h4 className="text-xs font-black text-blue-900 uppercase mb-2">Four Export Options</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-bold mt-3">
-              <div className="p-3 border rounded-xl bg-blue-50"><span className="text-blue-800 block mb-1">Print</span> Opens the browser print dialog. Select "Actual Size" (100% scale) for the exact 60×70mm badge. Use for physical badge printing.</div>
-              <div className="p-3 border rounded-xl bg-slate-100"><span className="text-slate-800 block mb-1">PDF</span> Downloads the badge as a 60×70mm PDF at exact scale. Ready for emailing or professional printing.</div>
+              <div className="p-3 border rounded-xl bg-blue-50"><span className="text-blue-800 block mb-1">Print</span> Opens the browser print dialog. Select "Actual Size" (100% scale) for the exact 65×91mm badge. Use for physical badge printing.</div>
+              <div className="p-3 border rounded-xl bg-slate-100"><span className="text-slate-800 block mb-1">PDF</span> Downloads the badge as a 65×91mm PDF at exact scale. Ready for emailing or professional printing.</div>
               <div className="p-3 border rounded-xl bg-emerald-50"><span className="text-emerald-800 block mb-1">Image</span> Downloads a high-resolution PNG image of the badge. Perfect for saving to a mobile gallery and displaying at check-in points.</div>
               <div className="p-3 border rounded-xl bg-purple-50"><span className="text-purple-800 block mb-1">Share</span> Opens the native device share sheet (WhatsApp, Telegram, email, etc.). The officer can instantly send the e-badge to the delegate's phone without saving a file first.</div>
             </div>
@@ -391,11 +399,11 @@ const MANUAL_SECTIONS: DocSection[] = [
     id: 'badge-print',
     number: '8B',
     group: 'operations',
-    title: 'Badge Printing: Batch Production & Printed Status',
+    title: 'Batch Badge Printing (Batch Production & Printed Status)',
     allowedRoles: ROLE_BADGES,
     body: (
       <>
-        <p className="text-sm text-gray-600 mb-4">The <strong>Badge Printing</strong> module produces printable PDF badge sheets in batches before registration — usually by district. It tracks a <strong>"Badge Printed"</strong> status per delegate so reprint rounds never duplicate work.</p>
+        <p className="text-sm text-gray-600 mb-4">The <strong>Batch Badge Printing</strong> module (sidebar — distinct from <strong>Print Delegate Badge</strong>) produces printable PDF badge sheets in batches before registration — usually by district. It tracks a <strong>"Badge Printed"</strong> status per delegate so reprint rounds never duplicate work.</p>
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FILTER BAR</span>
@@ -411,7 +419,15 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FEE CATEGORY STAMP (EARLY BIRD / REGULAR)</span>
-            The <strong>Fee Category Stamp</strong> toggle controls the stamp on the full-design (4-up/6-up portrait) badges. Every badge produced so far was <strong>EARLY BIRD</strong> (kept as the default; the bolder EARLY BIRD text already printed on the card is used, nothing extra is printed on top). The EARLY BIRD period has ended — for remaining unprinted delegates select <strong>REGULAR</strong> (full charges): the bottom-left slanted navy box is overpainted with the design navy and <strong>REGULAR</strong> is printed inside it, aligned to the box's trapezoid geometry. The choice is saved on each batch, displayed in the Batch Queue, and restored when you <strong>Reprint</strong>. The <strong>A6 Single</strong> layout prints <strong>no fee stamp</strong> — the category is pre-printed on the A6 shell template.
+            The <strong>Fee Category Stamp</strong> toggle controls the stamp on the full-design (4-up/6-up portrait) badges. Every badge produced so far was <strong>EARLY BIRD</strong> (kept as the default; the bolder EARLY BIRD text already printed on the card is used, nothing extra is printed on top). The EARLY BIRD period has ended — for remaining unprinted delegates select <strong>REGULAR</strong> (full charges): the bottom-left slanted navy box is overpainted with the design navy and <strong>REGULAR</strong> is printed inside it, aligned to the box's trapezoid geometry. The choice is saved on each batch, displayed as a <strong>Fee chip</strong> in the Batch Queue, and restored when you <strong>Reprint</strong>. The <strong>A6 Single</strong> layout prints <strong>no fee stamp</strong> — the category is pre-printed on the A6 shell template.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">A6 SINGLE LAYOUT — A6 PAPER + NAME IN FILE NAME</span>
+            The <strong>A6 Single</strong> layout prints <strong>one badge per A6 sheet</strong> (105×148mm page, 100×140mm content) on pre-cut shell stock — only the name/details/QR are printed (banner, footer and fee category are pre-printed). <strong>Print PDF</strong> opens the A6 PDF in the browser viewer so the print dialog defaults to the <strong>A6 paper size</strong> (choose A6 / actual size in your printer settings if it does not). The Download and Print file names carry the delegate's name — <code>FGBMFI_Badge_A6_John_Doe_….pdf</code> — exactly like the Print Delegate Badge module.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">UPLOAD FAILURE RESILIENCE</span>
+            If a badge PDF is generated but the storage upload times out (e.g., weak venue Wi-Fi), the batch is flagged <strong>failed</strong> in the queue (never left stuck "generating") and the generated PDF <strong>still appears in the preview</strong> so you can <strong>Print/Download immediately</strong>. Regenerate later to re-upload the batch to storage.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BATCHES PER RUN (STORAGE-SAFE ROUNDS)</span>
@@ -456,6 +472,10 @@ const MANUAL_SECTIONS: DocSection[] = [
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">VERY IMPORTANT — NEW DELEGATE AUTO-PROMPT</span>
             After the New Delegate form saves, the confirmation screen offers <strong>"PRINT A6 BADGE NOW"</strong> — it opens this page pre-loaded with the delegate. Print immediately so delegates leave the desk with their physical badge.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">A6 PAPER LOCK & EXIT</span>
+            <strong>Print</strong> forces the printer dialog to the <strong>A6 paper size (105×148mm)</strong> and prints <strong>only the badge</strong> — the rest of the app screen is hidden for the print. The page has a <strong>Close</strong> button (top-right) that returns you to the previous screen (New Delegate / Check-In).
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">AUDIT & STATUS</span>
@@ -523,7 +543,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">REGISTRAR RESTRICTIONS</span>
-            Admins can restrict registrar-created records to <strong>Free Guest</strong> only (per event). Restricted registrars are locked to the Guest district and chapter; admins and event admins retain full control.
+            Admins can restrict registrar-created records to <strong>Free Guest</strong> only (per event). Restricted registrars are locked to the Guest district and chapter; admins and event admins retain full control. <strong>Exec Registrars are exempt</strong> from this restriction — they register <strong>all delegate types</strong> on the New Delegate form.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">DESTRUCTIVE CONTROLS & REQUIRED FIELDS</span>
@@ -583,7 +603,7 @@ const MANUAL_SECTIONS: DocSection[] = [
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">ADMIN TIER (National, Regional, District, Legacy System Admin)</span>
-            Full access to all modules including Events & Config, User Management, System Setup, Data Management, Storage, Audit Log, Badge Printing, Master List, Import Data, and Financials.
+            Full access to all modules including Events & Config, User Management, System Setup, Data Management, Storage, Audit Log, Batch Badge Printing, Print Delegate Badge, Master List, Import Data, and Financials.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">REGISTRAR TIER (National, Regional, District, Legacy Registrar)</span>
@@ -594,12 +614,16 @@ const MANUAL_SECTIONS: DocSection[] = [
             Operates exactly like a <strong>National Registrar</strong> (Dashboard, Reports, Check-In, Session Details, New Delegate) at national scope, <strong>PLUS full financial visibility</strong>: the Reports Center shows all Financial Matrix, Pledge Summary, and Pledge List tabs, and the Dashboard displays financial totals. Executive Admins can <strong>view</strong> financials but cannot record or edit offerings/pledges — financial writes remain reserved for Admins, Event Admins, and Finance officers.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">EXEC REGISTRAR (All Delegate Types + Individual Badge Printing)</span>
+            Has the same module surface as a <strong>National Registrar</strong> at national scope (Dashboard, Reports, Check-In, Session Details, New Delegate), <strong>PLUS</strong>: (1) registers <strong>ALL delegate types</strong> — the Event-level "Restrict Registrar to Free Guest" setting does not apply to them; (2) prints <strong>individual A6 badges</strong> via the <strong>Print Delegate Badge</strong> page (sidebar, under New Delegate). Exec Registrars are <strong>not</strong> admins/event admins — batch <strong>Batch Badge Printing</strong>, Master List, Import, and the admin-only modules remain locked.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FINANCE</span>
             Financial operations: Dashboard, Financials, Reports.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">EVENT ADMIN</span>
-            Global (unscoped) registrar modules + Badge Printing, Master List, Import Data (bulk), and Financials. Excluded from admin-only modules (Events, Users, Setup, Data, Storage, Audit).
+            Global (unscoped) registrar modules + Batch Badge Printing, Print Delegate Badge, Master List, Import Data (bulk), and Financials. Excluded from admin-only modules (Events, Users, Setup, Data, Storage, Audit).
           </div>
         </div>
       </>
@@ -682,6 +706,18 @@ const TRAINING_SECTIONS: DocSection[] = [
             <p>6. Enter Voice Distribution totals at the bottom of the page.</p>
           </div>
         </div>
+
+        <div className="p-6 bg-blue-900 text-white rounded-2xl shadow-xl mt-6">
+          <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 7: The New Arrival Gets a Badge Immediately (Desk Printing)</h4>
+          <p className="text-sm text-gray-300 italic">"I've just registered a delegate at the venue — they need a physical A6 badge now."</p>
+          <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+            <p>1. Register the delegate on the <strong>New Delegate</strong> form.</p>
+            <p>2. On the success screen tap <strong>"PRINT A6 BADGE NOW"</strong> — the Print Delegate Badge page opens pre-loaded.</p>
+            <p>3. Tap <strong>Print A6 Badge</strong>, then <strong>Print</strong> — the dialog is locked to A6 paper (105×148mm).</p>
+            <p>4. Only the name, details and QR print over the pre-cut shell (banner, footer and fee category are pre-printed).</p>
+            <p>5. <strong>Close</strong> returns you to where you were. (Admins, Exec Registrars and Event Admins run this desk.)</p>
+          </div>
+        </div>
       </div>
     ),
   },
@@ -717,7 +753,7 @@ const TRAINING_SECTIONS: DocSection[] = [
           <h4 className="text-xs font-black text-purple-700 uppercase mb-2">Scenario 1: Printing a District's First Round</h4>
           <p className="text-sm text-gray-600 italic">"I need to print badges for South East 1."</p>
           <div className="mt-3 text-[11px] font-bold text-gray-800 uppercase space-y-1">
-            <p>1. Open Badge Printing. Filter District = South East 1, Badge Status = Badge Not Printed (default).</p>
+            <p>1. Open <strong>Batch Badge Printing</strong>. Filter District = South East 1, Badge Status = Badge Not Printed (default).</p>
             <p>2. Choose a Layout + Batch Size (e.g. 500). Leave Batches Per Run = 1.</p>
             <p>3. Click Generate — one PDF sub-batch is produced.</p>
             <p>4. Download, print it, then click <strong>Printed</strong> on the batch. Check the Batch Queue label: #N (South East 1).</p>
@@ -752,6 +788,28 @@ const TRAINING_SECTIONS: DocSection[] = [
             <p>1. Ask an Admin to open Badge Printing → Batches tab.</p>
             <p>2. Click <strong>"Clear Badge Printed Flags"</strong> and confirm.</p>
             <p>3. Every delegate returns to Badge Not Printed — regenerate from round one.</p>
+          </div>
+        </div>
+
+        <div className="p-6 bg-purple-900 text-white rounded-2xl shadow-xl mt-6">
+          <h4 className="text-xs font-black text-purple-400 uppercase mb-2">Scenario 5: Switching to REGULAR After Early Bird Ends</h4>
+          <p className="text-sm text-gray-300 italic">"All badges so far are EARLY BIRD — the window has closed, the rest are REGULAR (full charges)."</p>
+          <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+            <p>1. In Sort &amp; Layout, set <strong>Fee Category Stamp = Regular</strong>.</p>
+            <p>2. Generate as normal — the full-design (4-up/6-up) badges overpaint the navy box and print <strong>REGULAR</strong> inside it.</p>
+            <p>3. The <strong>Fee chip</strong> in the Batch Queue and a <strong>Reprint</strong> always restore the batch's own category.</p>
+            <p>4. A6 Single prints <strong>no fee stamp</strong> — the category is pre-printed on the shell template.</p>
+          </div>
+        </div>
+
+        <div className="p-6 bg-blue-900 text-white rounded-2xl shadow-xl mt-6">
+          <h4 className="text-xs font-black text-blue-400 uppercase mb-2">Scenario 6: A Single A6 Badge (One Delegate at a Time)</h4>
+          <p className="text-sm text-gray-300 italic">"I need one badge for a delegate registered at the desk."</p>
+          <div className="mt-3 text-[11px] font-black uppercase space-y-1">
+            <p>1. Use <strong>A6 Single</strong> layout (batch module) OR the <strong>Print Delegate Badge</strong> page for one delegate.</p>
+            <p>2. Print — the dialog defaults to <strong>A6 paper</strong> (105×148mm); choose A6/Actual size if prompted.</p>
+            <p>3. Only name/details/QR print over the pre-cut shell — banner, footer and fee category are pre-printed.</p>
+            <p>4. Download/Print file name carries the delegate's name: <code>FGBMFI_Badge_A6_John_Doe_….pdf</code>.</p>
           </div>
         </div>
       </div>
@@ -812,6 +870,14 @@ const TRAINING_SECTIONS: DocSection[] = [
         <div className="p-4 bg-red-50 rounded-xl border border-red-100">
           <p className="text-[10px] font-black text-red-800 uppercase">Q: Voice Distribution count not saving!</p>
           <p className="text-[10px] font-medium text-red-700 mt-1">A: Ensure you've selected a session first. Enter the total number and click "Save". For locked events, all writes are blocked — check if the event is finalized.</p>
+        </div>
+        <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+          <p className="text-[10px] font-black text-red-800 uppercase">Q: "Batch generated but upload failed"</p>
+          <p className="text-[10px] font-medium text-red-700 mt-1">A: The PDF was still produced — the preview panel lets you <strong>Print/Download immediately</strong>; the batch is flagged "failed" and you can regenerate later to re-upload. Often caused by slow venue Wi-Fi timing out.</p>
+        </div>
+        <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+          <p className="text-[10px] font-black text-red-800 uppercase">Q: The A6 badge prints on A4 paper!</p>
+          <p className="text-[10px] font-medium text-red-700 mt-1">A: Use the app's <strong>Print</strong> button (not the browser Ctrl+P) — it locks the paper to A6 (105×148mm). If your printer driver overrides it, pick "A6" or "Actual size" in the dialog.</p>
         </div>
       </div>
     ),
@@ -980,7 +1046,7 @@ const UserManualModule = () => {
             <p className="text-sm font-bold text-gray-500 uppercase tracking-[0.3em]">{activeTab === 'manual' ? 'Events Management System (EMS)' : 'Scenario-Based Workflow & Procedures'}</p>
             <div className="mt-6 flex justify-center gap-4">
               <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">FGBMFI Nigeria</span>
-              <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">{activeTab === 'manual' ? 'Version 3.0' : 'Volunteer Handout'}</span>
+              <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-[10px] font-black uppercase border border-blue-100">{activeTab === 'manual' ? 'Version 3.1' : 'Volunteer Handout'}</span>
             </div>
           </div>
 
@@ -992,7 +1058,7 @@ const UserManualModule = () => {
 
           <div className="print-only mt-20 pt-10 border-t border-gray-100 flex justify-between text-[9px] font-black uppercase text-gray-400 tracking-widest">
             <span>© 2025 FGBMFI Nigeria EMS</span>
-            <span>Document: EMS-USER-V3.0</span>
+            <span>Document: EMS-USER-V3.1</span>
             <span>System Training &amp; Operations Reference</span>
           </div>
         </div>
