@@ -6,6 +6,11 @@ export interface BadgeImageOptions {
   showRank: boolean;
   showOffice: boolean;
   feeCategory?: FeeCategory;
+  // v1.65-fix: card size in mm (default 65×90.8mm e-badge; A6 desk print = 100×139.7).
+  sizeMm?: { width: number; height: number };
+  // A6 shell print: content only (banner + footer are PRE-PRINTED) — skip the
+  // design PNG and use the PDF's V2_ZONES so overlay aligns with the shell.
+  includeDesign?: boolean;
 }
 
 export interface BadgeImageResult {
@@ -44,7 +49,7 @@ export const generateBadgeImage = async (delegate: Delegate, options: BadgeImage
   await QRCode.toCanvas(qrCanvas, delegate.qr_hash, { width: 400, margin: 1, color: { dark: '#1e3a5f' } });
   const qrUrl = qrCanvas.toDataURL('image/png');
 
-  const bannerUrl = await fetchBadgeBanner();
+  const bannerUrl = options.includeDesign !== false ? await fetchBadgeBanner() : '';
 
   const badgeUrl = await renderBadgeCanvas(delegate, qrUrl, bannerUrl, options);
   return { badgeUrl, qrUrl, bannerUrl };
@@ -79,11 +84,14 @@ const wrapCanvasText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: n
 };
 
 const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDataUrl: string, options: BadgeImageOptions): Promise<string> => {
-  const { showRank, showOffice, feeCategory } = options;
+  const { showRank, showOffice, feeCategory, sizeMm, includeDesign } = options;
   const mmToPx = 3.779527559;
   const scale = 3;
-  const bw = Math.round(65 * mmToPx);
-  const bh = Math.round(90.8 * mmToPx);
+  const s = sizeMm || { width: 65, height: 90.8 };
+  const bw = Math.round(s.width * mmToPx);
+  const bh = Math.round(s.height * mmToPx);
+  // Scale font/metrics when drawing a larger card (A6 = 100/65 ≈ 1.538×).
+  const k = s.width / 65;
   const canvas = document.createElement('canvas');
   canvas.width = bw * scale;
   canvas.height = bh * scale;
@@ -95,7 +103,12 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   // Canvas-local zones: the 12px canvas name is ~2 lines taller than the PDF's
   // 9.5pt one, so the name block + details band sit 2 lines lower than the
   // shared V2_ZONES to clear the design's baked-in "Theme" line.
-  const z = { ...V2_ZONES, nameTop: 0.542, nameBottom: 0.659, detailsTop: 0.670, rowBottom: 0.877 };
+  // A6 SHELL print (no design) uses the PDF's V2_ZONES verbatim so the overlay
+  // aligns with the pre-printed banner/footer geometry.
+  const isShellPrint = includeDesign === false;
+  const z = isShellPrint
+    ? { ...V2_ZONES }
+    : { ...V2_ZONES, nameTop: 0.542, nameBottom: 0.659, detailsTop: 0.670, rowBottom: 0.877 };
 
   if (designDataUrl) {
     try {
@@ -111,19 +124,19 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     } catch {}
   }
 
-  const nameSize = 12;
-  const labelSize = 7;
-  const fieldSize = 8;
+  const nameSize = 12 * k;
+  const labelSize = 7 * k;
+  const fieldSize = 8 * k;
 
   // Name — centered at the top of the white panel
   const fullName = [delegate.title, delegate.first_name, delegate.last_name].filter(Boolean).join(' ').toUpperCase();
-  const nameMaxW = bw - 8;
+  const nameMaxW = bw - 8 * k;
   const nameTop = yFromTop(z.nameTop);
   const nameBottom = yFromTop(z.nameBottom);
   const nameAvail = nameBottom - nameTop;
   let nameFontSize = nameSize;
   let nameLines: string[] = [];
-  const minNameSize = 8;
+  const minNameSize = 8 * k;
   for (let fs = nameFontSize; fs >= minNameSize; fs -= 0.5) {
     ctx.font = 'bold ' + fs + 'px sans-serif';
     const lines = wrapCanvasText(ctx, fullName, nameMaxW);
@@ -160,7 +173,7 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   const bandBot = yFromTop(z.rowBottom);
   const bandHgt = bandBot - bandTop;
 
-  const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92);
+  const qrSize = Math.min(bw * (V2_ZONES.qrX1 - V2_ZONES.qrX0), bandHgt * 0.92, mmToPx * 30);
   const qrX = bw * V2_ZONES.qrCX - qrSize / 2;
   const qrY = bandTop + (bandHgt - qrSize) / 2;
   if (qrDataUrl) {
@@ -184,19 +197,19 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
   let idValueFont = fieldSize;
   let idLabelFont = labelSize;
   if (fields[2] && fields[2][0] === 'ID') {
-    idValueFont = Math.max(5, fieldSize - 1);
-    idLabelFont = Math.max(4, labelSize - 1);
+    idValueFont = Math.max(5 * k, fieldSize - 1 * k);
+    idLabelFont = Math.max(4 * k, labelSize - 1 * k);
     const idValue = fields[2][1];
     ctx.font = 'bold ' + idLabelFont + 'px sans-serif';
     const idLW = ctx.measureText('ID: ').width;
     ctx.font = 'bold ' + idValueFont + 'px sans-serif';
-    while (ctx.measureText(idValue).width > detailW - idLW - 2 && idValueFont > 4.5) {
+    while (ctx.measureText(idValue).width > detailW - idLW - 2 * k && idValueFont > 4.5 * k) {
       idValueFont -= 0.25;
       ctx.font = 'bold ' + idValueFont + 'px sans-serif';
     }
   }
 
-  const lineGap = 14;
+  const lineGap = 14 * k;
   const totalFields = fields.length;
   const blocked = totalFields * lineGap;
   let textY = bandTop + (bandHgt - blocked) / 2 + lineGap * 0.5;
@@ -217,23 +230,30 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     textY += lineGap;
   }
 
-  // v1.65: EARLY BIRD / REGULAR fee stamp in the design's bottom-left slashed box
+  // v1.65-fix: the design PNG bakes a bold 'EARLY BIRD' in the bottom-left box.
+  // Early Bird keeps the baked text (nothing drawn on top). REGULAR neutralizes
+  // the box with the design navy (#003040) then prints the white 'REGULAR'.
   const stampTop = yFromTop(z.stampY0);
   const stampBot = yFromTop(z.stampY1);
   const stampH = stampTop - stampBot;
   const stampX = bw * z.stampX0;
   const stampW = bw * (z.stampX1 - z.stampX0);
-  const stampLabel = feeCategory ? FEE_CATEGORY_LABELS[feeCategory] : 'EARLY BIRD';
-  let stampSize = 9;
-  ctx.font = 'bold ' + stampSize + 'px sans-serif';
-  while (stampSize > 5 && ctx.measureText(stampLabel).width > stampW - 3) {
-    stampSize -= 0.25;
+  if (isShellPrint || feeCategory === 'regular') {
+    const stampLabel = feeCategory ? FEE_CATEGORY_LABELS[feeCategory] : 'REGULAR';
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#003040';
+    ctx.fillRect(stampX, stampTop, stampW, stampH);
+    let stampSize = 9 * k;
     ctx.font = 'bold ' + stampSize + 'px sans-serif';
+    while (stampSize > 5 * k && ctx.measureText(stampLabel).width > stampW - 3 * k) {
+      stampSize -= 0.25;
+      ctx.font = 'bold ' + stampSize + 'px sans-serif';
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(stampLabel, stampX + stampW / 2, stampBot + stampH / 2 + stampSize * 0.35, stampW);
+    ctx.textAlign = 'left';
   }
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
-  ctx.fillText(stampLabel, stampX + stampW / 2, stampBot + stampH / 2 + stampSize * 0.35, stampW);
-  ctx.textAlign = 'left';
 
   return canvas.toDataURL('image/png');
 };

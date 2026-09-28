@@ -8,11 +8,18 @@ import { createClient } from '@supabase/supabase-js';
 // Callers that pass their own AbortSignal (e.g. image fetches with 5s timeouts)
 // are not overridden.
 const FETCH_TIMEOUT_MS = 25_000;
+// Body-bearing requests (storage uploads of badge PDFs, multipart payloads) can
+// legitimately take far longer than a plain JSON query on venue Wi-Fi — a 25s cap
+// aborts them mid-flight (Firefox: "signal is aborted without reason").
+const FETCH_TIMEOUT_MS_BODY = 120_000;
 const _originalFetch = globalThis.fetch.bind(globalThis);
+const abortWithReason = (controller: AbortController, ms: number) =>
+  controller.abort(new DOMException(`Fetch timed out after ${ms}ms`, 'TimeoutError'));
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     if (init && init.signal) return _originalFetch(input, init);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeoutMs = init && init.body != null ? FETCH_TIMEOUT_MS_BODY : FETCH_TIMEOUT_MS;
+    const timer = setTimeout(() => abortWithReason(controller, timeoutMs), timeoutMs);
     return _originalFetch(input, init ? { ...init, signal: controller.signal } : { signal: controller.signal }).finally(() => clearTimeout(timer));
 };
 

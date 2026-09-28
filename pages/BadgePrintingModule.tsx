@@ -409,6 +409,8 @@ const BadgePrintingModule = () => {
 
         const batchDelegates = runBatches[batchIdx];
         const idxOffset = batchIdx * batchSize;
+        let currentBatchId: string | null = null;
+        let currentBatchNumber = 0;
 
         console.log('[BadgePrinting] generating batch', batchIdx + 1, 'of', runBatches.length, 'delegates:', batchDelegates.length, 'layout:', layout);
         const pdfBytes = await generateBadgePDF(
@@ -454,6 +456,8 @@ const BadgePrintingModule = () => {
             generated_by: user.id,
             fee_category: feeCategory,
           });
+          currentBatchId = batch.batch_id;
+          currentBatchNumber = batch.batch_number;
 
           const districtSlug = (filters.district || 'All-Districts')
             .replace(/[^a-zA-Z0-9]/g, '-')
@@ -486,9 +490,23 @@ const BadgePrintingModule = () => {
           setPdfPreviewUrl(previewUrl);
         } catch (uploadErr: any) {
           hasError = true;
+          // The PDF was generated fine — keep it printable/downloadable right
+          // now; only the storage upload failed (e.g. network stall past the
+          // 120s body timeout). Flag the batch 'failed' so it is never left
+          // stuck in 'generating' and shows a Reprint action in the queue.
+          if (currentBatchId) { try { await db.updateBadgeBatchStatus(currentBatchId, 'failed'); } catch {} }
+          setGeneratedPdfBytes(pdfBytes);
+          setGeneratedBatchId(currentBatchId || '');
+          setGeneratedBatchNumber(currentBatchNumber);
+          setGeneratedBatchDistrict(filters.district || '');
+          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const previewUrl = URL.createObjectURL(blob);
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = previewUrl;
+          setPdfPreviewUrl(previewUrl);
           setFeedback({
             type: 'error',
-            msg: `Batch ${batchIdx + 1} generated but upload failed: ${uploadErr.message}`,
+            msg: `Batch ${batchIdx + 1} generated, but the storage upload failed (${uploadErr.message}). You can still print/download below — regenerate to re-upload.`,
           });
         }
       }
@@ -772,7 +790,7 @@ const BadgePrintingModule = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-black text-blue-900 uppercase tracking-tighter">
-            Badge Printing
+            Batch Badge Printing
           </h1>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
             Production badge generation for commercial printing

@@ -89,6 +89,8 @@ const HEADER_STRIP_BG = rgb(0.027, 0.000, 0.000);
 // box and dark bands; STAMP_DARK renders code-chosen against light bands.
 const STAMP_LIGHT = rgb(1, 1, 1);
 const STAMP_DARK = rgb(0.06, 0.09, 0.16);
+// v1.65-fix: design navy #003040 — erases the baked 'EARLY BIRD' under REGULAR.
+const STAMP_BOX_FILL = rgb(0, 0.188, 0.251);
 const DESIGN_V2_ASPECT = 0.716; // badge-design-v2.png 1207x1686 fallback
 
 // Auto-fit uppercase stamp text ("EARLY BIRD" / "REGULAR") inside a box.
@@ -327,7 +329,8 @@ function drawV2Content(
   font: any,
   feeCategory: FeeCategory,
   showRank: boolean,
-  showOffice: boolean
+  showOffice: boolean,
+  overpaintAlways: boolean = false
 ) {
   const yFromTop = (f: number) => imgY + imgH * (1 - f);
   const isLarge = bw >= mmToPt(70);
@@ -409,7 +412,15 @@ function drawV2Content(
   const sBoxH = Math.max(mmToPt(2), sTop - sBot);
   const sX = badgeLeft + bw * V2_ZONES.stampX0;
   const sW = Math.max(mmToPt(4), bw * (V2_ZONES.stampX1 - V2_ZONES.stampX0));
-  drawStampText(page, sX, sBot, sW, sBoxH, FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD', fontBold, STAMP_LIGHT);
+  // v1.65-fix: the design bakes a bold 'EARLY BIRD' in the box. Early Bird keeps
+  // it (skip drawing — no double stamp). REGULAR erases it by overpainting the
+  // box with the design navy then draws white 'REGULAR'. The A6 shell
+  // (overpaintAlways) always overpaints + draws — its pre-printed stock may or
+  // may not carry baked text, neutralization is safe either way.
+  if (overpaintAlways || feeCategory === 'regular') {
+    page.drawRectangle({ x: sX, y: sBot, width: sW, height: sBoxH, color: STAMP_BOX_FILL });
+    drawStampText(page, sX, sBot, sW, sBoxH, FEE_CATEGORY_LABELS[feeCategory] || 'EARLY BIRD', fontBold, STAMP_LIGHT);
+  }
 }
 
 function drawBadge(
@@ -483,7 +494,7 @@ function drawBadge(
     } else {
       imgY = badgeBottom + (bh - imgH) / 2;
     }
-    drawV2Content(page, delegate, badgeLeft, badgeBottom, bw, bh, imgY, imgH, event, fontBold, font, feeCategory, showRank, showOffice);
+    drawV2Content(page, delegate, badgeLeft, badgeBottom, bw, bh, imgY, imgH, event, fontBold, font, feeCategory, showRank, showOffice, true);
     return;
   }
 

@@ -124,7 +124,7 @@ case UserRole.FINANCE: return 'Finance Admin';
              )}
              {showBadgeModule && (
                 <Link to="/admin/badges" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/badges')}`}>
-                  Badge Printing
+                  Batch Badge Printing
                 </Link>
              )}
              {showFinanceModule && (

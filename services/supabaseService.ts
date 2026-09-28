@@ -3336,12 +3336,17 @@ export const db = {
             }
         } catch {}
 
-        const { data, error } = await supabase.storage
-            .from(bucketName)
-            .upload(fileName, pdfBytes, {
-                contentType: 'application/pdf',
-                upsert: true,
-            });
+        // The global fetch net now applies a 120s timeout to body-bearing uploads
+        // (supabaseClient.ts), and withRetry re-issues after transient
+        // network/abort blips — a badge-PDF upload can no longer die at 25s.
+        const { data, error } = await withRetry(() =>
+            supabase.storage
+                .from(bucketName)
+                .upload(fileName, pdfBytes, {
+                    contentType: 'application/pdf',
+                    upsert: true,
+                })
+        );
         handleSupabaseError({ data, error }, 'Failed to upload badge PDF');
 
         const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(fileName);

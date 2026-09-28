@@ -4,6 +4,7 @@ import { db } from '../services/supabaseService';
 import { Delegate, FeeCategory, getScopeFilter, isAdminRole, isEventAdminRole } from '../types';
 import { AppContext } from '../context/AppContext';
 import { generateSingleBadgePDF } from '../services/badgePdfGenerator';
+import { generateBadgeImage } from '../services/badgeImageGenerator';
 
 const IndividualBadgePrint = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -14,6 +15,9 @@ const IndividualBadgePrint = () => {
   const isLocked = activeEvent?.is_active === false;
   // Repairing the external_id needs delegates UPDATE RLS — admin/event_admin only.
   const canRepairExternalId = isAdminRole(user?.role || '') || isEventAdminRole(user?.role || '');
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
@@ -24,9 +28,20 @@ const IndividualBadgePrint = () => {
   const [generating, setGenerating] = useState(false);
   const [generatedPdfBytes, setGeneratedPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  // Content-only A6 canvas image used by the @page-locked Print (the banner +
+  // footer zones are pre-printed on the shell, so the design is omitted).
+  const [a6PrintImageUrl, setA6PrintImageUrl] = useState<string>('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  const handleClose = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.hash = '#/register-new';
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -121,6 +136,21 @@ const IndividualBadgePrint = () => {
       setGeneratedPdfBytes(pdfBytes);
       setPdfPreviewUrl(previewUrl);
 
+      // Content-only 100×140mm canvas (no design — shell banner/footer are
+      // pre-printed) used by the @page A6 print.
+      try {
+        const { badgeUrl: a6Image } = await generateBadgeImage(target, {
+          showRank,
+          showOffice,
+          feeCategory,
+          sizeMm: { width: 100, height: 139.7 },
+          includeDesign: false,
+        });
+        setA6PrintImageUrl(a6Image);
+      } catch {
+        setA6PrintImageUrl('');
+      }
+
       setFeedback({
         type: 'success',
         msg: `A6 badge generated for ${target.title} ${target.first_name} ${target.last_name} — ${feeCategory === 'early_bird' ? 'EARLY BIRD' : 'REGULAR'}. Print on the pre-cut A6 stock.`,
@@ -136,12 +166,19 @@ const IndividualBadgePrint = () => {
   };
 
   const handlePrint = () => {
-    if (!pdfPreviewUrl) return;
+    if (!a6PrintImageUrl && !pdfPreviewUrl) return;
     const fileName = buildFileName();
     const originalTitle = document.title;
     document.title = fileName;
-    const iframe = document.querySelector('iframe[title="A6 Badge PDF Preview"]') as HTMLIFrameElement | null;
-    iframe?.contentWindow?.print();
+    // Preferred: print the content-only A6 canvas at 100×140mm via a hidden
+    // print node whose @page rule locks the OS dialog to A6 (105×148mm). The
+    // banner + footer are pre-printed on the shell. Falls back to the PDF iframe.
+    if (a6PrintImageUrl) {
+      window.print();
+    } else {
+      const iframe = document.querySelector('iframe[title="A6 Badge PDF Preview"]') as HTMLIFrameElement | null;
+      iframe?.contentWindow?.print();
+    }
     window.addEventListener('afterprint', () => { document.title = originalTitle; }, { once: true });
     setTimeout(() => { document.title = originalTitle; }, 15000);
   };
@@ -177,7 +214,8 @@ const IndividualBadgePrint = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <>
+    <div className="space-y-6 print:hidden">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-black text-blue-900 uppercase tracking-tighter">
@@ -187,6 +225,12 @@ const IndividualBadgePrint = () => {
             A6 desk printing — pre-cut A6 stock, banner + footer pre-printed
           </p>
         </div>
+        <button
+          onClick={handleClose}
+          className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95"
+        >
+          Close
+        </button>
       </div>
 
       {isLocked && (
@@ -353,6 +397,21 @@ const IndividualBadgePrint = () => {
         </div>
       )}
     </div>
+
+    {a6PrintImageUrl && (
+      <div className="hidden print:block">
+        <style>{`@media print {
+              @page { size: 105mm 148mm; margin: 0; }
+              html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
+            }`}</style>
+        <img
+          src={a6PrintImageUrl}
+          alt="A6 Badge"
+          style={{ width: '100mm', height: '140mm', display: 'block', margin: '0 auto', boxShadow: 'none' }}
+        />
+      </div>
+    )}
+    </>
   );
 };
 
