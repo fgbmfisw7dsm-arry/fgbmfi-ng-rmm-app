@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.59 (Financial Write Resilience: withRetry + global fetch timeout + idempotent entry_id/id + record_financial_entry RPC + inline status banner)
+- **Current Version:** 1.60 (EMS Delegate-Type → Guest District/Chapter Locking + field reorder + REQUIRED placeholders)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -874,6 +874,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - `createPledge` stays on the hardened classic path (retry + idempotent `id` only) — the offering/RPC pattern can be extended to pledges later if needed.
 - **Diagnostics (FinancialsPage):** `submitTransaction`/`submitPledge`/`submitRedemption` now write timing + errors to the console (`[submitTransaction] OK/FAILED`, `[submitTransaction] OK in Nms`, `[createPledge]`, `[addFinancialEntry]`) and surface success/error via a dismissible **inline status banner** (green/red, replaces the success `alert()`s and unmissable-blocking failure dialogs). Validation messages (invalid amount, missing fields) also route to the banner.
 - **Known trade-offs:** (1) a 25s global fetch timeout now applies to Supabase storage downloads too (badge PDFs) — acceptable safety net; large downloads on very slow links will error instead of hanging. (2) The idempotent RPC is scoped to `financial_entries`; a manual user re-click after a response-lost save is treated as a NEW record (correct for the offering workflow). (3) `tsc --noEmit` still reports the 4 pre-existing non-blocking warnings; `npm run build` passes.
+
+## 57. EMS Delegate-Type → Guest District/Chapter Locking + Field Reorder (v1.60)
+
+- **Problem solved (data-entry speed, Sep 2026):** the Delegate Type field was the LAST field on the New Delegate Entry form, so officers filled District/Chapter before knowing the type. Registering a guest (any non-Member, non-Dependant type) required manual District/Chapter entry when the system already routes them. Also, required fields lacked a consistent "REQUIRED" placeholder cue.
+- **Open-ended guest family — no fixed list:** `isGuestRoutedType(type)` (`NewDelegatePage.tsx` + `supabaseService.ts`) = any delegate type that is **not `Member`** and **not `Dependant-*`**. Free Guest, National Guest, International, Facilitator, Vendor, Support, and ANY future type added in System Setup automatically lock — **zero code changes for new types**. `Dependants` are an explicit exception (keep their entered District/Chapter).
+- **Lock rule:** a guest type locks **District AND Chapter**. **Chapter** always → `Guest` (`FREE_GUEST_CHAPTER`). **District** → `system_settings.delegate_type_districts[type]` if mapped; fallback `International` (only for the International type) / `Guest` for everything else unmapped (`typeLockedDistrict()`, shared form+service helper preserving v1.50/§48 map-driven routing + rename cascade). `Member` → District/Chapter dropdowns (unchanged).
+- **Field reorder:** `NewDelegatePage.tsx` moved the Delegate Type field to immediately after **Last Name** (before District), so selecting a type instantly locks District/Chapter (teal "Routed" chips, amber "Free Guest" chips for restricted registrars). Type-change effect force-syncs `district`/`chapter` for guest types and clears a stale `Guest` chapter when switching back to Member/Dependant. Submit payload force-sets both fields; `isDistrictScoped` override stays last.
+- **Service defense-in-depth (`registerDelegate` emit, `supabaseService.ts`):** the `FORCED_TYPE_DISTRICTS` throw-if-unconfigured branch became `isGuestRoutedType` → `district = getConfiguredTypeDistrict(type) || fallback`, `chapter='Guest'`. Sole caller is the EMS form; QR quick-register/import/reconcile paths untouched (`FORCED_TYPE_DISTRICTS` kept for `canonicalizeDistrict`).
+- **REQUIRED placeholders:** required fields render `placeholder="REQUIRED"` — Phone, Email, Payment Amount, Payment Reference (when their per-type required flag is true; contextual hints like `803...`/`email@example.com`/`0.00`/`e.g. BANK-2026-0001` kept when optional). First/Last Name already had it.
+- **Registration Source = EMS:** already live (page sends `registration_source:'EMS'`, v1.55 CHECK includes `'EMS'`) — no change; verify the deployed CHECK before first use.
+- **Non-disruption:** `types.ts`, `supabaseClient.ts`, `CheckInPage`, `ImportModule`, `DataModule`, `MasterList`, `Reports`, `Financials`, `BadgePrinting`, Setup routing/rename cascade, RLS (`delegates_insert_scoped`) — all untouched. Per-type required-field rules (`requiredFor`/`event_config.required_fields`) unchanged. Frontend-only; the routing fallback relies on the existing `delegate_type_districts` map. `tsc --noEmit` still reports the 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 

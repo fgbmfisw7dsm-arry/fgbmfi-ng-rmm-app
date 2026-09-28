@@ -8,7 +8,12 @@ import CountryDialSelect from '../components/CountryDialSelect';
 // Fallback defaults in case settings table is empty
 const DEFAULT_TITLES = ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'];
 const FREE_GUEST_CHAPTER = 'Guest';
-const ROUTED_TYPES = ['Free Guest', 'National Guest', 'International'];
+// Open-ended guest family: ANY delegate type that is not 'Member' or a 'Dependant-*'
+// locks District + Chapter (fallback Guest, International → International).
+const isGuestRoutedType = (type?: string): boolean => {
+    const t = (type || '').trim().toLowerCase();
+    return t !== '' && t !== 'member' && !t.startsWith('dependant');
+};
 
 // v1.55 (EMS): default required-field rules per delegate type, effective for
 // the current live event. Overridable per event from Events & Config ->
@@ -74,9 +79,20 @@ const NewDelegatePage = () => {
   const [typeDistrictMap, setTypeDistrictMap] = useState<Record<string, string>>({});
 
   const routedDistrict = (type?: string): string => (((typeDistrictMap || {})[(type || '').trim()] || '').trim());
-  const forcedTypeRouted = ROUTED_TYPES.includes(form.delegate_type || '') ? routedDistrict(form.delegate_type || '') : '';
-  const districtLocked = freeGuestLocked || isDistrictScoped || (ROUTED_TYPES.includes(form.delegate_type || '') && !!forcedTypeRouted);
-  const displayedDistrict = freeGuestLocked ? (routedDistrict('Free Guest') || form.district) : (forcedTypeRouted || form.district);
+  const typeLockedDistrict = (type?: string): string => {
+    const t = (type || '').trim();
+    const mapped = routedDistrict(t);
+    if (mapped) return mapped;
+    if (!isGuestRoutedType(t)) return '';
+    return t.toLowerCase() === 'international' ? 'International' : FREE_GUEST_CHAPTER;
+  };
+  const guestRouted = isGuestRoutedType(form.delegate_type);
+  const forcedTypeDistrict = guestRouted ? typeLockedDistrict(form.delegate_type) : '';
+  const districtLocked = freeGuestLocked || isDistrictScoped || guestRouted;
+  const chapterLocked = freeGuestLocked || guestRouted;
+  const displayedDistrict = freeGuestLocked
+    ? (typeLockedDistrict('Free Guest') || form.district)
+    : (isDistrictScoped && !freeGuestLocked ? (user?.district || form.district) : (forcedTypeDistrict || form.district));
   
   const [successData, setSuccessData] = useState<{
     id: string;
@@ -94,14 +110,17 @@ const NewDelegatePage = () => {
 
 useEffect(() => {
     if (freeGuestLocked) {
-        setForm(prev => ({ ...prev, delegate_type: 'Free Guest', district: routedDistrict('Free Guest'), chapter: FREE_GUEST_CHAPTER }));
+        setForm(prev => ({ ...prev, delegate_type: 'Free Guest', district: typeLockedDistrict('Free Guest'), chapter: FREE_GUEST_CHAPTER }));
     }
 }, [freeGuestLocked, typeDistrictMap]);
 
 useEffect(() => {
-    if (!freeGuestLocked && ROUTED_TYPES.includes(form.delegate_type || '')) {
-        const d = routedDistrict(form.delegate_type || '');
+    if (!freeGuestLocked && isGuestRoutedType(form.delegate_type)) {
+        const d = typeLockedDistrict(form.delegate_type || '');
         if (d && form.district !== d) setForm(prev => ({ ...prev, district: d }));
+        if (form.chapter !== FREE_GUEST_CHAPTER) setForm(prev => ({ ...prev, chapter: FREE_GUEST_CHAPTER }));
+    } else if (form.chapter === FREE_GUEST_CHAPTER && !freeGuestLocked) {
+        setForm(prev => ({ ...prev, chapter: '' }));
     }
 }, [form.delegate_type, typeDistrictMap, freeGuestLocked]);
 
@@ -176,11 +195,12 @@ useEffect(() => {
         };
         if (freeGuestLocked) {
             payload.delegate_type = 'Free Guest';
-            payload.district = routedDistrict('Free Guest') || form.district;
+            payload.district = typeLockedDistrict('Free Guest') || form.district;
             payload.chapter = FREE_GUEST_CHAPTER;
-        } else if (ROUTED_TYPES.includes(payload.delegate_type || '')) {
-            const d = routedDistrict(payload.delegate_type || '');
-            if (d) payload.district = d;
+        } else if (isGuestRoutedType(payload.delegate_type)) {
+            const t = payload.delegate_type || '';
+            payload.district = typeLockedDistrict(t) || form.district;
+            payload.chapter = FREE_GUEST_CHAPTER;
         }
         if (isDistrictScoped && !freeGuestLocked) payload.district = user.district;
 
@@ -214,7 +234,7 @@ useEffect(() => {
 
         setForm({ 
             title: availableTitles[0] || 'Mr', first_name: '', last_name: '', phone: '', email: '', 
-            district: freeGuestLocked ? (routedDistrict('Free Guest') || '') : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
+            district: freeGuestLocked ? (typeLockedDistrict('Free Guest') || '') : (isDistrictScoped ? user?.district : ''), chapter: freeGuestLocked ? FREE_GUEST_CHAPTER : '', rank: 'CP', office: 'OTHER', delegate_type: freeGuestLocked ? 'Free Guest' : 'Member'
         });
         setPaymentAmount('');
         setPaymentRef('');
@@ -334,9 +354,25 @@ useEffect(() => {
                     <input required className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="REQUIRED" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} />
                 </div>
 
+                {showDelegateType && (
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Delegate Type</label>
+                    {freeGuestLocked ? (
+                        <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
+                            <span className="font-black text-amber-800 uppercase">Free Guest</span>
+                            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
+                        </div>
+                    ) : (
+                        <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.delegate_type} onChange={e => setForm({...form, delegate_type: e.target.value})}>
+                            {availableDelegateTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                        </select>
+                    )}
+                </div>
+                )}
+
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                    {freeGuestLocked ? 'District (Free Guest)' : (districtLocked ? 'District (Routed)' : (isDistrictScoped ? 'District (Auto-Assigned)' : 'District *'))}
+                    {freeGuestLocked ? 'District (Free Guest)' : (isDistrictScoped ? 'District (Auto-Assigned)' : (districtLocked ? 'District (Routed)' : 'District *'))}
                     </label>
                     {districtLocked ? (
                     <div className={`w-full p-4 border-2 rounded-2xl flex items-center justify-between ${freeGuestLocked ? 'border-amber-100 bg-amber-50' : isDistrictScoped ? 'border-blue-50 bg-blue-50' : 'border-teal-100 bg-teal-50'}`}>
@@ -351,11 +387,16 @@ useEffect(() => {
                     )}
                 </div>
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Chapter</label>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{freeGuestLocked ? 'Chapter (Free Guest)' : (chapterLocked ? 'Chapter (Routed)' : 'Chapter')}</label>
                     {freeGuestLocked ? (
                         <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
                             <span className="font-black text-amber-800 uppercase">{FREE_GUEST_CHAPTER}</span>
                             <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
+                        </div>
+                    ) : chapterLocked ? (
+                        <div className="w-full p-4 border-2 border-teal-100 rounded-2xl bg-teal-50 flex items-center justify-between">
+                            <span className="font-black text-teal-800 uppercase">{FREE_GUEST_CHAPTER}</span>
+                            <span className="text-[8px] font-black text-teal-500 uppercase tracking-widest">Locked</span>
                         </div>
                     ) : chapters.length > 0 ? (
                         <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.chapter} onChange={e => setForm({...form, chapter: e.target.value})}>
@@ -370,23 +411,23 @@ useEffect(() => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqPhone ? 'Phone *' : 'Phone'}</label>
                     <div className="flex flex-wrap gap-2">
                         <CountryDialSelect value={dialCode} onChange={setDialCode} />
-                        <input required={reqPhone} type="tel" className="flex-1 min-w-[14ch] p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="803..." value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+                        <input required={reqPhone} type="tel" className="flex-1 min-w-[14ch] p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder={reqPhone ? 'REQUIRED' : '803...'} value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
                     </div>
                 </div>
 
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqEmail ? 'Email Address *' : 'Email Address'}</label>
-                    <input required={reqEmail} type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="email@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                    <input required={reqEmail} type="email" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder={reqEmail ? 'REQUIRED' : 'email@example.com'} value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                 </div>
                 {showPaymentFields && (
                 <>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqAmount ? 'Payment Amount (₦) *' : 'Payment Amount (₦)'}</label>
-                    <input required={reqAmount} type="number" min="0" step="0.01" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder="0.00" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+                    <input required={reqAmount} type="number" min="0" step="0.01" className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" placeholder={reqAmount ? 'REQUIRED' : '0.00'} value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{reqRef ? 'Payment Reference *' : 'Payment Reference'}</label>
-                    <input required={reqRef} className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder="e.g. BANK-2026-0001" value={paymentRef} onChange={e => setPaymentRef(e.target.value)} />
+                    <input required={reqRef} className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black uppercase outline-none focus:bg-white focus:border-blue-500" placeholder={reqRef ? 'REQUIRED' : 'e.g. BANK-2026-0001'} value={paymentRef} onChange={e => setPaymentRef(e.target.value)} />
                 </div>
                 </>
                 )}
@@ -404,21 +445,6 @@ useEffect(() => {
                     <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.office} onChange={e => setForm({...form, office: e.target.value})}>
                         {availableOffices.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
-                </div>
-                )}
-                {showDelegateType && (
-                <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Delegate Type</label>
-                    {freeGuestLocked ? (
-                        <div className="w-full p-4 border-2 border-amber-100 rounded-2xl bg-amber-50 flex items-center justify-between">
-                            <span className="font-black text-amber-800 uppercase">Free Guest</span>
-                            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Locked</span>
-                        </div>
-                    ) : (
-                        <select className="w-full p-4 border-2 border-gray-50 rounded-2xl bg-gray-50 font-black outline-none focus:bg-white focus:border-blue-500" value={form.delegate_type} onChange={e => setForm({...form, delegate_type: e.target.value})}>
-                            {availableDelegateTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
-                        </select>
-                    )}
                 </div>
                 )}
 

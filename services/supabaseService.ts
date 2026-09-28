@@ -14,6 +14,17 @@ const normalize = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
 const LEGACY_GUEST_DISTRICT_RE = /national\/external|international\/external|international\/guest/i;
 
 const FORCED_TYPE_DISTRICTS: Readonly<string[]> = ['Free Guest', 'National Guest', 'International'];
+// Open-ended guest family (EMS form): any delegate type that is not 'Member' or a
+// 'Dependant-*' locks District + Chapter. FORCED_TYPE_DISTRICTS stays for the QR path.
+const isGuestRoutedType = (type?: string): boolean => {
+    const t = (type || '').trim().toLowerCase();
+    return t !== '' && t !== 'member' && !t.startsWith('dependant');
+};
+const typeLockedDistrict = async (type: string): Promise<string> => {
+    const routed = await db.getConfiguredTypeDistrict(type.trim());
+    if (routed) return routed;
+    return type.trim().toLowerCase() === 'international' ? 'International' : 'Guest';
+};
 
 let delegateTypeDistrictCache: { map: Record<string, string>; at: number } | null = null;
 const DELEGATE_TYPE_DISTRICT_CACHE_MS = 30_000;
@@ -1301,13 +1312,9 @@ export const db = {
             payload.chapter = 'Guest';
             if (!payload.district) throw new Error('Free Guest district not configured in System Setup.');
         }
-        if (FORCED_TYPE_DISTRICTS.includes(payload.delegate_type || '')) {
-            const routed = await db.getConfiguredTypeDistrict((payload.delegate_type as string));
-            if (routed) {
-                payload.district = routed;
-            } else {
-                throw new Error(`${payload.delegate_type} district not configured in System Setup.`);
-            }
+        if (isGuestRoutedType(payload.delegate_type)) {
+            payload.district = await typeLockedDistrict((payload.delegate_type as string) || '');
+            payload.chapter = 'Guest';
         }
         if (payload.phone) {
             const { data: candidates } = await supabase.from('delegates')
