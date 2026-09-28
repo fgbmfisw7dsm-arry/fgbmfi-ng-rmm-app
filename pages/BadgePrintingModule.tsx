@@ -20,6 +20,16 @@ const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: 'a6-single', label: 'A6 Single (100×140mm on A6 shell — banner/footer pre-printed)' },
 ];
 
+// v1.65-fix3: sanitized First_Last slug for an a6-single badge's export filename.
+const a6BatchNameOf = (delegates: Delegate[]): string => {
+  const d = delegates[0];
+  if (!d) return 'delegate';
+  return `${d.first_name || 'delegate'}_${d.last_name || ''}`
+    .replace(/[^a-zA-Z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+};
+
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
   { value: 250, label: '250 Badges' },
   { value: 500, label: '500 Badges' },
@@ -91,6 +101,10 @@ const BadgePrintingModule = () => {
   const [generatedBatchId, setGeneratedBatchId] = useState<string | null>(null);
   const [generatedBatchNumber, setGeneratedBatchNumber] = useState<number | null>(null);
   const [generatedBatchDistrict, setGeneratedBatchDistrict] = useState<string>('');
+  // v1.65-fix3: for a6-single the export/print file carries the delegate's name
+  // (mirrors Print Individual Delegate Badge).
+  const [generatedBatchName, setGeneratedBatchName] = useState<string>('');
+  const [generatedBatchDelegateCount, setGeneratedBatchDelegateCount] = useState<number>(0);
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string>('');
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [batches, setBatches] = useState<BadgeBatch[]>([]);
@@ -372,6 +386,8 @@ const BadgePrintingModule = () => {
     setGeneratedBatchId(null);
     setGeneratedBatchNumber(null);
     setGeneratedBatchDistrict('');
+    setGeneratedBatchName('');
+    setGeneratedBatchDelegateCount(0);
     setGeneratedPdfUrl('');
 
     try {
@@ -482,6 +498,8 @@ const BadgePrintingModule = () => {
           setGeneratedBatchId(batch.batch_id);
           setGeneratedBatchNumber(batch.batch_number);
           setGeneratedBatchDistrict(filters.district || '');
+          setGeneratedBatchName(layout === 'a6-single' && batchDelegates.length ? a6BatchNameOf(batchDelegates) : '');
+          setGeneratedBatchDelegateCount(layout === 'a6-single' ? batchDelegates.length : 0);
           setGeneratedPdfUrl(pdfUrl);
           const blob = new Blob([pdfBytes], { type: 'application/pdf' });
           const previewUrl = URL.createObjectURL(blob);
@@ -499,6 +517,8 @@ const BadgePrintingModule = () => {
           setGeneratedBatchId(currentBatchId || '');
           setGeneratedBatchNumber(currentBatchNumber);
           setGeneratedBatchDistrict(filters.district || '');
+          setGeneratedBatchName(layout === 'a6-single' && batchDelegates.length ? a6BatchNameOf(batchDelegates) : '');
+          setGeneratedBatchDelegateCount(layout === 'a6-single' ? batchDelegates.length : 0);
           const blob = new Blob([pdfBytes], { type: 'application/pdf' });
           const previewUrl = URL.createObjectURL(blob);
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -573,17 +593,25 @@ const BadgePrintingModule = () => {
     setGeneratedBatchId(null);
     setGeneratedBatchNumber(null);
     setGeneratedBatchDistrict('');
+    setGeneratedBatchName('');
+    setGeneratedBatchDelegateCount(0);
     setGeneratedPdfUrl('');
     setPdfPreviewUrl(null);
     setFeedback(null);
   };
 
   const buildBatchFileName = (): string => {
+    const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
+    // v1.65-fix3: a6-single exports carry the delegate's name (like Print
+    // Individual Delegate Badge) — FGBMFI_Badge_A6_<Name>[_x<count>]_<ts>.pdf
+    if (layout === 'a6-single' && generatedBatchName) {
+      const countPart = generatedBatchDelegateCount > 1 ? `_x${generatedBatchDelegateCount}` : '';
+      return `FGBMFI_Badge_A6_${generatedBatchName}${countPart}_${timestamp}.pdf`;
+    }
     const districtSlug = (generatedBatchDistrict || 'All-Districts')
       .replace(/[^a-zA-Z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
-    const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
     const batchNum = generatedBatchNumber || '0';
     return `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
   };
