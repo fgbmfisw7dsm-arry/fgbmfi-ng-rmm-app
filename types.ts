@@ -29,7 +29,9 @@ export enum FinancialType {
 export const PAYMENT_MODES = ['Cash', 'POS', 'Bank Transfer', 'Cheque'] as const;
 export type PaymentMode = typeof PAYMENT_MODES[number];
 
-export type RegType = 'manual' | 'portal' | 'web';
+// v1.61 (additive exception): 'ems' = New Delegate Entry form channel (EMS),
+// stored in delegates.reg_type to drive the Master List Source filter/export.
+export type RegType = 'manual' | 'portal' | 'web' | 'ems';
 
 // v1.55 (additive exception): per delegate-type required-field configuration,
 // stored per event in `events.event_config.required_fields`.

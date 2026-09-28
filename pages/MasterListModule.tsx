@@ -9,11 +9,12 @@ import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 25;
 
-const sourceFilterLabel = (sf: string) => sf === 'portal' ? 'Portal' : sf === 'web' ? 'Web' : sf === 'manual' ? 'Manual' : '';
+const sourceFilterLabel = (sf: string) => sf === 'portal' ? 'Portal' : sf === 'web' ? 'Web' : sf === 'ems' ? 'EMS' : sf === 'manual' ? 'Manual' : '';
 const showRegId = (d: Delegate) => d.reg_type === 'portal' || d.reg_type === 'web';
 const regBadge = (rt?: string) => {
     if (rt === 'portal') return `<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span>`;
     if (rt === 'web') return `<span class="inline-block px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span>`;
+    if (rt === 'ems') return `<span class="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span>`;
     return `<span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>`;
 };
 
@@ -58,7 +59,7 @@ const MasterListModule = () => {
     const [delegates, setDelegates] = useState<Delegate[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
-    const [sourceFilter, setSourceFilter] = useState<'portal' | 'web' | 'manual' | ''>('');
+    const [sourceFilter, setSourceFilter] = useState<'portal' | 'web' | 'manual' | 'ems' | ''>('');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -498,10 +499,11 @@ const MasterListModule = () => {
                         <option value="">All Official Districts</option>
                         {officialDistricts.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
-                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as 'portal' | 'web' | 'manual' | '')}>
+                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as 'portal' | 'web' | 'manual' | 'ems' | '')}>
                         <option value="">All Sources</option>
                         <option value="portal">Portal</option>
                         <option value="web">Web</option>
+                        <option value="ems">EMS</option>
                         <option value="manual">Manual</option>
                     </select>
                     {paymentEnabled && (
@@ -580,7 +582,7 @@ const MasterListModule = () => {
                                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
+                                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
                                                             {showPaymentCols && <>
                                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
@@ -654,7 +656,7 @@ const MasterListModule = () => {
                                             {showOffice && <td className="p-3 font-medium uppercase text-[9px]">{d.office}</td>}
                                             {showDelegateType && <td className="p-3 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
-                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
+                                            <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
                                             {showPaymentCols && <>
                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>

@@ -1021,8 +1021,10 @@ export const db = {
                 q = q.eq('reg_type', 'portal');
             } else if (source === 'web') {
                 q = q.eq('reg_type', 'web');
+            } else if (source === 'ems') {
+                q = q.eq('reg_type', 'ems');
             } else if (source === 'manual') {
-                q = q.neq('reg_type', 'portal').neq('reg_type', 'web');
+                q = q.neq('reg_type', 'portal').neq('reg_type', 'web').neq('reg_type', 'ems');
             }
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
@@ -1078,7 +1080,8 @@ export const db = {
                 .neq('district', '');
             if (source === 'portal') q = q.eq('reg_type', 'portal');
             else if (source === 'web') q = q.eq('reg_type', 'web');
-            else if (source === 'manual') q = q.neq('reg_type', 'portal').neq('reg_type', 'web');
+            else if (source === 'ems') q = q.eq('reg_type', 'ems');
+            else if (source === 'manual') q = q.neq('reg_type', 'portal').neq('reg_type', 'web').neq('reg_type', 'ems');
             const { data, error } = await q
                 .order('delegate_id')
                 .range(from, from + 999);
@@ -1345,8 +1348,8 @@ export const db = {
             ...payload,
             qr_hash: payload.qr_hash || generateQrHash(),
             external_id: payload.external_id || generateRegId(),
-            registration_source: payload.registration_source || 'manual',
-            reg_type: payload.reg_type || 'manual'
+            registration_source: payload.registration_source || 'EMS',
+            reg_type: 'ems'
         }).select().single();
         if (error) {
             if (error.code === '23505' || error.message?.includes('duplicate')) {
@@ -3279,6 +3282,7 @@ export const db = {
         await ensureEventActive(eventId);
         const updates: Partial<Delegate> = { reg_type: mode };
         if (mode === 'portal') updates.registration_source = 'portal';
+        else if (mode === 'ems') updates.registration_source = 'EMS';
         let q = supabase.from('delegates').update(updates);
         if (delegateIds && delegateIds.length > 0) {
             q = q.in('delegate_id', delegateIds);

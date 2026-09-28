@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.60 (EMS Delegate-Type → Guest District/Chapter Locking + field reorder + REQUIRED placeholders)
+- **Current Version:** 1.61 (EMS Reg Type — Master List 'EMS' Source filter)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -885,6 +885,15 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **REQUIRED placeholders:** required fields render `placeholder="REQUIRED"` — Phone, Email, Payment Amount, Payment Reference (when their per-type required flag is true; contextual hints like `803...`/`email@example.com`/`0.00`/`e.g. BANK-2026-0001` kept when optional). First/Last Name already had it.
 - **Registration Source = EMS:** already live (page sends `registration_source:'EMS'`, v1.55 CHECK includes `'EMS'`) — no change; verify the deployed CHECK before first use.
 - **Non-disruption:** `types.ts`, `supabaseClient.ts`, `CheckInPage`, `ImportModule`, `DataModule`, `MasterList`, `Reports`, `Financials`, `BadgePrinting`, Setup routing/rename cascade, RLS (`delegates_insert_scoped`) — all untouched. Per-type required-field rules (`requiredFor`/`event_config.required_fields`) unchanged. Frontend-only; the routing fallback relies on the existing `delegate_type_districts` map. `tsc --noEmit` still reports the 4 pre-existing non-blocking warnings; `npm run build` passes.
+
+## 58. EMS Reg Type — Master List 'EMS' Source filter (v1.61)
+
+- **Problem solved (Sep 2026):** the New Delegate Entry form (EMS) wrote `registration_source='EMS'` (v1.55 §53) but `reg_type` defaulted to `'manual'`, and the Master List **Source dropdown filters on `reg_type`** (v1.44 §42) — so EMS registrations were swallowed into "Manual" and the dropdown could not list EMS. Root cause: `reg_type` (the user-facing 4-value classification) was never widened for the EMS channel.
+- **Fix — 'ems' is a first-class `reg_type`:** `types.ts` `RegType` widened additively to `'manual' | 'portal' | 'web' | 'ems'` (documented additive exception, mirrors §42 precedent). `registerDelegate` (`supabaseService.ts`; sole caller = the EMS form) now stores `reg_type:'ems'` + `registration_source:'EMS'` on INSERT. **Backfill:** `supabase_migration_v1.61_ems_reg_type.sql` widens `delegates_reg_type_check` (drop+re-add, idempotent), `UPDATE ... SET reg_type='ems' WHERE registration_source='EMS'` (repairs pre-v1.61 rows), and rebuilds `get_paginated_delegates` so `p_reg_type='ems'` filters server-side and the `'manual'` predicate excludes `'ems'` (correct COUNT/pagination at 25K).
+- **Master List (`MasterListModule.tsx`):** Source dropdown = All / Portal / Web / **EMS** / Manual; `sourceFilter` state + `sourceFilterLabel` + `regBadge` + both table bodies (per-district sections + unified) render an indigo **EMS** badge; export filename label flows from `sourceFilterLabel` (unchanged plumbing). Reg ID column still shows only for `portal`/`web` (EMS rows get system-generated `CON26` ids like Manual — display unchanged).
+- **DataModule reclassify:** "Delegate Registration Source" now has a **"Mark All as EMS"** button + confirm (`handleSourceApply('ems')`); `reclassifyDelegateSource` syncs `registration_source='EMS'` when mode=`'ems'` (mirrors the portal mode sync). `getSourceDistribution` already counts by `reg_type` string → auto-includes `ems` (no change). Bulk **Import** source selector intentionally unchanged (Manual/Portal/Web only — EMS means "registered on the EMS form", not a bulk-upload classification).
+- **Fallback paths (`getPaginatedDelegates`/`getDistrictsWithDelegates`):** added `source==='ems' → eq('reg_type','ems')` and the `'manual'` fallback now `.neq('portal').neq('web').neq('ems')` — so the fallback query layer matches the rebuilt RPC.
+- **Non-disruption:** no data deletes; additive CHECK value; existing EMS rows are re-tagged by the backfill. QR quick-register (`registration_source='qr_scan'` → `reg_type` default `'manual'`), imports, reconcile, dedup, RLS (`delegates_insert_scoped` EMS≡manual, §53) all unchanged. `supabase_schema.sql` does not carry `reg_type` (pre-existing v1.44 state — feature lives in the migration only). `tsc --noEmit` → the same 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 

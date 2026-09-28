@@ -329,15 +329,17 @@ const DataModule = () => {
         }
     };
 
-    const handleSourceApply = async (mode: 'portal' | 'web' | 'manual') => {
+    const handleSourceApply = async (mode: 'portal' | 'web' | 'manual' | 'ems') => {
         if (!activeEventId) return alert("Select an active event first.");
         if (!srcBackupReady) return alert("Download the backup first.");
-        const label = mode === 'portal' ? 'Portal' : mode === 'web' ? 'Web' : 'Manual';
+        const label = mode === 'portal' ? 'Portal' : mode === 'web' ? 'Web' : mode === 'ems' ? 'EMS' : 'Manual';
         const total = srcDist?.total || 'all';
         if (mode === 'portal') {
             if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as PORTAL (registered on the FGBMFI Portal with a RegId)?\n\nOnly do this if you are certain every record in this event came from a portal export.`) ) return;
         } else if (mode === 'web') {
             if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as WEB (registered via the web portal — mainly International delegates and guests)?`)) return;
+        } else if (mode === 'ems') {
+            if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as EMS (registered on the EMS New Delegate Entry form)?`)) return;
         } else {
             if (!window.confirm(`Mark ALL ${total} delegate(s) in ${activeEvent?.name || 'the active event'} as MANUAL (registered outside the portal, no RegId)?`)) return;
         }
@@ -664,7 +666,7 @@ const DataModule = () => {
             <div className="bg-white rounded-3xl shadow-xl border-t-8 border-teal-500 overflow-hidden">
                 <div className="p-6 bg-teal-50 border-b border-teal-100">
                     <h3 className="text-lg font-black text-teal-900 uppercase">Delegate Registration Source</h3>
-                    <p className="text-[10px] font-bold text-teal-700 uppercase">Classify active-event delegates as <span className="text-teal-900">Portal</span> (registered on the FGBMFI Portal with a RegId), <span className="text-blue-700">Web</span> (mainly International delegates and guests), or <span className="text-teal-900">Manual</span> (registered outside the portal). Drives the Master List Source filter + CSV/PDF exports.</p>
+                    <p className="text-[10px] font-bold text-teal-700 uppercase">Classify active-event delegates as <span className="text-teal-900">Portal</span> (registered on the FGBMFI Portal with a RegId), <span className="text-blue-700">Web</span> (mainly International delegates and guests), <span className="text-indigo-700">EMS</span> (registered on the EMS New Delegate Entry form), or <span className="text-teal-900">Manual</span> (registered outside the portal). Drives the Master List Source filter + CSV/PDF exports.</p>
                 </div>
                 <div className="p-8 space-y-6">
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
@@ -698,7 +700,7 @@ const DataModule = () => {
                                     </span>
                                 ))}
                             </div>
-                            <p className="text-[9px] font-bold text-teal-700 uppercase">Reg Type drives the Master List Source filter. portal = Portal filter, web = Web filter, everything else = Manual filter.</p>
+                            <p className="text-[9px] font-bold text-teal-700 uppercase">Reg Type drives the Master List Source filter. portal = Portal filter, web = Web filter, ems = EMS filter, everything else = Manual filter.</p>
                         </div>
                     )}
 
@@ -735,6 +737,13 @@ const DataModule = () => {
                                 className="flex-1 py-4 bg-blue-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-blue-700 transition-all disabled:opacity-50"
                             >
                                 {srcApplying ? 'SAVING...' : 'Mark All as Web'}
+                            </button>
+                            <button
+                                onClick={() => handleSourceApply('ems')}
+                                disabled={srcApplying}
+                                className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-50"
+                            >
+                                {srcApplying ? 'SAVING...' : 'Mark All as EMS'}
                             </button>
                             <button
                                 onClick={() => handleSourceApply('manual')}
