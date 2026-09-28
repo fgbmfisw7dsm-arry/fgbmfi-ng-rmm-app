@@ -313,13 +313,14 @@ const MasterListModule = () => {
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
             const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
-            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0);
+            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0);
             const headerCells = [
                 '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
                 showRank ? '<th class="p-3">Rank</th>' : '',
                 showOffice ? '<th class="p-3">Office</th>' : '',
                 showDelegateType ? '<th class="p-3">Type</th>' : '',
                 '<th class="p-3">Phone</th><th class="p-3">Source</th><th class="p-3">Reg ID</th>',
+                showPaymentCols ? '<th class="p-3">Payment</th><th class="p-3">Payment Ref</th>' : '',
             ].join('');
             const rows = all.map((d, i) => {
                 const cells = [
@@ -334,6 +335,7 @@ const MasterListModule = () => {
                     `<td class="p-3 font-black text-gray-500 tracking-tighter">${d.phone}</td>`,
                     `<td class="p-3">${regBadge(d.reg_type)}</td>`,
                     `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (d.external_id || '-') : '-'}</td>`,
+                    showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${d.payment_reference || '—'}</td>` : '',
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');
@@ -371,6 +373,7 @@ const MasterListModule = () => {
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
             cols.push('phone', 'district', 'external_id', 'reg_type');
+            if (showPaymentCols) cols.push('payment_amount', 'payment_reference');
             exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.csv`, cols);
         } catch (err) {
             console.error('CSV export error:', err);

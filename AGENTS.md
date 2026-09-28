@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.62 (Registration Data Wipe — District + Source + Date Range)
+- **Current Version:** 1.63 (Master List Export — Payment columns when "Show Payment Details")
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -905,6 +905,14 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - `deleteWipeTargets(eventId, opts)` → `ensureEventActive()` → `delegates.delete().eq('event_id').in('reg_type', sources)[.ilike('district')].gte('created_at').lte('created_at')` → audit `delegate_training_wipe` (count + scope in summary/metadata) → returns count. **Cascade is DB-enforced** (`ON DELETE CASCADE` on `checkins`/`session_responses`/`badge_print_logs` `.delegate_id`) — attendance/alter-call/badge history dies with each delegate; `badge_batches` + storage PDFs stay intact (same as §District Master Purge).
 - **Semantics:** district omitted / `ALL_DISTRICTS_SENTINEL` = All Districts; `district` normalized + `.ilike` (matches §2283 purge). `reg_type IN (sources)`; a row's bucket is its stored `reg_type` (QR quick-register rows default `manual`, §42). Dates: page converts `YYYY-MM-DD` via `dateToISO` helper to local-day ISO bounds (`00:00:00.000` → `23:59:59.999`), inclusive. Both dates + ≥1 source required in the UI (`wipeScopeValid`).
 - **Non-disruption:** DataModule route + delegates DELETE RLS are already admin-only → permission surface unchanged. No DB migration (existing columns + FK cascades) and **no `types.ts` change** (`RegType` already includes `'ems'`). QR/import/reconcile/check-in paths untouched. `tsc --noEmit` → same 4 pre-existing non-blocking warnings; `npm run build` passes.
+
+## 60. Master List Export — Payment Columns missing when "Show Payment Details" (v1.63)
+
+- **Bug (Sep 2026):** the Master List on-screen tables honored `showPaymentCols` ("Show Payment Details"), but both export handlers built **fixed column sets** and never referenced it — PDF (`handleExport`) and CSV (`handleCSVExport`) omitted `payment_amount`/`payment_reference` even when the checkbox was checked.
+- **Fix (`MasterListModule.tsx`):** both export column arrays are now `showPaymentCols`-aware.
+  - **PDF:** `headerCells` + rows push `Payment` / `Payment Ref` columns (after Reg ID, matching the on-screen order at §58/§table) — `formatCurrency(payment_amount)` with `'—'` for nulls, raw `payment_reference`; `colSpan` numerator includes the 2 columns.
+  - **CSV:** `if (showPaymentCols) cols.push('payment_amount', 'payment_reference')` — raw snake_case keys consistent with the other CSV columns (`exportToCSV` prints header from key names).
+- **Non-disruption:** export data source (`fetchAllDelegatesForExport`) unchanged and already returns payment fields; filter/search/source prefix logic untouched. No DB migration or `types.ts` change. `tsc --noEmit` → same 4 pre-existing non-blocking warnings; `npm run build` passes.
 
 ## Code Conventions
 
