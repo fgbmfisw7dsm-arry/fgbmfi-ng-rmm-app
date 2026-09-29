@@ -360,12 +360,23 @@ const IndividualBadgePrint = () => {
       {generatedPdfBytes && pdfPreviewUrl && (
         <div ref={resultsRef} className="bg-white p-6 rounded-3xl shadow-sm border border-emerald-200">
           <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden">
-              <iframe
-                src={pdfPreviewUrl}
-                className="w-full h-full min-h-[400px]"
-                title="A6 Badge PDF Preview"
-              />
+            <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden flex items-center justify-center bg-white p-4">
+              {a6PrintImageUrl ? (
+                // Image-based on-screen preview (PNG data URL) — renders on ALL devices.
+                // Android browsers do not render PDFs inline inside iframes ("Open" button),
+                // but the same content-only A6 canvas prints identically to the PDF.
+                <img
+                  src={a6PrintImageUrl}
+                  alt="A6 Badge Preview"
+                  className="max-h-[520px] w-auto shadow-lg rounded-sm"
+                />
+              ) : (
+                <iframe
+                  src={pdfPreviewUrl}
+                  className="w-full h-full min-h-[400px]"
+                  title="A6 Badge PDF Preview"
+                />
+              )}
             </div>
             <div className="lg:w-64 space-y-2">
               <h2 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">
@@ -383,6 +394,12 @@ const IndividualBadgePrint = () => {
                 className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95"
               >
                 Download PDF
+              </button>
+              <button
+                onClick={() => { if (pdfPreviewUrl) window.open(pdfPreviewUrl, '_blank'); }}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95"
+              >
+                View PDF
               </button>
               <p className="text-[9px] text-gray-400 text-center leading-relaxed mt-2">
                 Overlay prints only the delegate details and QR code — the banner, footer and fee category are already pre-printed on the A6 shell.
