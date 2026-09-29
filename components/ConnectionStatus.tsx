@@ -36,12 +36,12 @@ const ConnectionStatus: React.FC = () => {
   useEffect(() => {
     const updateQueue = () => {
       try {
+        let n = 0;
         const raw = localStorage.getItem('fgbmfi_checkin_queue');
-        if (raw) {
-          setQueueLength(JSON.parse(raw).length);
-        } else {
-          setQueueLength(0);
-        }
+        if (raw) n += (JSON.parse(raw) as unknown[]).length;
+        const sr = localStorage.getItem('fgbmfi_session_response_queue');
+        if (sr) n += (JSON.parse(sr) as unknown[]).length;
+        setQueueLength(n);
       } catch { setQueueLength(0); }
     };
     updateQueue();

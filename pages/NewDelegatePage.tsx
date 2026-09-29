@@ -205,25 +205,15 @@ useEffect(() => {
         }
         if (isDistrictScoped && !freeGuestLocked) payload.district = user.district;
 
-        const newDelegate = await db.registerDelegate(payload);
+        const res = await db.registerDelegateAndCheckIn(payload, user, { restricted: freeGuestLocked });
+        const newDelegate = res.delegate;
         if (!newDelegate || !newDelegate.delegate_id) throw new Error("Database persistence failure.");
 
         const actualId = newDelegate.delegate_id;
         const delDistrict = newDelegate.district || payload.district || 'General';
-        
-        let initialCheckInOk = false;
-        let initialStatus = "Recorded in Master List";
 
-        try {
-            const checkInRes = await db.checkInDelegate(activeEventId, actualId, user);
-            if (checkInRes && checkInRes.success) {
-                initialCheckInOk = true;
-                initialStatus = "Verified Successfully";
-            }
-        } catch (checkInErr) {
-            console.warn("Auto-checkin pending manual action.");
-            initialStatus = "Recorded (Pending Arrival Verify)";
-        }
+        let initialCheckInOk = !!res.checkin?.success;
+        let initialStatus = res.checkin?.alreadyCheckedIn ? "Already Checked-in" : (initialCheckInOk ? "Verified Successfully" : "Recorded in Master List");
 
         setSuccessData({
             id: actualId,

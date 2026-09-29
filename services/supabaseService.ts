@@ -3,6 +3,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
+import { buildOfflineRoster, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
 
 /**
  * Normalizes email for transmission. 
@@ -28,6 +29,16 @@ const typeLockedDistrict = async (type: string): Promise<string> => {
 
 let delegateTypeDistrictCache: { map: Record<string, string>; at: number } | null = null;
 const DELEGATE_TYPE_DISTRICT_CACHE_MS = 30_000;
+
+const chaptersCache = new Map<string, { rows: any[]; at: number }>();
+const CHAPTERS_CACHE_MS = 60_000;
+
+let settingsCache: { settings: SystemSettings; at: number } | null = null;
+const SETTINGS_CACHE_MS = 30_000;
+const invalidateSettingsCache = () => { settingsCache = null; delegateTypeDistrictCache = null; };
+
+const districtCountsCache = new Map<string, { rows: { district: string; count: number }[]; at: number }>();
+const DISTRICT_COUNTS_CACHE_MS = 20_000;
 
 export const ALL_DISTRICTS_SENTINEL = '__ALL_DISTRICTS__';
 
@@ -192,6 +203,43 @@ const handleRpcResponse = (res: any, operationName: string) => {
 };
 
 // Lifecycle Guard: Checks if an event is active before allowing writes
+
+const CHECKIN_QUEUE_STORAGE_KEY = 'fgbmfi_checkin_queue';
+const enqueueCheckInLocal = (eventId: string, delegateId: string, registrar: User, sessionId?: string): void => {
+    try {
+        const raw = localStorage.getItem(CHECKIN_QUEUE_STORAGE_KEY);
+        const queue: any[] = raw ? JSON.parse(raw) : [];
+        queue.push({
+            id: crypto.randomUUID(),
+            eventId,
+            delegateId,
+            registrar,
+            sessionId,
+            timestamp: Date.now(),
+            retryCount: 0,
+        });
+        localStorage.setItem(CHECKIN_QUEUE_STORAGE_KEY, JSON.stringify(queue));
+    } catch { /* storage unavailable — ignore */ }
+};
+
+const SESSION_RESPONSE_QUEUE_KEY = 'fgbmfi_session_response_queue';
+const enqueueSessionResponseLocal = (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User): void => {
+    try {
+        const raw = localStorage.getItem(SESSION_RESPONSE_QUEUE_KEY);
+        const queue: any[] = raw ? JSON.parse(raw) : [];
+        queue.push({
+            id: crypto.randomUUID(),
+            eventId,
+            delegateId,
+            sessionId,
+            responseType,
+            registrar,
+            timestamp: Date.now(),
+            retryCount: 0,
+        });
+        localStorage.setItem(SESSION_RESPONSE_QUEUE_KEY, JSON.stringify(queue));
+    } catch { /* storage unavailable — ignore */ }
+};
 
 const withRetry = async <T>(
   fn: () => Promise<T>,
@@ -534,6 +582,8 @@ const USE_CHECKIN_RPC = true;
 let checkinRpcAvailable = true;
 const USE_FINANCIAL_RPC = true;
 let financialRpcAvailable = true;
+const USE_REGISTER_RPC = true;
+let registerRpcAvailable = true;
 
 export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
 
@@ -630,10 +680,15 @@ export const db = {
     },
 
     getChapters: async (district?: string) => {
+        const cacheKey = district || '__ALL__';
+        const cached = chaptersCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < CHAPTERS_CACHE_MS) return cached.rows;
         let q = supabase.from('chapters').select('*', { count: 'exact' }).order('chapter_name').limit(5000);
         if (district) q = q.eq('district', district);
         const { data } = await q;
-        return data || [];
+        const rows = data || [];
+        chaptersCache.set(cacheKey, { rows, at: Date.now() });
+        return rows;
     },
 
     importChapters: async (chapters: { district: string; chapter_code?: string; chapter_name: string; state?: string; city?: string; meeting_day?: string }[]): Promise<{ inserted: number; errors: string[] }> => {
@@ -668,6 +723,9 @@ export const db = {
     },
 
     getSettings: async (): Promise<SystemSettings> => {
+        if (settingsCache && Date.now() - settingsCache.at < SETTINGS_CACHE_MS) {
+            return { ...settingsCache.settings };
+        }
         const defaultData = { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: ['North Central 1', 'North Central 2', 'North Central 3', 'North Central 4', 'North Central 5', 'North East 1', 'North East 2', 'North West 1', 'North West 2', 'North West 3', 'South East 1', 'South East 2', 'South East 3', 'South South 1', 'South South 2', 'South South 3', 'South South 4', 'South West 1', 'South West 2', 'South West 3', 'South West 4', 'South West 5', 'South West 6', 'South West 7', 'SOUTH WEST 8', 'Guest', 'International'], ranks: [], offices: [], regions: [], delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'], delegate_type_districts: { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' }, audit_enabled: true };
         const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (error) throw error;
@@ -688,7 +746,13 @@ export const db = {
             settings.delegate_type_districts = { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' };
         }
         updateAuditSyncCache(settings);
+        settingsCache = { settings: { ...settings }, at: Date.now() };
         return settings;
+    },
+
+    // v1.66/D1: refresh the offline roster snapshot in the background (best-effort).
+    refreshOfflineRoster: (eventId: string, scope?: { district?: string; region?: string }): void => {
+        if (eventId) buildOfflineRoster(eventId, scope).catch(() => {});
     },
 
     getDelegateTypeDistrictMap: async (): Promise<Record<string, string>> => {
@@ -723,11 +787,13 @@ export const db = {
         if (current) {
             const { data, error } = await supabase.from('system_settings').update(payload).eq('id', current.id).select().single();
             handleWriteError(error);
+            invalidateSettingsCache();
             if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         } else {
             const { data, error } = await supabase.from('system_settings').insert(payload).select().single();
             handleWriteError(error);
+            invalidateSettingsCache();
             if (!field || field === 'audit_enabled') updateAuditSyncCache(data);
             return data;
         }
@@ -1079,7 +1145,47 @@ export const db = {
         });
         const guestDistrict = (typeMap['Free Guest'] || typeMap['National Guest'] || '').trim();
         const intlDistrict = (typeMap['International'] || '').trim();
+        const labelFor = (stored: string, delegateType?: string): string => {
+            const s = (stored || '').trim();
+            if (!s) return '';
+            const key = s.toUpperCase();
+            const official = officialByKey.get(key);
+            if (official) return official;
+            if (LEGACY_GUEST_DISTRICT_RE.test(s)) {
+                if ((delegateType || '').trim().toUpperCase() === 'INTERNATIONAL' && intlDistrict) return intlDistrict;
+                if (guestDistrict) return guestDistrict;
+            }
+            return s;
+        };
         const counts = new Map<string, number>();
+        const cacheKey = `${eventId}|${source || ''}`;
+        const cachedCounts = districtCountsCache.get(cacheKey);
+        const serveCached = (rows: { district: string; count: number }[]) => {
+            districtCountsCache.set(cacheKey, { rows, at: Date.now() });
+            return rows;
+        };
+        if (cachedCounts && Date.now() - cachedCounts.at < DISTRICT_COUNTS_CACHE_MS) return cachedCounts.rows;
+
+        // v1.66: single-RTT server-side GROUP BY (fast path). Falls back to the
+        // paginated client scan below if the function is missing or errors.
+        try {
+            const { data: rows, error } = await supabase.rpc('get_district_aggregate_counts', {
+                p_event_id: eventId,
+                p_reg_type: source || null,
+            });
+            if (!error && Array.isArray(rows)) {
+                for (const r of rows as any[]) {
+                    const label = labelFor(r.district, r.delegate_type);
+                    if (label) counts.set(label, (counts.get(label) || 0) + (Number(r.total) || 0));
+                }
+                return serveCached(Array.from(counts.entries())
+                    .map(([district, count]) => ({ district, count }))
+                    .sort((a, b) => a.district.localeCompare(b.district, undefined, { sensitivity: 'base', numeric: true })));
+            }
+        } catch (e) {
+            console.log('[getDistrictsWithDelegates] RPC failed, using client pagination fallback:', (e as any)?.message);
+        }
+
         let from = 0;
         while (true) {
             let q = supabase
@@ -1097,26 +1203,15 @@ export const db = {
                 .range(from, from + 999);
             if (error || !data || data.length === 0) break;
             for (const d of data) {
-                const stored = (d.district || '').trim();
-                if (!stored) continue;
-                const key = normalize(stored).toUpperCase();
-                let label = officialByKey.get(key);
-                if (!label && LEGACY_GUEST_DISTRICT_RE.test(stored)) {
-                    if ((d.delegate_type || '').trim().toUpperCase() === 'INTERNATIONAL' && intlDistrict) {
-                        label = intlDistrict;
-                    } else if (guestDistrict) {
-                        label = guestDistrict;
-                    }
-                }
-                if (!label) label = stored;
-                counts.set(label, (counts.get(label) || 0) + 1);
+                const label = labelFor(d.district, d.delegate_type);
+                if (label) counts.set(label, (counts.get(label) || 0) + 1);
             }
             if (data.length < 1000) break;
             from += 1000;
         }
-        return Array.from(counts.entries())
+        return serveCached(Array.from(counts.entries())
             .map(([district, count]) => ({ district, count }))
-            .sort((a, b) => a.district.localeCompare(b.district, undefined, { sensitivity: 'base', numeric: true }));
+            .sort((a, b) => a.district.localeCompare(b.district, undefined, { sensitivity: 'base', numeric: true })));
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
@@ -1132,8 +1227,18 @@ export const db = {
     },
 
     // Fix: Corrected variable name mismatch from event_id to eventId
-    checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string, opts?: { skipGuard?: boolean }): Promise<CheckInResult> => {
+    checkInDelegate: async (eventId: string, delegateId: string, registrar: User, sessionId?: string, opts?: { skipGuard?: boolean; forceOnline?: boolean }): Promise<CheckInResult> => {
         if (!delegateId) return { success: false, message: 'Invalid delegate ID.' };
+        // v1.66/C3: offline fast-path — never block the door queue on a dead uplink.
+        // The write is persisted to the SAME localStorage queue offlineQueue.flushQueue
+        // drains (shared STORAGE_KEY, mirrored shape), making retries conflict-free
+        // via the DB partial-unique indexes (23505 → "Already Checked-in").
+        // forceOnline (flush path) bypasses this so a flaky reconnect never re-queues
+        // an item that flushQueue believes it already handled.
+        if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
+            return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: { delegate_id: delegateId } as any };
+        }
         return withRetry(async () => {
         if (!opts?.skipGuard) await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
@@ -1178,7 +1283,35 @@ export const db = {
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
         const rawCode = (code || '').trim();
+
+        // v1.66/D2: offline fast-path — resolve a badge purely from the IndexedDB
+        // roster snapshot and enqueue the write with an optimistic "Pending Sync"
+        // result instead of blocking on the dead uplink. Only when the offline
+        // window is open (session bounded) AND the code is a known identifier.
+        if (typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen() && eventId) {
+            const local = await resolveCodeLocally(eventId, rawCode);
+            if (local && local.delegate_id) {
+                enqueueCheckInLocal(eventId, local.delegate_id, registrar, sessionId);
+                return {
+                    success: true,
+                    message: 'Offline Verified (Pending Sync)',
+                    alreadyCheckedIn: false,
+                    delegate: {
+                        delegate_id: local.delegate_id,
+                        qr_hash: local.qr_hash || '',
+                        title: local.title || '',
+                        first_name: local.first_name || '',
+                        last_name: local.last_name || '',
+                        district: local.district || '',
+                        chapter: local.chapter || '',
+                        delegate_type: local.delegate_type || ''
+                    } as any
+                };
+            }
+        }
+
         if (USE_CHECKIN_RPC && checkinRpcAvailable) {
+            let rpcResolved: any = null;
             try {
                 const { data, error } = await supabase.rpc('check_in_by_code', {
                     p_event_id: eventId,
@@ -1188,23 +1321,35 @@ export const db = {
                     p_registrar_email: registrar.email || null,
                     p_audit_enabled: auditEnabled
                 });
-                if (error) {
-                    if ((error.message || '').toLowerCase().includes('could not find the function') || error.code === 'PGRST116') checkinRpcAvailable = false;
-                    throw error;
+                if (error) throw error;
+                rpcResolved = (data as any) || {};
+                if (rpcResolved.locked) throw new Error(rpcResolved.message || 'EVENT_LOCKED: This event is currently inactive (Read-Only).');
+                if (rpcResolved.ok) {
+                    return { success: true, message: rpcResolved.message || 'Verified!', alreadyCheckedIn: !!rpcResolved.already_checked_in, delegate: (rpcResolved.delegate || undefined) as Delegate | undefined };
                 }
-                const r = (data as any) || {};
-                if (r.locked) throw new Error(r.message || 'EVENT_LOCKED: This event is currently inactive (Read-Only).');
-                if (r.ok) {
-                    return { success: true, message: r.message || 'Verified!', alreadyCheckedIn: !!r.already_checked_in, delegate: (r.delegate || undefined) as Delegate | undefined };
-                }
-                if (!r.needs_parse) throw new Error('check_in_by_code returned an unexpected result.');
+                if (!rpcResolved.needs_parse) throw new Error('check_in_by_code returned an unexpected result.');
             } catch (e: any) {
-                if (e?.message?.startsWith('EVENT_LOCKED')) throw e;
+                const msg = (e?.message || '').toLowerCase();
+                if (msg.startsWith('event_locked')) throw e;
+                const isMissing = msg.includes('could not find the function') || e?.code === 'PGRST116';
+                const isNetwork = /connection failed|network error|failed to fetch|timed out|timeout|aborted|aborterror|signal/i.test(msg);
+                if (isMissing) {
+                    checkinRpcAvailable = false;
+                } else if (rpcResolved && rpcResolved.needs_parse) {
+                    // RPC resolved but needs the TS fuzzy/registration path — fall through
+                } else if (isNetwork) {
+                    // Transient network RPC failure — fail fast instead of cascading into
+                    // the classic 5-8 round-trip chain (v1.66/C1). Retry from the page.
+                    throw new Error('NETWORK: Could not verify on the server. Check your connection and retry.');
+                } else {
+                    // Non-network RPC error (e.g. RLS/`data` issue) — fall through to the
+                    // classic path which surfaces the precise error for the page to render.
+                }
             }
         }
         await ensureEventActive(eventId);
         code = rawCode;
-        
+
         const parseQRData = (raw: string): Record<string, string> | null => {
             try {
                 const parsed = JSON.parse(raw);
@@ -1271,23 +1416,42 @@ export const db = {
         const parsedData = parseQRData(code);
         const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || parsedData?.['reg_id'] || parsedData?.['RegId'] || code;
         
-        // Pass 1: UUID QR hash lookup (internal QR codes, use raw code when no extracted ID)
+        // Pass 1-3 (parallel, priority order): UUID qr_hash → external_id → delegate_id.
+        // Firing all three probes concurrently collapses 3 sequential round trips into 1.
+        const probes: Promise<{ priority: number; match?: any; error?: any }>[] = [];
         if (code.length > 10 && code === lookupId) {
-            const { data: match } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('qr_hash', code).maybeSingle();
-            if (match && match.delegate_id) return db.checkInDelegate(eventId, match.delegate_id, registrar, sessionId, { skipGuard: true });
+            probes.push((async () => {
+                try {
+                    const r = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('qr_hash', code).maybeSingle();
+                    return { priority: 1, match: r.data };
+                } catch (err) { return { priority: 1, error: err }; }
+            })());
         }
-        
-        // Pass 2: External ID lookup (use extracted delegate ID, matches subsequent scans)
         if (lookupId.length > 4) {
-            const { data: extMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('external_id', lookupId).maybeSingle();
-            if (extMatch && extMatch.delegate_id) return db.checkInDelegate(eventId, extMatch.delegate_id, registrar, sessionId, { skipGuard: true });
+            probes.push((async () => {
+                try {
+                    const r = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('external_id', lookupId).maybeSingle();
+                    return { priority: 2, match: r.data };
+                } catch (err) { return { priority: 2, error: err }; }
+            })());
         }
-        
-        // Pass 3: Delegate ID lookup
         if (lookupId.length > 4 && lookupId !== code) {
-            const { data: idMatch } = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('delegate_id', lookupId).maybeSingle();
-            if (idMatch && idMatch.delegate_id) return db.checkInDelegate(eventId, idMatch.delegate_id, registrar, sessionId, { skipGuard: true });
+            probes.push((async () => {
+                try {
+                    const r = await supabase.from('delegates').select('delegate_id').eq('event_id', eventId).eq('delegate_id', lookupId).maybeSingle();
+                    return { priority: 3, match: r.data };
+                } catch (err) { return { priority: 3, error: err }; }
+            })());
         }
+        const probeResults = await Promise.all(probes);
+        const resolved = probeResults
+            .filter(p => p.match && p.match.delegate_id)
+            .sort((a, b) => a.priority - b.priority)[0];
+        if (resolved && resolved.match && resolved.match.delegate_id) {
+            return db.checkInDelegate(eventId, resolved.match.delegate_id, registrar, sessionId, { skipGuard: true });
+        }
+        const probeError = probeResults.find(p => p.error);
+        if (probeError?.error) throw probeError.error;
         
         // Pass 4: Fuzzy identity resolution — portal/3rd-party badge payloads
         // carry contact data but no EMS identifier (qr_hash/external_id/
@@ -1312,9 +1476,9 @@ export const db = {
         return { success: false, message: 'Invalid code.' };
     },
 
-    registerDelegate: async (delegate: Partial<Delegate>): Promise<Delegate> => {
+    registerDelegate: async (delegate: Partial<Delegate>, opts?: { restricted?: boolean }): Promise<Delegate> => {
         if (!delegate.event_id) throw new Error('registerDelegate requires event_id');
-        const restricted = await isRegistrarFreeGuestRestricted(delegate.event_id);
+        const restricted = opts?.restricted !== undefined ? opts.restricted : await isRegistrarFreeGuestRestricted(delegate.event_id);
         if (restricted && normalize(delegate.delegate_type || '').toUpperCase() !== 'FREE GUEST') {
             throw new Error('PERMISSION: Registrar role restricted to Free Guest registrations for this event.');
         }
@@ -1368,6 +1532,52 @@ export const db = {
             throw error;
         }
         return data;
+    },
+
+    // v1.66: single-RTT registration + arrival check-in (combines registerDelegate +
+    // checkInDelegate's no-session arrival write into ONE server call). Tries the
+    // record_delegate_and_checkin RPC; falls back to the classic two-step path
+    // verbatim when the RPC is missing or errors. Pages unchanged.
+    registerDelegateAndCheckIn: async (delegate: Partial<Delegate>, registrar: User, opts?: { restricted?: boolean }): Promise<{ delegate: Delegate; checkin: CheckInResult }> => {
+        if (USE_REGISTER_RPC && registerRpcAvailable) {
+            try {
+                const { data, error } = await supabase.rpc('record_delegate_and_checkin', {
+                    p_payload: { ...delegate, phone: normalizePhone(delegate.phone || '') } as any,
+                    p_event_id: delegate.event_id,
+                    p_registrar_uid: registrar.id,
+                    p_registrar_email: registrar.email || null,
+                    p_audit_enabled: auditEnabled
+                });
+                if (error) {
+                    if ((error.message || '').toLowerCase().includes('could not find the function') || error.code === 'PGRST116') registerRpcAvailable = false;
+                    throw error;
+                }
+                const r = (data as any) || {};
+                if (r.locked) throw new Error(r.message || 'EVENT_LOCKED: This event is currently inactive (Read-Only).');
+                if (r.permission) throw new Error(r.message || 'PERMISSION: Registrar role restricted to Free Guest registrations for this event.');
+                if (r.duplicate) throw new Error(r.message || 'A delegate with this name and phone already exists for this event.');
+                if (!r.ok) throw new Error(r.message || 'Registration failed.');
+                return {
+                    delegate: r.delegate as Delegate,
+                    checkin: {
+                        success: true,
+                        message: (r.checkin?.message) || (r.already_checked_in ? 'Already Checked-in' : 'Verified'),
+                        alreadyCheckedIn: !!r.already_checked_in,
+                        delegate: (r.delegate || undefined) as Delegate | undefined
+                    }
+                };
+            } catch (e: any) {
+                if (e?.message?.startsWith('EVENT_LOCKED') || e?.message?.startsWith('PERMISSION') || e?.message?.includes('already exists') || e?.message?.includes('contact-less')) throw e;
+                if (registerRpcAvailable === false) {
+                    // RPC permanently unavailable — fall through to the classic path
+                } else {
+                    console.warn('[registerDelegateAndCheckIn] RPC transient error, using classic fallback:', e?.message);
+                }
+            }
+        }
+        const newDelegate = await db.registerDelegate(delegate, opts);
+        const checkin = await db.checkInDelegate(delegate.event_id!, newDelegate.delegate_id, registrar);
+        return { delegate: newDelegate, checkin };
     },
 
     registerDelegateFromQR: async (eventId: string, scannedCode: string, parsedData: Record<string, string>): Promise<Delegate> => {
@@ -2847,8 +3057,15 @@ export const db = {
         return newHash;
     },
 
-    recordSessionResponse: async (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User): Promise<{ success: boolean; message: string }> => {
+    recordSessionResponse: async (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User, opts?: { forceOnline?: boolean }): Promise<{ success: boolean; message: string }> => {
         if (!delegateId) return { success: false, message: 'Invalid delegate ID.' };
+        // v1.66/D3: offline fast-path for alter-call responses — queue and report
+        // optimistically; conflicts resolve server-side via the partial unique index.
+        // forceOnline (flush path) bypasses this so a flaky reconnect never re-queues.
+        if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            enqueueSessionResponseLocal(eventId, delegateId, sessionId, responseType, registrar);
+            return { success: true, message: 'Recorded (Pending Sync)' };
+        }
         return withRetry(async () => {
             await ensureEventActive(eventId);
 

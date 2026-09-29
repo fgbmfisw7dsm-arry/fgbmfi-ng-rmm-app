@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User, Event, UserRole } from './types';
+import { User, Event, UserRole, getScopeFilter } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
@@ -10,6 +10,7 @@ import { auth, db } from './services/supabaseService';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './hooks/useQueryClient';
 import { flushQueueOnConnect } from './services/offlineQueue';
+import { setOfflineWindowOpen } from './services/offlineRoster';
 
 // Modules
 import LoginPage from './pages/LoginPage';
@@ -180,8 +181,29 @@ const AppContent = () => {
   useEffect(() => {
     if (user?.id && activeEventId) {
       flushQueueOnConnect();
+      db.refreshOfflineRoster(activeEventId, getScopeFilter(user));
     }
   }, [user?.id, activeEventId]);
+
+  // v1.66/D4: keep the offline roster + pending queue in sync with connectivity.
+  useEffect(() => {
+    if (!user?.id || !activeEventId) return;
+    const sync = () => {
+      flushQueueOnConnect();
+      db.refreshOfflineRoster(activeEventId, getScopeFilter(user));
+    };
+    sync();
+    window.addEventListener('online', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+    };
+  }, [user?.id, activeEventId]);
+
+  useEffect(() => {
+    // D5: the offline window is open while an authenticated session exists in this
+    // browser (roster present). Close on sign-out / empty session.
+    setOfflineWindowOpen(!!user?.id);
+  }, [user?.id]);
 
   if (!isSupabaseConfigured) return <ConfigurationError />;
   
