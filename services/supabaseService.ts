@@ -968,6 +968,18 @@ export const db = {
         return result;
     },
 
+    updateUserEmail: async (userId: string, newEmail: string): Promise<string> => {
+        const email = normalizeEmail(newEmail);
+        if (!isValidEmail(email)) throw new Error('Please enter a valid email address.');
+        const r = await handleSupabaseError(await supabase.rpc('update_auth_user_email', { user_id: userId, new_email: email }));
+        const d = r && typeof r === 'object' ? (r as any) : null;
+        if (!d || d.status !== 'success') {
+            throw new Error((d && d.message) || 'Email update failed.');
+        }
+        recordAuditLog('', 'user_email_change', `Login email updated for user ${userId} → ${d.email}`, null, 'app_users', userId, { new_email: d.email, identity_synced: !!d.identity_synced });
+        return d.email as string;
+    },
+
     deleteUser: async (userId: string) => {
         const { data: usr } = await supabase.from('app_users').select('email').eq('id', userId).maybeSingle();
         const result = handleRpcResponse(await supabase.rpc('delete_app_user', { user_id_to_delete: userId }), 'delete_app_user');

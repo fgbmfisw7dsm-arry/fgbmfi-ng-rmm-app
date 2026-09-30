@@ -25,6 +25,7 @@ const UsersModule = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [form, setForm] = useState({ email: '', password: '', role: '' as string, district: '', region: '' });
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
+    const [originalEmail, setOriginalEmail] = useState('');
     const [config, setSettings] = useState<SystemSettings | null>(null);
     const [resettingId, setResettingId] = useState<string | null>(null);
     const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<string | null>(null);
@@ -89,12 +90,18 @@ const UsersModule = () => {
 
         try {
             if (editingUserId) {
+                const emailChanged = form.email.trim().toLowerCase() !== originalEmail.trim().toLowerCase();
+                if (emailChanged) {
+                    await db.updateUserEmail(editingUserId, form.email);
+                }
                 await db.updateUser(editingUserId, { 
                     role: form.role as UserRole, 
                     district: needsDistrict(form.role) ? form.district : '',
                     region: needsRegion(form.role) ? form.region : ''
                 });
-                setStatus({ type: 'success', msg: "Account updated successfully." });
+                setStatus({ type: 'success', msg: emailChanged
+                    ? `Account updated. Login email changed to ${form.email.trim().toLowerCase()}. Their password is unchanged — the new address is now the login username.`
+                    : "Account updated successfully." });
             } else {
                 const res = await db.createUser({ ...form, role: form.role as UserRole }, form.password);
                 setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this email.` });
@@ -117,6 +124,7 @@ const UsersModule = () => {
     const startEditing = (u: User) => {
         const role = (u.role || '').toLowerCase();
         setEditingUserId(u.id);
+        setOriginalEmail(u.email);
         setForm({
             email: u.email,
             password: '',
@@ -132,6 +140,7 @@ const UsersModule = () => {
 
     const cancelEditing = () => {
         setEditingUserId(null);
+        setOriginalEmail('');
         setForm({ email: '', password: '', role: UserRole.REGISTRAR, district: '', region: '' });
         setStatus(null);
     };
@@ -241,7 +250,7 @@ const UsersModule = () => {
                             placeholder="e.g. officer@fgbmfi.ng" 
                             value={form.email} 
                             onChange={e => setForm({...form, email: e.target.value})} 
-                            disabled={!!editingUserId || loading} 
+                            disabled={loading} 
                         />
                     </div>
                     
