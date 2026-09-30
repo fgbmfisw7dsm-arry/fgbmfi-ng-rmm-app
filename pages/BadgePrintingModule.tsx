@@ -3,6 +3,7 @@ import { db } from '../services/supabaseService';
 import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
 import { AppContext } from '../context/AppContext';
 import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
+import { generateBadgeImage } from '../services/badgeImageGenerator';
 import { useQuery } from '@tanstack/react-query';
 import BadgePreview from '../components/BadgePreview';
 import BatchStatusBadge from '../components/BatchStatusBadge';
@@ -28,6 +29,32 @@ const a6BatchNameOf = (delegates: Delegate[]): string => {
     .replace(/[^a-zA-Z0-9]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
+};
+
+// v1.66-fix: content-only 100×140mm A6 preview thumbnails for the a6-single
+// layout (no design/stamp — the shell banner/footer carry them pre-printed).
+const buildA6PreviewImages = async (
+  delegates: Delegate[],
+  showRank: boolean,
+  showOffice: boolean,
+  limit: number
+): Promise<{ url: string; name: string }[]> => {
+  const out: { url: string; name: string }[] = [];
+  for (const d of delegates.slice(0, limit)) {
+    try {
+      const { badgeUrl } = await generateBadgeImage(d, {
+        showRank,
+        showOffice,
+        sizeMm: { width: 100, height: 139.7 },
+        includeDesign: false,
+      });
+      out.push({ url: badgeUrl, name: `${d.first_name || ''} ${d.last_name || ''}`.trim() || d.delegate_id });
+    } catch (e) {
+      console.warn('[buildA6PreviewImages] thumbnail failed, fall back to PDF iframe:', (e as any)?.message);
+      break;
+    }
+  }
+  return out;
 };
 
 const BATCH_SIZES: { value: BadgeBatchSize; label: string }[] = [
@@ -120,6 +147,15 @@ const BadgePrintingModule = () => {
   const cancellationRef = useRef(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const previewUrlRef = useRef<string | null>(null);
+
+  // v1.66-fix: a6-single on-screen preview uses content-only A6 canvas images
+  // (Android cannot inline-render PDFs in <iframe>). Bounded to the first few
+  // badges; the PDF remains the authoritative full output.
+  const [a6PreviewImages, setA6PreviewImages] = useState<{ url: string; name: string }[]>([]);
+  const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
+  const showRank = eventConfig.show_rank !== false;
+  const showOffice = eventConfig.show_office !== false;
+  const A6_PREVIEW_LIMIT = 8;
 
   useEffect(() => {
     db.getSettings()
@@ -506,6 +542,10 @@ const BadgePrintingModule = () => {
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
           previewUrlRef.current = previewUrl;
           setPdfPreviewUrl(previewUrl);
+          if (layout === 'a6-single') {
+            const imgs = await buildA6PreviewImages(batchDelegates, showRank, showOffice, A6_PREVIEW_LIMIT);
+            if (imgs.length) setA6PreviewImages(imgs);
+          }
         } catch (uploadErr: any) {
           hasError = true;
           // The PDF was generated fine — keep it printable/downloadable right
@@ -524,6 +564,10 @@ const BadgePrintingModule = () => {
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
           previewUrlRef.current = previewUrl;
           setPdfPreviewUrl(previewUrl);
+          if (layout === 'a6-single') {
+            const imgs = await buildA6PreviewImages(batchDelegates, showRank, showOffice, A6_PREVIEW_LIMIT);
+            if (imgs.length) setA6PreviewImages(imgs);
+          }
           setFeedback({
             type: 'error',
             msg: `Batch ${batchIdx + 1} generated, but the storage upload failed (${uploadErr.message}). You can still print/download below — regenerate to re-upload.`,
@@ -589,6 +633,7 @@ const BadgePrintingModule = () => {
       URL.revokeObjectURL(previewUrlRef.current);
       previewUrlRef.current = null;
     }
+    if (a6PreviewImages.length) setA6PreviewImages([]);
     setGeneratedPdfBytes(null);
     setGeneratedBatchId(null);
     setGeneratedBatchNumber(null);
@@ -1362,12 +1407,31 @@ const BadgePrintingModule = () => {
                 </button>
               </div>
               <div className="flex flex-col lg:flex-row gap-4">
-                <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden">
-                  <iframe
-                    src={pdfPreviewUrl}
-                    className="w-full h-full min-h-[400px]"
-                    title="Badge PDF Preview"
-                  />
+                <div className="flex-1 min-h-[400px] border border-gray-200 rounded-xl overflow-hidden bg-white p-4 flex flex-col items-center justify-start gap-3">
+                  {layout === 'a6-single' && a6PreviewImages.length > 0 ? (
+                    // v1.66-fix: the a6-single preview is image-based (content-only
+                    // A6 canvas thumbnails) so it renders on Android too — mobile
+                    // browsers don't inline-render PDFs in <iframe> ("Open" button).
+                    <>
+                      {a6PreviewImages.map((img, i) => (
+                        <img
+                          key={i}
+                          src={img.url}
+                          alt={`A6 Badge Preview: ${img.name}`}
+                          className="max-h-[340px] w-auto shadow-lg rounded-sm"
+                        />
+                      ))}
+                      <p className="text-[9px] text-gray-400 text-center mt-1">
+                        Showing first {a6PreviewImages.length}{generatedBatchDelegateCount && generatedBatchDelegateCount > a6PreviewImages.length ? ` of ${generatedBatchDelegateCount}` : ''} — open <strong>View PDF</strong> for the full sheet.
+                      </p>
+                    </>
+                  ) : (
+                    <iframe
+                      src={pdfPreviewUrl}
+                      className="w-full h-full min-h-[400px]"
+                      title="Badge PDF Preview"
+                    />
+                  )}
                 </div>
                 <div className="lg:w-64 space-y-2">
                   <button
