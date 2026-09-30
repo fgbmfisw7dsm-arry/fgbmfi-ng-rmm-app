@@ -720,6 +720,7 @@ DECLARE
   v_updated INT := 0;
   v_identity_synced INT := 0;
   v_confirmed BOOLEAN := false;
+  v_email_plain BOOLEAN := false;
 BEGIN
   IF NOT is_admin_user() THEN
     RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
@@ -748,11 +749,29 @@ BEGIN
     RETURN json_build_object('status', 'error', 'message', 'Email already in use by another account');
   END IF;
 
-  UPDATE auth.users SET email = v_email, updated_at = NOW() WHERE id = v_uid;
+  -- 1) Mirror into raw_user_meta_data (drives the generated 'email' column on
+  --    current Supabase Auth). COALESCE so a NULL raw_user_meta_data can't erase it.
+  UPDATE auth.users SET
+    raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('email', v_email)
+  WHERE id = v_uid;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
   IF v_updated = 0 THEN
     RETURN json_build_object('status', 'error', 'message', 'User not found');
+  END IF;
+
+  -- 2) Directly update 'email' when it is a plain column (legacy schemas); on
+  --    generated-column schemas it recomputes from raw_user_meta_data.
+  SELECT (is_generated = 'NEVER') INTO v_email_plain
+  FROM information_schema.columns
+  WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email';
+
+  IF v_email_plain THEN
+    EXECUTE 'UPDATE auth.users SET email = $1, updated_at = NOW() WHERE id = $2'
+      USING v_email, v_uid;
+  ELSE
+    EXECUTE 'UPDATE auth.users SET updated_at = NOW() WHERE id = $1'
+      USING v_uid;
   END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -806,7 +825,12 @@ BEGIN
 
   UPDATE auth.identities SET
     provider_id = v_email,
-    identity_data = identity_data || jsonb_build_object('email', v_email, 'sub', v_uid::text),
+    identity_data = jsonb_set(
+      COALESCE(identity_data, '{}'::jsonb),
+      '{email}',
+      to_jsonb(v_email),
+      true
+    ) || jsonb_build_object('sub', v_uid::text),
     updated_at = NOW()
   WHERE auth.identities.user_id = v_uid AND auth.identities.provider = 'email';
   GET DIAGNOSTICS v_identity_synced = ROW_COUNT;
