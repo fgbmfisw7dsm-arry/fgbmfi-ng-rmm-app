@@ -719,6 +719,7 @@ DECLARE
   v_taken BOOLEAN;
   v_updated INT := 0;
   v_identity_synced INT := 0;
+  v_confirmed BOOLEAN := false;
 BEGIN
   IF NOT is_admin_user() THEN
     RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
@@ -747,20 +748,60 @@ BEGIN
     RETURN json_build_object('status', 'error', 'message', 'Email already in use by another account');
   END IF;
 
-  UPDATE auth.users SET
-    email = v_email,
-    email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
-    confirmation_sent_at = COALESCE(confirmation_sent_at, NOW()),
-    confirmation_token = '',
-    recovery_token = '',
-    email_change_token = '',
-    email_change = '',
-    updated_at = NOW()
-  WHERE id = v_uid;
+  UPDATE auth.users SET email = v_email, updated_at = NOW() WHERE id = v_uid;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
   IF v_updated = 0 THEN
     RETURN json_build_object('status', 'error', 'message', 'User not found');
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users'
+               AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
+    EXECUTE 'UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, NOW()) WHERE id = $1'
+      USING v_uid;
+    v_confirmed := true;
+  END IF;
+  IF NOT v_confirmed AND EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users'
+               AND column_name = 'confirmed_at' AND is_generated = 'NEVER') THEN
+    EXECUTE 'UPDATE auth.users SET confirmed_at = COALESCE(confirmed_at, NOW()) WHERE id = $1'
+      USING v_uid;
+    v_confirmed := true;
+  END IF;
+  IF NOT v_confirmed THEN
+    UPDATE auth.users
+    SET raw_app_meta_data = raw_app_meta_data || '{"email_verified": true}'::jsonb
+    WHERE id = v_uid;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change') THEN
+    EXECUTE 'UPDATE auth.users SET email_change = $1 WHERE id = $2' USING '', v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token') THEN
+    EXECUTE 'UPDATE auth.users SET email_change_token = $1 WHERE id = $2' USING '', v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_new') THEN
+    EXECUTE 'UPDATE auth.users SET email_change_token_new = $1 WHERE id = $2' USING '', v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_token_current') THEN
+    EXECUTE 'UPDATE auth.users SET email_change_token_current = $1 WHERE id = $2' USING '', v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_change_confirm_status') THEN
+    EXECUTE 'UPDATE auth.users SET email_change_confirm_status = 0 WHERE id = $1' USING v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'recovery_token') THEN
+    EXECUTE 'UPDATE auth.users SET recovery_token = $1 WHERE id = $2' USING '', v_uid;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'confirmation_token') THEN
+    EXECUTE 'UPDATE auth.users SET confirmation_token = $1 WHERE id = $2' USING '', v_uid;
   END IF;
 
   UPDATE auth.identities SET
