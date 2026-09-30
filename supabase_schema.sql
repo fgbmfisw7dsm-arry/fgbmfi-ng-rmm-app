@@ -808,7 +808,7 @@ BEGIN
     provider_id = v_email,
     identity_data = identity_data || jsonb_build_object('email', v_email, 'sub', v_uid::text),
     updated_at = NOW()
-  WHERE user_id = v_uid AND provider = 'email';
+  WHERE auth.identities.user_id = v_uid AND auth.identities.provider = 'email';
   GET DIAGNOSTICS v_identity_synced = ROW_COUNT;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
