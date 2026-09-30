@@ -26,14 +26,16 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
 // =================================================================================
 // PROJECT CONFIGURATION
 // =================================================================================
-// Your specific Supabase Project URL
-export const supabaseUrl = 'https://qtlxhozqskisgwazuksb.supabase.co';
+// Env-first (Vite inlines VITE_* at build): VITE_SUPABASE_URL and
+// VITE_SUPABASE_ANON_KEY are expected on Vercel. The literals below remain as a
+// non-breaking local-dev fallback only; do not treat them as the primary config.
+const FALLBACK_URL = 'https://qtlxhozqskisgwazuksb.supabase.co';
+const FALLBACK_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF0bHhob3pxc2tpc2d3YXp1a3NiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzNTc4ODgsImV4cCI6MjA4MDkzMzg4OH0.Nrgxg3AEAktQpyay7yxMB0pW_eE1_Db4yHwCUjdbXo4';
 
-/**
- * PROJECT API KEY:
- * Verified Supabase Anon Public Key (JWT).
- */
-export const supabaseAnonKey: string = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF0bHhob3pxc2tpc2d3YXp1a3NiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzNTc4ODgsImV4cCI6MjA4MDkzMzg4OH0.Nrgxg3AEAktQpyay7yxMB0pW_eE1_Db4yHwCUjdbXo4';
+const importMetaEnv = (import.meta as unknown as { env?: Record<string, string> }).env ?? {};
+
+export const supabaseUrl: string = (importMetaEnv.VITE_SUPABASE_URL || FALLBACK_URL).trim();
+export const supabaseAnonKey: string = (importMetaEnv.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_KEY).trim();
 
 // Validation Logic
 export const isSupabaseConfigured = !!supabaseUrl && 

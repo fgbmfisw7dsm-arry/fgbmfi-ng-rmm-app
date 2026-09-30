@@ -842,7 +842,7 @@ export const db = {
         await refile('app_users');
         await refile('chapters');
         delegateTypeDistrictCache = null;
-        recordAuditLog('', 'district_rename', `District renamed "${oldTrim}" → "${newTrim}" (${delegatesRefiled} delegate rows re-filed)`, null, 'system_settings', null, { old: oldTrim, new: newTrim, delegatesRefiled });
+        recordAuditLog('', 'district_rename', `District renamed "${oldTrim}" → "${newTrim}" (${delegatesRefiled} delegate rows re-filed)`, null, 'system_settings', undefined, { old: oldTrim, new: newTrim, delegatesRefiled });
         return { districts: nextDistricts, routing, delegatesRefiled };
     },
 
@@ -2630,7 +2630,7 @@ export const db = {
         };
         const { data: settings } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
         if (!settings) return 0;
-        const official: string[] = (settings.districts || []).map(d => normalize(d));
+        const official: string[] = (settings.districts || []).map((d: string) => normalize(d));
         console.log(`[harmonizeDistricts] Official districts (${official.length}): ${official.join(', ')}`);
         const delegates: { delegate_id: string; district: string }[] = [];
         let from = 0;

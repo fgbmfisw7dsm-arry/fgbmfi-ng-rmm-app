@@ -90,13 +90,13 @@ const UsersModule = () => {
         try {
             if (editingUserId) {
                 await db.updateUser(editingUserId, { 
-                    role: form.role, 
+                    role: form.role as UserRole, 
                     district: needsDistrict(form.role) ? form.district : '',
                     region: needsRegion(form.role) ? form.region : ''
                 });
                 setStatus({ type: 'success', msg: "Account updated successfully." });
             } else {
-                const res = await db.createUser(form, form.password);
+                const res = await db.createUser({ ...form, role: form.role as UserRole }, form.password);
                 setStatus({ type: 'success', msg: `Account ${form.email} created. User can login with this email.` });
             }
             

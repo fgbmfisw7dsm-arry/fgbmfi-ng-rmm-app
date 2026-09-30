@@ -1436,7 +1436,7 @@ const hasFile = repairHasFile;
                             {repairLoading ? 'ANALYZING...' : '1. Analyze'}
                         </button>
                         <button
-                            onClick={handleRepairBackup}
+                            onClick={() => handleRepairBackup()}
                             disabled={!repairItems.some(i => !i.skip && i.delegate_id)}
                             className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-white font-black rounded-xl text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
                         >

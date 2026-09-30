@@ -784,57 +784,144 @@ DROP POLICY IF EXISTS "chapters_update" ON chapters;
 CREATE POLICY "chapters_update" ON chapters FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
 -- 7. AGGREGATE RPCs (Dashboard performance)
+-- NOTE: all aggregate RPCs are SECURITY DEFINER (bypass RLS) — pass 4 makes the
+-- caller's visible scope authoritative inside each body (see helpers below) so
+-- district/regional registrars can never read national totals directly.
 
--- Dashboard stats: returns counts and aggregates for a single event
-CREATE OR REPLACE FUNCTION get_event_dashboard_stats(p_event_id UUID, p_district TEXT DEFAULT NULL)
+-- Normalized district key + caller full-scope helpers (shared by the RPCs)
+CREATE OR REPLACE FUNCTION district_key(p_district TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE
+SET search_path = public, extensions
+AS $func$
+  SELECT UPPER(regexp_replace(TRIM($1), '\s+', ' ', 'g'));
+$func$;
+
+CREATE OR REPLACE FUNCTION caller_full_scope()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+  SELECT is_admin_user()
+      OR is_event_admin_user()
+      OR is_national_role_user()
+      OR EXISTS (
+          SELECT 1 FROM app_users
+          WHERE id = auth.uid()
+            AND role IN ('finance','executive_admin')
+            AND (is_active IS NULL OR is_active = true)
+      );
+$func$;
+
+GRANT EXECUTE ON FUNCTION district_key(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION caller_full_scope() TO authenticated;
+
+-- Dashboard stats: caller-scope authoritative (p_district/p_region honored only
+-- for full-scope callers, i.e. normally null); scoped-tier callers without a
+-- configured district/region fail closed.
+CREATE OR REPLACE FUNCTION get_event_dashboard_stats(p_event_id UUID, p_district TEXT DEFAULT NULL, p_region TEXT DEFAULT NULL)
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions
 AS $func$
 DECLARE
-  total_delegates BIGINT;
-  total_checkins BIGINT;
-  total_financials BIGINT;
-  rank_counts JSON;
-  district_counts JSON;
-  recent_activity JSON;
+  total_delegates BIGINT := 0;
+  total_checkins BIGINT := 0;
+  total_arrivals BIGINT := 0;
+  total_session_attendance BIGINT := 0;
+  total_financials BIGINT := 0;
+  rank_counts JSON := '{}'::JSON;
+  district_counts JSON := '{}'::JSON;
+  recent_activity JSON := '[]'::JSON;
   norm_district TEXT;
+  norm_region TEXT;
+  v_none BOOLEAN := false;
 BEGIN
-  norm_district := CASE WHEN p_district IS NOT NULL THEN UPPER(regexp_replace(TRIM(p_district), '\s+', ' ', 'g')) ELSE NULL END;
-
-  IF norm_district IS NOT NULL THEN
-    SELECT COUNT(*) INTO total_delegates FROM delegates
-    WHERE UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = norm_district;
+  IF caller_full_scope() THEN
+    norm_district := CASE WHEN p_district IS NOT NULL THEN district_key(p_district) ELSE NULL END;
+    norm_region := CASE WHEN p_region IS NOT NULL THEN district_key(p_region) ELSE NULL END;
+  ELSIF current_user_region() IS NOT NULL THEN
+    norm_region := district_key(current_user_region());
+    norm_district := NULL;
+  ELSIF current_user_district() IS NOT NULL THEN
+    norm_district := district_key(current_user_district());
+    norm_region := NULL;
   ELSE
-    SELECT COUNT(*) INTO total_delegates FROM delegates;
+    norm_district := '__NONE__';
+    norm_region := NULL;
+    v_none := true;
   END IF;
 
-  SELECT COUNT(DISTINCT d.delegate_id) INTO total_checkins
-  FROM checkins c
-  JOIN delegates d ON c.delegate_id = d.delegate_id
-  WHERE c.event_id = p_event_id
-    AND (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district);
+  IF v_none THEN
+    RETURN json_build_object(
+      'totalDelegates', 0, 'totalCheckIns', 0, 'totalArrivals', 0,
+      'totalSessionAttendance', 0, 'totalFinancials', 0,
+      'checkInsByRank', '{}'::JSON, 'checkInsByDistrict', '{}'::JSON, 'recentActivity', '[]'::JSON);
+  END IF;
 
-  SELECT COALESCE(SUM(amount), 0) INTO total_financials
-  FROM financial_entries
-  WHERE event_id = p_event_id;
+  IF norm_region IS NOT NULL THEN
+    SELECT COUNT(*) INTO total_delegates FROM delegates
+    WHERE event_id = p_event_id
+      AND district_key(district) LIKE norm_region || '%';
+  ELSIF norm_district IS NOT NULL THEN
+    SELECT COUNT(*) INTO total_delegates FROM delegates
+    WHERE event_id = p_event_id
+      AND district_key(district) = norm_district;
+  ELSE
+    SELECT COUNT(*) INTO total_delegates FROM delegates
+    WHERE event_id = p_event_id;
+  END IF;
+
+  SELECT COUNT(DISTINCT c.delegate_id) INTO total_checkins
+  FROM checkins c
+  JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
+  WHERE c.event_id = p_event_id
+    AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+      OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district));
+
+  SELECT COUNT(DISTINCT c.delegate_id) INTO total_arrivals
+  FROM checkins c
+  JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
+  WHERE c.event_id = p_event_id AND c.session_id IS NULL
+    AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+      OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district));
+
+  SELECT COUNT(*) INTO total_session_attendance
+  FROM checkins c
+  JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
+  WHERE c.event_id = p_event_id AND c.session_id IS NOT NULL
+    AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+      OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district));
+
+  -- Financial gate: admins / event admins / finance / executive_admin
+  IF is_admin_user() OR is_event_admin_user()
+     OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role IN ('finance','executive_admin') AND (is_active IS NULL OR is_active = true)) THEN
+    SELECT COALESCE(SUM(amount), 0) INTO total_financials
+    FROM financial_entries
+    WHERE event_id = p_event_id;
+  ELSE
+    total_financials := 0;
+  END IF;
 
   SELECT COALESCE(json_object_agg(rnk, cnt), '{}'::JSON) INTO rank_counts
   FROM (
-    SELECT COALESCE(NULLIF(TRIM(d.rank), ''), 'OTHER') AS rnk, COUNT(DISTINCT d.delegate_id) AS cnt
+    SELECT COALESCE(NULLIF(TRIM(d.rank), ''), 'OTHER') AS rnk, COUNT(DISTINCT c.delegate_id) AS cnt
     FROM checkins c
-    JOIN delegates d ON c.delegate_id = d.delegate_id
+    JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
     WHERE c.event_id = p_event_id
-      AND (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district)
+      AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+        OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district))
     GROUP BY COALESCE(NULLIF(TRIM(d.rank), ''), 'OTHER')
   ) sub;
 
   SELECT COALESCE(json_object_agg(distname, cnt), '{}'::JSON) INTO district_counts
   FROM (
-    SELECT COALESCE(NULLIF(TRIM(d.district), ''), 'UNKNOWN') AS distname, COUNT(DISTINCT d.delegate_id) AS cnt
+    SELECT COALESCE(NULLIF(TRIM(d.district), ''), 'UNKNOWN') AS distname, COUNT(DISTINCT c.delegate_id) AS cnt
     FROM checkins c
-    JOIN delegates d ON c.delegate_id = d.delegate_id
+    JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
     WHERE c.event_id = p_event_id
-      AND (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district)
+      AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+        OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district))
     GROUP BY COALESCE(NULLIF(TRIM(d.district), ''), 'UNKNOWN')
   ) sub;
 
@@ -853,8 +940,9 @@ BEGIN
       WHERE event_id = p_event_id
       ORDER BY delegate_id, checked_in_at DESC
     ) c
-    JOIN delegates d ON c.delegate_id = d.delegate_id
-    WHERE (norm_district IS NULL OR UPPER(regexp_replace(TRIM(d.district), '\s+', ' ', 'g')) = norm_district)
+    JOIN delegates d ON c.delegate_id = d.delegate_id AND d.event_id = p_event_id
+    WHERE (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+      OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district))
     ORDER BY c.checked_in_at DESC
     LIMIT 10
   ) activity;
@@ -862,13 +950,170 @@ BEGIN
   RETURN json_build_object(
     'totalDelegates', total_delegates,
     'totalCheckIns', total_checkins,
-    'totalArrivals', (SELECT COUNT(DISTINCT delegate_id) FROM checkins WHERE event_id = p_event_id AND session_id IS NULL),
-    'totalSessionAttendance', (SELECT COUNT(*) FROM checkins WHERE event_id = p_event_id AND session_id IS NOT NULL),
+    'totalArrivals', total_arrivals,
+    'totalSessionAttendance', total_session_attendance,
     'totalFinancials', total_financials,
     'checkInsByRank', rank_counts,
     'checkInsByDistrict', district_counts,
     'recentActivity', recent_activity
   );
+END;
+$func$;
+
+-- Report aggregates (25K-scale reports): caller-scope attended + attendance
+CREATE OR REPLACE FUNCTION get_report_aggregates(p_event_id UUID, p_session_id UUID DEFAULT NULL)
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  attended_json JSON := '[]'::JSON;
+  session_attendance_json JSON := '[]'::JSON;
+  financials_json JSON := '[]'::JSON;
+  pledges_json JSON := '[]'::JSON;
+  v_scope_region TEXT := NULL;
+  v_scope_district TEXT := NULL;
+  v_none BOOLEAN := false;
+BEGIN
+  IF caller_full_scope() THEN
+    NULL; -- full event
+  ELSIF current_user_region() IS NOT NULL THEN
+    v_scope_region := district_key(current_user_region());
+  ELSIF current_user_district() IS NOT NULL THEN
+    v_scope_district := district_key(current_user_district());
+  ELSE
+    v_scope_district := '__NONE__';
+    v_none := true;
+  END IF;
+
+  IF NOT v_none THEN
+    SELECT COALESCE(json_agg(d), '[]'::JSON) INTO attended_json
+    FROM (
+      SELECT d.delegate_id, d.title, d.first_name, d.last_name, d.chapter, d.district,
+             d.email, d.phone, d.rank, d.office, d.delegate_type, d.room_number, c.checked_in_at
+      FROM delegates d
+      JOIN checkins c ON c.delegate_id = d.delegate_id AND c.event_id = d.event_id
+      WHERE d.event_id = p_event_id
+        AND ((p_session_id IS NULL AND c.session_id IS NULL)
+             OR (p_session_id IS NOT NULL AND c.session_id = p_session_id))
+        AND (v_scope_region IS NULL AND v_scope_district IS NULL
+             OR (v_scope_region IS NOT NULL AND district_key(d.district) LIKE v_scope_region || '%')
+             OR (v_scope_district IS NOT NULL AND district_key(d.district) = v_scope_district))
+      ORDER BY d.chapter, d.last_name, d.first_name
+    ) d;
+
+    SELECT COALESCE(json_agg(sa), '[]'::JSON) INTO session_attendance_json
+    FROM (
+      SELECT c.session_id, COUNT(*) AS attendance
+      FROM checkins c
+      JOIN delegates d ON d.delegate_id = c.delegate_id AND d.event_id = p_event_id
+      WHERE c.event_id = p_event_id AND c.session_id IS NOT NULL
+        AND (v_scope_region IS NULL AND v_scope_district IS NULL
+             OR (v_scope_region IS NOT NULL AND district_key(d.district) LIKE v_scope_region || '%')
+             OR (v_scope_district IS NOT NULL AND district_key(d.district) = v_scope_district))
+      GROUP BY c.session_id
+    ) sa;
+  END IF;
+
+  -- Financial gate: admins / event admins / finance / executive_admin
+  IF is_admin_user() OR is_event_admin_user()
+     OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role IN ('finance','executive_admin') AND (is_active IS NULL OR is_active = true)) THEN
+    SELECT COALESCE(json_agg(f), '[]'::JSON) INTO financials_json
+    FROM (SELECT * FROM financial_entries WHERE event_id = p_event_id ORDER BY created_at) f;
+
+    SELECT COALESCE(json_agg(p), '[]'::JSON) INTO pledges_json
+    FROM (SELECT * FROM pledges WHERE event_id = p_event_id ORDER BY created_at) p;
+  END IF;
+
+  RETURN json_build_object(
+    'attendedDelegates', attended_json,
+    'sessionAttendance', session_attendance_json,
+    'financials', financials_json,
+    'pledges', pledges_json
+  );
+END;
+$func$;
+
+-- Ministry export data: scope per-delegate responses + attendance (PII)
+CREATE OR REPLACE FUNCTION get_ministry_export_data(p_event_id UUID)
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+    responses_json JSON := '[]'::JSON;
+    summaries_json JSON := '[]'::JSON;
+    vd_json JSON := '[]'::JSON;
+    attendance_json JSON := '[]'::JSON;
+    v_scope_region TEXT := NULL;
+    v_scope_district TEXT := NULL;
+BEGIN
+  IF NOT caller_full_scope() THEN
+    IF current_user_region() IS NOT NULL THEN
+      v_scope_region := district_key(current_user_region());
+    ELSIF current_user_district() IS NOT NULL THEN
+      v_scope_district := district_key(current_user_district());
+    ELSE
+      v_scope_district := '__NONE__';
+    END IF;
+  END IF;
+
+    IF v_scope_district IS DISTINCT FROM '__NONE__' THEN
+      SELECT COALESCE(json_agg(r), '[]'::JSON) INTO responses_json
+      FROM (
+          SELECT sr.*,
+              d.first_name, d.last_name, d.district, d.chapter, d.phone, d.rank, d.office,
+              (d.first_name || ' ' || d.last_name) AS delegate_name,
+              s.title AS session_title
+          FROM session_responses sr
+          JOIN delegates d ON sr.delegate_id = d.delegate_id
+          JOIN sessions s ON sr.session_id = s.session_id
+          WHERE sr.event_id = p_event_id
+            AND (v_scope_region IS NULL AND v_scope_district IS NULL
+                 OR (v_scope_region IS NOT NULL AND district_key(d.district) LIKE v_scope_region || '%')
+                 OR (v_scope_district IS NOT NULL AND district_key(d.district) = v_scope_district))
+          ORDER BY sr.recorded_at DESC
+      ) r;
+    END IF;
+
+    SELECT COALESCE(json_agg(s), '[]'::JSON) INTO summaries_json
+    FROM (
+        SELECT srs.*, s.title AS session_title
+        FROM session_response_summaries srs
+        JOIN sessions s ON srs.session_id = s.session_id
+        WHERE srs.event_id = p_event_id
+        ORDER BY srs.entered_at DESC
+    ) s;
+    SELECT COALESCE(json_agg(v), '[]'::JSON) INTO vd_json
+    FROM (
+        SELECT svd.*, s.title AS session_title
+        FROM session_voice_distribution svd
+        JOIN sessions s ON svd.session_id = s.session_id
+        WHERE svd.event_id = p_event_id
+        ORDER BY svd.updated_at DESC
+    ) v;
+    SELECT COALESCE(json_agg(a), '[]'::JSON) INTO attendance_json
+    FROM (
+        SELECT
+            s.session_id,
+            s.title AS session_title,
+            COUNT(DISTINCT c.delegate_id) AS attendance
+        FROM sessions s
+        LEFT JOIN checkins c ON c.session_id = s.session_id AND c.event_id = p_event_id
+        LEFT JOIN delegates d ON d.delegate_id = c.delegate_id
+        WHERE s.event_id = p_event_id
+          AND (v_scope_region IS NULL AND v_scope_district IS NULL
+               OR (v_scope_region IS NOT NULL AND district_key(d.district) LIKE v_scope_region || '%')
+               OR (v_scope_district IS NOT NULL AND district_key(d.district) = v_scope_district))
+        GROUP BY s.session_id, s.title, s.start_time
+        ORDER BY s.start_time
+    ) a;
+    RETURN json_build_object(
+        'responses', responses_json,
+        'summaries', summaries_json,
+        'voiceDistribution', vd_json,
+        'attendance', attendance_json
+    );
 END;
 $func$;
 
@@ -1614,11 +1859,21 @@ WITH CHECK (is_admin_user() OR is_event_admin_user()
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "svd_delete" ON session_voice_distribution FOR DELETE TO authenticated USING (is_admin_user());
 
--- 12f. session_responses: delete admin-only; insert scoped to officers (unchanged from live)
+-- 12f. session_responses: SELECT scoped by role + district (pass 4); delete
+--      admin-only; insert scoped to officers (unchanged from live)
 DROP POLICY IF EXISTS "sr_select" ON session_responses;
+DROP POLICY IF EXISTS "sr_select_scoped" ON session_responses;
 DROP POLICY IF EXISTS "sr_insert" ON session_responses;
 DROP POLICY IF EXISTS "sr_delete" ON session_responses;
-CREATE POLICY "sr_select" ON session_responses FOR SELECT TO authenticated USING (true);
+CREATE POLICY "sr_select_scoped" ON session_responses FOR SELECT TO authenticated USING (
+  is_admin_user() OR is_event_admin_user() OR is_national_role_user()
+  OR EXISTS (
+    SELECT 1 FROM delegates
+    WHERE delegates.delegate_id = session_responses.delegate_id
+      AND ( (current_user_district() IS NOT NULL AND delegates.district ILIKE current_user_district())
+         OR (current_user_region() IS NOT NULL AND delegates.district ILIKE current_user_region() || '%') )
+  )
+);
 CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH CHECK (
   is_admin_user() OR is_event_admin_user()
   OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()

@@ -13,7 +13,7 @@ const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
-  const [results, setResults] = useState<(Delegate & { checkedIn: boolean })[]>([]);
+  const [results, setResults] = useState<(Delegate & { checkedIn: boolean; verifiedLocally?: boolean })[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
@@ -212,7 +212,8 @@ const CheckInPage = () => {
             phone: res.parsedData?.['phone'] || '',
             email: res.parsedData?.['email'] || '',
             rank: res.parsedData?.['rank'] || 'CP',
-            office: res.parsedData?.['office'] || 'OTHER'
+            office: res.parsedData?.['office'] || 'OTHER',
+            delegate_type: res.parsedData?.['delegate_type'] || 'Member'
           });
         } else { 
           clearVerifiedSnapshot();

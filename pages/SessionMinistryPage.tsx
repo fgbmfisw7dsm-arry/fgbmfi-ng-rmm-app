@@ -650,8 +650,8 @@ const SessionMinistryPage: React.FC = () => {
                   {recordVD.isPending ? 'Saving...' : 'Save'}
                 </button>
               </div>
-              {currentDashboard?.voice_distribution > 0 && (
-                <p className="mt-2 text-xs font-bold text-blue-600">Current: {currentDashboard.voice_distribution} copies recorded</p>
+              {(currentDashboard?.voice_distribution ?? 0) > 0 && (
+                <p className="mt-2 text-xs font-bold text-blue-600">Current: {currentDashboard?.voice_distribution ?? 0} copies recorded</p>
               )}
             </div>
           </div>
