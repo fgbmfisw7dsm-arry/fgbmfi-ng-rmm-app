@@ -720,7 +720,6 @@ DECLARE
   v_updated INT := 0;
   v_identity_synced INT := 0;
   v_confirmed BOOLEAN := false;
-  v_email_plain BOOLEAN := false;
 BEGIN
   IF NOT is_admin_user() THEN
     RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
@@ -760,19 +759,15 @@ BEGIN
     RETURN json_build_object('status', 'error', 'message', 'User not found');
   END IF;
 
-  -- 2) Directly update 'email' when it is a plain column (legacy schemas); on
-  --    generated-column schemas it recomputes from raw_user_meta_data.
-  SELECT (is_generated = 'NEVER') INTO v_email_plain
-  FROM information_schema.columns
-  WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email';
-
-  IF v_email_plain THEN
-    EXECUTE 'UPDATE auth.users SET email = $1, updated_at = NOW() WHERE id = $2'
-      USING v_email, v_uid;
-  ELSE
-    EXECUTE 'UPDATE auth.users SET updated_at = NOW() WHERE id = $1'
-      USING v_uid;
-  END IF;
+  -- 2) Attempt a direct email write for LEGACY plain-column schemas; on modern
+  --    schema generations the email column is GENERATED so this raises 428C9,
+  --    which is swallowed (raw_user_meta_data already updated it).
+  BEGIN
+    EXECUTE 'UPDATE auth.users SET email = $1 WHERE id = $2' USING v_email, v_uid;
+  EXCEPTION WHEN generated_always THEN
+    NULL;
+  END;
+  EXECUTE 'UPDATE auth.users SET updated_at = NOW() WHERE id = $1' USING v_uid;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
              WHERE table_schema = 'auth' AND table_name = 'users'
@@ -835,11 +830,8 @@ BEGIN
   WHERE auth.identities.user_id = v_uid AND auth.identities.provider = 'email';
   GET DIAGNOSTICS v_identity_synced = ROW_COUNT;
 
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-             WHERE table_schema = 'auth' AND table_name = 'identities' AND column_name = 'email') THEN
-    EXECUTE 'UPDATE auth.identities SET email = $1 WHERE user_id = $2 AND provider = ''email'''
-      USING v_email, v_uid;
-  END IF;
+  -- identities.email is a DERIVED column on current Auth — it recomputes from
+  -- identity_data (updated above); never write it directly (428C9 on modern schema).
 
   UPDATE app_users SET email = v_email WHERE id = v_uid;
 
