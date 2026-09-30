@@ -1,7 +1,6 @@
 
 import React, { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import { db } from '../services/supabaseService';
-import { supabase } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
 import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, splitCsvRecords, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
@@ -722,12 +721,8 @@ const ImportModule = () => {
         setScrambleResult(null);
         try {
             const ids = scrambleAnalyses.map((a: any) => a.delegate_id);
-            await supabase.from('checkins').delete().in('delegate_id', ids);
-            await supabase.from('session_responses').delete().in('delegate_id', ids);
-            await supabase.from('badge_print_logs').delete().in('delegate_id', ids);
-            const { error } = await supabase.from('delegates').delete().in('delegate_id', ids);
-            if (error) throw error;
-            setScrambleResult({ type: 'deleted', count: ids.length, msg: `Deleted ${ids.length} records. Dashboard counts auto-updated.` });
+            const deleted = await db.deleteDelegatesByIds(activeEventId, ids);
+            setScrambleResult({ type: 'deleted', count: deleted, msg: `Deleted ${deleted} records. Dashboard counts auto-updated.` });
             setScrambleAnalyses([]);
             setScrambleShowRepairs(false);
         } catch (e: any) {

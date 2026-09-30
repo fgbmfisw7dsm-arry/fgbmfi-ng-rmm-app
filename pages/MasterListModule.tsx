@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole } from '../types';
-import { exportToPDF, exportToCSV, formatCurrency } from '../services/utils';
+import { exportToPDF, exportToCSV, formatCurrency, escapeHtml } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
@@ -325,17 +325,17 @@ const MasterListModule = () => {
             const rows = all.map((d, i) => {
                 const cells = [
                     `<td class="p-3 text-[9px] font-mono text-gray-400">${i + 1}</td>`,
-                    `<td class="p-3 font-bold text-gray-400 uppercase">${d.title}</td>`,
-                    `<td class="p-3 font-black text-gray-900 uppercase">${d.first_name} ${d.last_name}</td>`,
-                    `<td class="p-3 font-medium">${d.chapter || '-'}</td>`,
-                    `<td class="p-3 font-medium lowercase text-blue-600">${d.email || '-'}</td>`,
-                    showRank ? `<td class="p-3 font-black text-blue-800 uppercase">${d.rank}</td>` : '',
-                    showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${d.office}</td>` : '',
-                    showDelegateType ? `<td class="p-3 font-medium text-[9px]">${d.delegate_type || 'Member'}</td>` : '',
-                    `<td class="p-3 font-black text-gray-500 tracking-tighter">${d.phone}</td>`,
+                    `<td class="p-3 font-bold text-gray-400 uppercase">${escapeHtml(d.title)}</td>`,
+                    `<td class="p-3 font-black text-gray-900 uppercase">${escapeHtml(d.first_name)} ${escapeHtml(d.last_name)}</td>`,
+                    `<td class="p-3 font-medium">${escapeHtml(d.chapter) || '-'}</td>`,
+                    `<td class="p-3 font-medium lowercase text-blue-600">${escapeHtml(d.email) || '-'}</td>`,
+                    showRank ? `<td class="p-3 font-black text-blue-800 uppercase">${escapeHtml(d.rank)}</td>` : '',
+                    showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${escapeHtml(d.office)}</td>` : '',
+                    showDelegateType ? `<td class="p-3 font-medium text-[9px]">${escapeHtml(d.delegate_type) || 'Member'}</td>` : '',
+                    `<td class="p-3 font-black text-gray-500 tracking-tighter">${escapeHtml(d.phone)}</td>`,
                     `<td class="p-3">${regBadge(d.reg_type)}</td>`,
-                    `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (d.external_id || '-') : '-'}</td>`,
-                    showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${d.payment_reference || '—'}</td>` : '',
+                    `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (escapeHtml(d.external_id) || '-') : '-'}</td>`,
+                    showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${escapeHtml(d.payment_reference) || '—'}</td>` : '',
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');

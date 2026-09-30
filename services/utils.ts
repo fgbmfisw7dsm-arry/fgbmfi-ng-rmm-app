@@ -6,6 +6,18 @@ export const formatCurrency = (amount: number) => {
 };
 
 /**
+ * HTML-escapes a value for safe interpolation into innerHTML string builders
+ * (PDF export tables and any DOM innerHTML assignment).
+ */
+export const escapeHtml = (value: unknown): string =>
+    String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+/**
  * Generates a UUID v4 for QR hash (primary identifier).
  * Used when creating new delegates or regenerating lost badges.
  */

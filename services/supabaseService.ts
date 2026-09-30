@@ -318,8 +318,13 @@ const completeScore = (d: any) =>
     [d.title, d.first_name, d.last_name, d.phone, d.email, d.district, d.chapter, d.rank, d.office, d.delegate_type]
         .filter(v => v && String(v).trim()).length;
 
+const roleFromMetadata = (value: unknown): string =>
+    typeof value === 'object' && value !== null && 'role' in value && typeof (value as { role?: unknown }).role === 'string'
+        ? (value as { role: string }).role
+        : '';
+
 export const auth = {
-    getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: { role?: string }; user_metadata?: { role?: string } }): Promise<User> => {
+    getOrCreateProfile: async (authId: string, email: string, metadata?: { role?: string; app_metadata?: unknown; user_metadata?: unknown }): Promise<User> => {
         let profile: any = null;
         let rpcError: any = null;
         try {
@@ -381,7 +386,7 @@ export const auth = {
                 return directProfile as User;
             }
 
-            let role = metadata?.app_metadata?.role || metadata?.user_metadata?.role || metadata?.role || 'registrar';
+            let role = roleFromMetadata(metadata?.app_metadata) || roleFromMetadata(metadata?.user_metadata) || metadata?.role || 'registrar';
             console.log('[auth.getOrCreateProfile] Step D: role from metadata=', role);
             if (role === 'registrar') {
                 try {
@@ -716,7 +721,8 @@ export const db = {
                     }
                 }
             } else {
-                inserted += (data?.length || batch.length);
+                const upsertedRows = (data || []) as unknown as unknown[];
+                inserted += upsertedRows.length > 0 ? upsertedRows.length : batch.length;
             }
         }
         return { inserted, errors };
@@ -2145,6 +2151,27 @@ export const db = {
         }
         console.log(`[deleteScrambledImportDelegates] Deleted ${scrambledIds.length} delegate(s) with non-official district from event ${eventId}`);
         return { deleted: scrambledIds.length, preview: previewLines, samples: sampleList, totalDelegates };
+    },
+
+    deleteDelegatesByIds: async (eventId: string, ids: string[]): Promise<number> => {
+        if (!eventId || !ids || ids.length === 0) return 0;
+        await ensureEventActive(eventId);
+        const CHUNK = 500;
+        let deleted = 0;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const { error: cErr } = await supabase.from('checkins').delete().in('delegate_id', chunk);
+            if (cErr) throw cErr;
+            const { error: sErr } = await supabase.from('session_responses').delete().in('delegate_id', chunk);
+            if (sErr) throw sErr;
+            const { error: bErr } = await supabase.from('badge_print_logs').delete().in('delegate_id', chunk);
+            if (bErr) throw bErr;
+            const { error: dErr } = await supabase.from('delegates').delete().in('delegate_id', chunk);
+            if (dErr) throw dErr;
+            deleted += chunk.length;
+        }
+        recordAuditLog(eventId, 'delegate_delete_bulk', `Deleted ${deleted} delegate(s) by id (scrambled-recovery)`, null, 'delegate', eventId, { count: deleted });
+        return deleted;
     },
 
     junkReasonOf: (d: { first_name?: string; last_name?: string; district?: string; chapter?: string }): string | null => {

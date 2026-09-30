@@ -213,6 +213,10 @@ DECLARE
     instance_id_set  BOOLEAN := false;
     v_sanitized_role TEXT;
 BEGIN
+    IF NOT is_admin_user() THEN
+        RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+    END IF;
+
     new_user_id := gen_random_uuid();
 
     v_sanitized_role := CASE
@@ -345,6 +349,10 @@ DECLARE
   v_uid UUID;
   v_email TEXT;
 BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
   v_uid := user_id_to_delete::uuid;
   SELECT email INTO v_email FROM public.app_users WHERE id = v_uid;
   IF NOT FOUND THEN
@@ -369,6 +377,10 @@ DECLARE
     v_uid   UUID;
     v_found BOOLEAN;
 BEGIN
+    IF NOT is_admin_user() THEN
+        RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+    END IF;
+
     v_uid := user_id::uuid;
     UPDATE auth.users
     -- WARNING: GoTrue requires bcrypt cost >= 10. NEVER use gen_salt('bf').
@@ -405,6 +417,10 @@ RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
 BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
   UPDATE public.app_users SET is_active = false WHERE id = user_id::uuid;
   IF NOT FOUND THEN
     RETURN json_build_object('error', 'User not found');
@@ -421,6 +437,10 @@ RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
 AS $func$
 BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
   UPDATE public.app_users SET is_active = true WHERE id = user_id::uuid;
   IF NOT FOUND THEN
     RETURN json_build_object('error', 'User not found');
@@ -439,6 +459,10 @@ AS $func$
 DECLARE
   v_count INT;
 BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
   WITH updated AS (
     UPDATE public.app_users 
     SET is_active = false 
@@ -474,6 +498,10 @@ AS $func$
 DECLARE
   v_confirmed BOOLEAN := false;
 BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at' AND is_generated = 'NEVER') THEN
     EXECUTE 'UPDATE auth.users SET email_confirmed_at = NOW(), updated_at = NOW() WHERE id = $1' USING user_id;
     v_confirmed := true;
@@ -603,8 +631,12 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $func$;
 
-GRANT EXECUTE ON FUNCTION check_login_account(TEXT, TEXT) TO anon;
-GRANT EXECUTE ON FUNCTION check_login_account(TEXT, TEXT) TO authenticated;
+-- check_login_account is a login-password oracle / account-enumeration surface.
+-- Hardened: service_role only (see function lockdown block at the file end).
+REVOKE ALL ON FUNCTION check_login_account(TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION check_login_account(TEXT, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION check_login_account(TEXT, TEXT) FROM authenticated;
+GRANT  EXECUTE ON FUNCTION check_login_account(TEXT, TEXT) TO service_role;
 
 -- 3k. Confirm User By Email (v1.6 — used by signUp-based createUser)
 CREATE OR REPLACE FUNCTION confirm_user_by_email(p_email TEXT)
@@ -617,6 +649,10 @@ DECLARE
     v_confirmed BOOLEAN := false;
     v_identity_ensured BOOLEAN := false;
 BEGIN
+    IF NOT is_admin_user() THEN
+        RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+    END IF;
+
     SELECT id INTO v_uid FROM auth.users WHERE lower(trim(email)) = lower(trim(p_email));
     IF v_uid IS NULL THEN
         RETURN json_build_object('status', 'error', 'error', 'User not found', 'email', p_email);
@@ -1248,6 +1284,33 @@ AS $func$
   LIMIT 1;
 $func$;
 
+-- 8b.0 Helper: Get current user's region (for regional registrar scoping)
+CREATE OR REPLACE FUNCTION current_user_region()
+RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $func$
+  SELECT region FROM app_users
+  WHERE id = auth.uid()
+    AND (is_active IS NULL OR is_active = true)
+  LIMIT 1;
+$func$;
+
+-- 8b.0 Helper: Is current user a national-scope role (sees all rows)
+CREATE OR REPLACE FUNCTION is_national_role_user()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM app_users
+    WHERE id = auth.uid()
+      AND role IN ('national_admin','national_registrar','executive_admin','exec_registrar')
+      AND (is_active IS NULL OR is_active = true)
+  );
+$func$;
+
+GRANT EXECUTE ON FUNCTION current_user_region() TO authenticated;
+GRANT EXECUTE ON FUNCTION is_national_role_user() TO authenticated;
+
 -- 8b.1 Helper: Is current user registrar-tier (for Free Guest restriction; v1.38)
 CREATE OR REPLACE FUNCTION is_registrar_user()
 RETURNS BOOLEAN
@@ -1297,7 +1360,11 @@ END $$;
 -- 8e. app_users policies
 CREATE POLICY "app_users_view_own" ON app_users FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY "app_users_admin_view_all" ON app_users FOR SELECT TO authenticated USING (is_admin_user());
-CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (id = auth.uid());
+CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (
+  id = auth.uid() AND (
+    role NOT IN ('national_admin','regional_admin','district_admin','admin',
+                 'executive_admin','event_admin','exec_registrar')
+    OR is_admin_user()));
 CREATE POLICY "app_users_admin_insert_all" ON app_users FOR INSERT TO authenticated WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_update" ON app_users FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_delete" ON app_users FOR DELETE TO authenticated USING (is_admin_user());
@@ -1309,7 +1376,15 @@ CREATE POLICY "events_admin_update" ON events FOR UPDATE TO authenticated USING 
 CREATE POLICY "events_admin_delete" ON events FOR DELETE TO authenticated USING (is_admin_user());
 
 -- 8g. delegates policies
-CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
+-- SELECT is role + district scoped (hardening pass 3): admins / event admin /
+-- national-scope roles see all; regional roles see their region; district roles
+-- see their district; finance sees no raw delegate rows (uses gated RPCs).
+CREATE POLICY "delegates_select_scoped" ON delegates FOR SELECT TO authenticated USING (
+    is_admin_user()
+    OR is_event_admin_user()
+    OR is_national_role_user()
+    OR (current_user_district() IS NOT NULL AND district ILIKE current_user_district())
+    OR (current_user_region() IS NOT NULL AND district ILIKE current_user_region() || '%'));
 CREATE POLICY "delegates_insert_scoped" ON delegates FOR INSERT TO authenticated WITH CHECK (
     is_admin_user() OR (district ILIKE COALESCE(current_user_district(), '') AND current_user_district() IS NOT NULL));
 CREATE POLICY "delegates_update_scoped" ON delegates FOR UPDATE TO authenticated
@@ -1324,7 +1399,16 @@ CREATE POLICY "sessions_admin_update" ON sessions FOR UPDATE TO authenticated US
 CREATE POLICY "sessions_admin_delete" ON sessions FOR DELETE TO authenticated USING (is_admin_user());
 
 -- 8i. checkins policies
-CREATE POLICY "checkins_select_all" ON checkins FOR SELECT TO authenticated USING (true);
+CREATE POLICY "checkins_select_scoped" ON checkins FOR SELECT TO authenticated USING (
+    is_admin_user()
+    OR is_event_admin_user()
+    OR is_national_role_user()
+    OR EXISTS (
+        SELECT 1 FROM delegates
+        WHERE delegates.delegate_id = checkins.delegate_id
+          AND ( (current_user_district() IS NOT NULL AND delegates.district ILIKE current_user_district())
+             OR (current_user_region() IS NOT NULL AND delegates.district ILIKE current_user_region() || '%') )
+    ));
 CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
     is_admin_user() OR EXISTS (
       SELECT 1 FROM app_users
@@ -1410,15 +1494,26 @@ CREATE POLICY "app_users_admin_insert_all" ON app_users FOR INSERT TO authentica
 CREATE POLICY "app_users_admin_update" ON app_users FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "app_users_admin_view_all" ON app_users FOR SELECT TO authenticated USING (is_admin_user());
 CREATE POLICY "app_users_insert_own" ON app_users FOR INSERT TO authenticated WITH CHECK (
-  id = auth.uid() AND (role NOT IN ('national_admin','regional_admin','district_admin','executive_admin','admin') OR is_admin_user()));
+  id = auth.uid() AND (
+    role NOT IN ('national_admin','regional_admin','district_admin','admin',
+                 'executive_admin','event_admin','exec_registrar')
+    OR is_admin_user()));
 CREATE POLICY "app_users_view_own" ON app_users FOR SELECT TO authenticated USING (id = auth.uid());
 
--- 12b. checkins: registrars + event_admin + admin may insert arrivals/session
+-- 12b. checkins: SELECT scoped via delegate district (hardening pass 3);
+--      registrars + event_admin + admin may insert arrivals/session
 DROP POLICY IF EXISTS "checkins_select_all" ON checkins;
+DROP POLICY IF EXISTS "checkins_select_scoped" ON checkins;
 DROP POLICY IF EXISTS "checkins_admin_registrar_insert" ON checkins;
 DROP POLICY IF EXISTS "checkins_admin_update" ON checkins;
 DROP POLICY IF EXISTS "checkins_admin_delete" ON checkins;
-CREATE POLICY "checkins_select_all" ON checkins FOR SELECT TO authenticated USING (true);
+CREATE POLICY "checkins_select_scoped" ON checkins FOR SELECT TO authenticated USING (
+     is_admin_user() OR is_event_admin_user() OR is_national_role_user() OR EXISTS (
+       SELECT 1 FROM delegates
+       WHERE delegates.delegate_id = checkins.delegate_id
+         AND ( (current_user_district() IS NOT NULL AND delegates.district ILIKE current_user_district())
+            OR (current_user_region() IS NOT NULL AND delegates.district ILIKE current_user_region() || '%') )
+     ));
 CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
      is_admin_user() OR is_event_admin_user() OR EXISTS (
        SELECT 1 FROM app_users
@@ -1531,12 +1626,20 @@ CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH 
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "sr_delete" ON session_responses FOR DELETE TO authenticated USING (is_admin_user());
 
--- 12g. delegates: keep admin/event_admin unscoped writes + registrar district scope
+-- 12g. delegates: SELECT scoped by role + district (hardening pass 3);
+--      keep admin/event_admin unscoped writes + registrar district scope
 DROP POLICY IF EXISTS "delegates_select_all" ON delegates;
+DROP POLICY IF EXISTS "delegates_select_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_insert_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_update_scoped" ON delegates;
 DROP POLICY IF EXISTS "delegates_admin_delete" ON delegates;
-CREATE POLICY "delegates_select_all" ON delegates FOR SELECT TO authenticated USING (true);
+CREATE POLICY "delegates_select_scoped" ON delegates FOR SELECT TO authenticated USING (
+  is_admin_user()
+  OR is_event_admin_user()
+  OR is_national_role_user()
+  OR (current_user_district() IS NOT NULL AND district ILIKE current_user_district())
+  OR (current_user_region() IS NOT NULL AND district ILIKE current_user_region() || '%')
+);
 -- v1.39: restricted events (event_config.restrict_registrar_to_free_guest) allow registrar MANUAL
 -- inserts ONLY as 'Free Guest' in the CONFIGURED guest district; district-scoped manual inserts
 -- are disabled on restricted events. v1.50: the guest district is resolved dynamically from

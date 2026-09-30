@@ -4,11 +4,11 @@ import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { FinancialEntry, Pledge, Delegate, FinancialType, getScopeFilter, PAYMENT_MODES } from '../types';
 import { AppContext } from '../context/AppContext';
-import { formatCurrency, exportToCSV, exportToPDF } from '../services/utils';
+import { formatCurrency, exportToCSV, exportToPDF, escapeHtml } from '../services/utils';
 
 type PdfRow = { cells: string[]; kind?: 'header' | 'subtotal' | 'grand' | 'row' };
 
-const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const esc = escapeHtml;
 
 const buildPdfHtml = (heading: string, subheading: string, headers: string[], rows: PdfRow[], numericCols: number[]): string => {
     const th = headers.map(h => `<th class="p-3 border text-left text-[9px] font-black uppercase text-gray-500 bg-gray-50">${esc(h)}</th>`).join('');
