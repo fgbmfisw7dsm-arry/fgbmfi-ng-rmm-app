@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { User, Event, UserRole, getScopeFilter } from './types';
@@ -12,26 +12,35 @@ import { queryClient } from './hooks/useQueryClient';
 import { flushQueueOnConnect } from './services/offlineQueue';
 import { setOfflineWindowOpen } from './services/offlineRoster';
 
-// Modules
+// Modules — LoginPage stays eager for first paint; the rest are route-level
+// code-split so heavy deps (recharts, pdf-lib, qrcode) load only when needed.
 import LoginPage from './pages/LoginPage';
-import AdminDashboard from './pages/AdminDashboard';
-import ReportsPage from './pages/ReportsPage';
-import FinancialsPage from './pages/FinancialsPage';
-import CheckInPage from './pages/CheckInPage';
-import NewDelegatePage from './pages/NewDelegatePage';
-import MasterListModule from './pages/MasterListModule';
-import EventsModule from './pages/EventsModule';
-import UsersModule from './pages/UsersModule';
-import ImportModule from './pages/ImportModule';
-import SetupModule from './pages/SetupModule';
-import DataModule from './pages/DataModule';
-import UserManualModule from './pages/UserManualModule';
-import SessionMinistryPage from './pages/SessionMinistryPage';
-import BadgePrintingModule from './pages/BadgePrintingModule';
-import IndividualBadgePrint from './pages/IndividualBadgePrint';
-import StorageModule from './pages/StorageModule';
-import AuditLogPage from './pages/AuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
+
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const ReportsPage = React.lazy(() => import('./pages/ReportsPage'));
+const FinancialsPage = React.lazy(() => import('./pages/FinancialsPage'));
+const CheckInPage = React.lazy(() => import('./pages/CheckInPage'));
+const NewDelegatePage = React.lazy(() => import('./pages/NewDelegatePage'));
+const MasterListModule = React.lazy(() => import('./pages/MasterListModule'));
+const EventsModule = React.lazy(() => import('./pages/EventsModule'));
+const UsersModule = React.lazy(() => import('./pages/UsersModule'));
+const ImportModule = React.lazy(() => import('./pages/ImportModule'));
+const SetupModule = React.lazy(() => import('./pages/SetupModule'));
+const DataModule = React.lazy(() => import('./pages/DataModule'));
+const UserManualModule = React.lazy(() => import('./pages/UserManualModule'));
+const SessionMinistryPage = React.lazy(() => import('./pages/SessionMinistryPage'));
+const BadgePrintingModule = React.lazy(() => import('./pages/BadgePrintingModule'));
+const IndividualBadgePrint = React.lazy(() => import('./pages/IndividualBadgePrint'));
+const StorageModule = React.lazy(() => import('./pages/StorageModule'));
+const AuditLogPage = React.lazy(() => import('./pages/AuditLogPage'));
+
+const PageFallback = () => (
+  <div className="p-20 text-center flex flex-col items-center gap-4 opacity-60">
+    <div className="w-8 h-8 border-4 border-blue-900 border-t-transparent rounded-full animate-spin" />
+    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Loading…</p>
+  </div>
+);
 
 const ALL_ADMIN_ROLES: UserRole[] = [
   UserRole.NATIONAL_ADMIN, UserRole.REGIONAL_ADMIN, UserRole.DISTRICT_ADMIN, UserRole.ADMIN
@@ -248,6 +257,7 @@ const AppContent = () => {
           ) : (
             <Route path="*" element={
               <Layout user={user} onLogout={logout} activeEventId={activeEventId} onEventChange={setActiveEventId}>
+                 <Suspense fallback={<PageFallback />}>
                  <Routes>
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/admin/reports" element={<ReportsPage />} />
@@ -296,6 +306,7 @@ const AppContent = () => {
                      <Route path="/help/:section?" element={<UserManualModule />} />
                     <Route path="/" element={<Navigate to="/admin" replace />} />
                  </Routes>
+                 </Suspense>
               </Layout>
             } />
           )}

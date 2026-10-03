@@ -23,6 +23,7 @@ const IndividualBadgePrint = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Delegate | null>(null);
 
   const [generating, setGenerating] = useState(false);
@@ -59,14 +60,17 @@ const IndividualBadgePrint = () => {
   const handleSearch = useCallback(async (q: string) => {
     if (!activeEventId || q.trim().length < 2) {
       setSearchResults([]);
+      setSearchError(null);
       return;
     }
     setSearching(true);
+    setSearchError(null);
     try {
       const results = await db.searchDelegates(q, activeEventId, districtFilter);
       setSearchResults(results as Delegate[]);
-    } catch {
+    } catch (e: any) {
       setSearchResults([]);
+      setSearchError(e?.message || 'Search failed. Check your connection and retry.');
     }
     setSearching(false);
   }, [activeEventId, districtFilter]);
@@ -223,7 +227,6 @@ const IndividualBadgePrint = () => {
     <>
     <style>{`
       @media print {
-        @page { size: 105mm 148mm; margin: 0; }
         html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
         body.a6-print-active > #root > * { display: none !important; }
         #a6-print-sheet { display: none; }
@@ -295,7 +298,10 @@ const IndividualBadgePrint = () => {
             {searchQuery.length >= 2 && (
               <div className="mt-2 max-h-72 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
                 {searching && <p className="p-3 text-[10px] text-gray-400 text-center">Searching...</p>}
-                {!searching && !searchResults.length && (
+                {!searching && searchError && (
+                  <p className="p-3 text-[10px] text-red-600 font-bold text-center">{searchError}</p>
+                )}
+                {!searching && !searchError && !searchResults.length && (
                   <p className="p-3 text-[10px] text-gray-400 text-center">No delegates found</p>
                 )}
                 {searchResults.slice(0, 20).map((d) => (

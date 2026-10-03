@@ -589,6 +589,8 @@ const USE_FINANCIAL_RPC = true;
 let financialRpcAvailable = true;
 const USE_REGISTER_RPC = true;
 let registerRpcAvailable = true;
+const USE_SEARCH_RPC = true;
+let searchRpcAvailable = true;
 
 export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
 
@@ -1010,13 +1012,46 @@ export const db = {
 
     searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean })[]> => {
         if (!eventId) return [];
+        const trimmed = (query || '').trim();
+        if (trimmed.length < 2) return [];
+
+        // v1.68: tokenized, indexed, server-paginated search (matches "Patrick
+        // Arah" full names). Falls back to the legacy per-column query on any
+        // error / when the migration has not been applied yet.
+        if (USE_SEARCH_RPC && searchRpcAvailable) {
+            try {
+                const { data, error } = await supabase.rpc('search_delegates_v2', {
+                    p_event_id: eventId,
+                    p_query: trimmed,
+                    p_session_id: sessionId || null,
+                    p_district: district || null,
+                    p_region: region || null,
+                    p_limit: 100,
+                    p_offset: 0,
+                });
+                if (error) {
+                    const msg = (error.message || '').toLowerCase();
+                    if (msg.includes('could not find the function') || error.code === 'PGRST116' || error.code === 'PGRST202') {
+                        searchRpcAvailable = false;
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    const rows = ((data as any)?.delegates || []) as (Delegate & { checkedIn: boolean })[];
+                    return rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' }));
+                }
+            } catch (e) {
+                console.log('[searchDelegates] RPC failed, using fallback:', (e as any)?.message);
+            }
+        }
+
         let q = supabase.from('delegates').select('*').eq('event_id', eventId);
         if (region) {
             q = q.ilike('district', `${normalize(region)}%`);
         } else if (district) {
             q = q.ilike('district', normalize(district));
         }
-        if (query.length > 1) q = q.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,phone.ilike.%${query}%`);
+        if (trimmed.length > 1) q = q.or(`first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`);
         const { data: delegates, error } = await q.limit(100);
         if (error) throw error;
         if (!delegates || delegates.length === 0) return [];

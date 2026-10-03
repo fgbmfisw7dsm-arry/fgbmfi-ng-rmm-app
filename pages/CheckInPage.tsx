@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../services/supabaseService';
 import { Session, Delegate, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, Chapter, FeeCategory } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -7,7 +8,7 @@ import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
 import { enqueueCheckIn } from '../services/offlineQueue';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
-import { resolveDistrictShortCode } from '../services/utils';
+import { resolveDistrictShortCode, dataUrlToBlob, toWhatsAppNumber } from '../services/utils';
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -119,6 +120,15 @@ const CheckInPage = () => {
     });
     setResults(reconciledData);
   }, [searchResults, query, selectedSessionId, activeEventId]);
+
+  // Toggle a body class while a badge is staged for printing so the print CSS
+  // can hide the entire app shell and emit exactly one sheet.
+  useEffect(() => {
+    const active = !!(badgeDelegate && badgeCanvasUrl);
+    if (active) document.body.classList.add('badge-print-active');
+    else document.body.classList.remove('badge-print-active');
+    return () => document.body.classList.remove('badge-print-active');
+  }, [badgeDelegate, badgeCanvasUrl]);
 
   const renderQrToCanvas = useCallback((delegateId: string, qrHash: string) => {
     const canvas = qrCanvasRefs.current[delegateId];
@@ -341,12 +351,18 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
     try {
-      const resp = await fetch(badgeCanvasUrl);
-      const blob = await resp.blob();
+      // Decode the data URL directly — fetch(dataUrl) is blocked by connect-src CSP.
+      const blob = dataUrlToBlob(badgeCanvasUrl);
       const file = new File([blob], `FGBMFI_Badge_${nameSlug}.png`, { type: 'image/png' });
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'FGBMFI Badge' } as any);
+        await navigator.share({
+          files: [file],
+          title: 'FGBMFI Badge',
+          text: [badgeDelegate?.title, badgeDelegate?.first_name, badgeDelegate?.last_name].filter(Boolean).join(' ').trim(),
+        } as any);
+        setFeedback({ type: 'success', msg: 'Badge shared.' });
+        setTimeout(() => setFeedback(null), 2000);
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -360,10 +376,25 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
         setTimeout(() => setFeedback(null), 3000);
       }
     } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        console.error('Share failed:', e);
-      }
+      if (e?.name === 'AbortError') return;
+      console.error('Share failed:', e);
+      setFeedback({ type: 'error', msg: 'Share failed. Please try again or use the Image button.' });
+      setTimeout(() => setFeedback(null), 3000);
     }
+  };
+
+  const shareBadgeWhatsApp = () => {
+    if (!badgeDelegate) return;
+    const name = [badgeDelegate.title, badgeDelegate.first_name, badgeDelegate.last_name].filter(Boolean).join(' ').trim();
+    const lines = [
+      `FGBMFI Badge — ${name}`,
+      badgeDelegate.district ? `District: ${badgeDelegate.district}` : '',
+      activeEvent?.name ? `Event: ${activeEvent.name}` : '',
+    ].filter(Boolean);
+    const text = encodeURIComponent(lines.join('\n'));
+    const number = toWhatsAppNumber(badgeDelegate.phone);
+    const url = number ? `https://wa.me/${number}?text=${text}` : `https://wa.me/?text=${text}`;
+    window.open(url, '_blank', 'noopener');
   };
 
   const clearSearch = () => {
@@ -425,7 +456,7 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
 
   return (
     <>
-    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4 ${isLocked ? 'opacity-80' : ''} ${badgeDelegate ? 'print:hidden' : ''}`}>
+    <div className={`max-w-4xl mx-auto space-y-8 animate-in fade-in pb-20 px-4 ${isLocked ? 'opacity-80' : ''}`}>
        {isLocked && (
             <div className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl border-2 border-red-700 animate-in slide-in-from-top-4">
                 <span className="text-xl">🔒</span>
@@ -727,6 +758,9 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                   <button onClick={shareBadge} className="py-3 bg-purple-600 hover:bg-purple-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
                     Share
                   </button>
+                  <button onClick={shareBadgeWhatsApp} className="col-span-2 py-3 bg-green-600 hover:bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
+                    Share via WhatsApp
+                  </button>
                 </div>
                 <div className="mt-2 flex gap-3">
                   <button onClick={closeBadgeModal} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-xl text-[11px] uppercase tracking-widest transition-all">
@@ -744,11 +778,16 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
         )}
     </div>
 
-{badgeDelegate && badgeCanvasUrl && (
-          <div className="hidden print:block">
-            <style>{`@media print { html, body { margin: 0 !important; padding: 0 !important; background: white; } }`}</style>
+{badgeDelegate && badgeCanvasUrl && createPortal(
+          <div id="badge-print-sheet">
+            <style>{`@media print {
+              body.badge-print-active > #root > * { display: none !important; }
+              #badge-print-sheet { display: none; }
+              body.badge-print-active #badge-print-sheet { display: block !important; }
+            }`}</style>
             <img src={badgeCanvasUrl} alt="Badge" style={{ width: '65mm', height: '90.8mm', display: 'block', margin: '0 auto' }} />
-          </div>
+          </div>,
+          document.body
         )}
 
         {verifiedDelegate && (

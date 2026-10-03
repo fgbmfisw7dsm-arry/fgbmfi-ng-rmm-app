@@ -139,6 +139,30 @@ export const normalizePhone = (raw?: string | null): string => {
     return digits;
 };
 
+// Converts a normalized Nigerian number (0XXXXXXXXXX) to the
+// international digits-only form WhatsApp's wa.me expects (234XXXXXXXXXX).
+export const toWhatsAppNumber = (raw?: string | null): string => {
+    const local = normalizePhone(raw).replace(/[^0-9]/g, '');
+    if (!local) return '';
+    if (local.startsWith('234')) return local;
+    if (local.startsWith('0')) return `234${local.slice(1)}`;
+    return local;
+};
+
+// Decodes a `data:` URL into a Blob. Used to avoid `fetch(dataUrl)`, which is
+// blocked by the connect-src CSP (data: is only allowed for img/font).
+export const dataUrlToBlob = (dataUrl: string): Blob => {
+    const comma = dataUrl.indexOf(',');
+    const meta = comma >= 0 ? dataUrl.slice(0, comma) : '';
+    const payload = comma >= 0 ? dataUrl.slice(comma + 1) : '';
+    const mime = /:(.*?);/.exec(meta)?.[1] || 'application/octet-stream';
+    if (!/base64/i.test(meta)) return new Blob([decodeURIComponent(payload)], { type: mime });
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+};
+
 // Proper CSV line parser: respects double-quoted fields (fields may contain
 // commas, e.g. DOB "7th June,1958"). Returns trimmed, unquoted fields.
 // Falls back gracefully on malformed input (stray quotes treated literally).

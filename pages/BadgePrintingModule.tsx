@@ -120,6 +120,7 @@ const BadgePrintingModule = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedDelegates, setSelectedDelegates] = useState<Delegate[]>([]);
 
   const [generating, setGenerating] = useState(false);
@@ -262,14 +263,17 @@ const BadgePrintingModule = () => {
     async (q: string) => {
       if (!activeEventId || q.trim().length < 2) {
         setSearchResults([]);
+        setSearchError(null);
         return;
       }
       setSearching(true);
+      setSearchError(null);
       try {
         const results = await db.searchDelegates(q, activeEventId, districtFilter);
         setSearchResults(results as Delegate[]);
-      } catch {
+      } catch (e: any) {
         setSearchResults([]);
+        setSearchError(e?.message || 'Search failed. Check your connection and retry.');
       }
       setSearching(false);
     },
@@ -860,9 +864,6 @@ const BadgePrintingModule = () => {
 
   return (
     <div className="space-y-6">
-      {layout === 'a6-single' && (
-        <style>{`@media print { @page { size: 105mm 148mm; margin: 0; } }`}</style>
-      )}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-black text-blue-900 uppercase tracking-tighter">
@@ -1129,7 +1130,10 @@ const BadgePrintingModule = () => {
                   {searching && (
                     <p className="p-3 text-[10px] text-gray-400 text-center">Searching...</p>
                   )}
-                  {!searching && !searchResults.length && (
+                  {!searching && searchError && (
+                    <p className="p-3 text-[10px] text-red-600 font-bold text-center">{searchError}</p>
+                  )}
+                  {!searching && !searchError && !searchResults.length && (
                     <p className="p-3 text-[10px] text-gray-400 text-center">No delegates found</p>
                   )}
                   {searchResults.slice(0, 25).map((d) => {

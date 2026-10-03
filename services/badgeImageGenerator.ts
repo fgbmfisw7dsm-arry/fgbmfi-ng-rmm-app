@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { Delegate, FeeCategory } from '../types';
-import { V2_ZONES } from './badgePdfGenerator';
+import { V2_ZONES } from './badgeZones';
 
 export interface BadgeImageOptions {
   showRank: boolean;
