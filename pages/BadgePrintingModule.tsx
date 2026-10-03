@@ -1136,7 +1136,12 @@ const BadgePrintingModule = () => {
                   {!searching && !searchError && !searchResults.length && (
                     <p className="p-3 text-[10px] text-gray-400 text-center">No delegates found</p>
                   )}
-                  {searchResults.slice(0, 25).map((d) => {
+                  {!searching && !searchError && searchResults.length > 0 && (
+                    <p className="px-3 py-2 text-[9px] font-bold text-gray-400 text-center bg-gray-50 uppercase tracking-widest">
+                      {searchResults.length} match{searchResults.length === 1 ? '' : 'es'} — scroll to find your delegate
+                    </p>
+                  )}
+                  {searchResults.map((d) => {
                     const selected = selectedDelegates.some(
                       (s) => s.delegate_id === d.delegate_id
                     );

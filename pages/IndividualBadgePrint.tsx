@@ -13,6 +13,7 @@ const IndividualBadgePrint = () => {
 
   const scope = getScopeFilter(user);
   const districtFilter = scope.district;
+  const regionFilter = scope.region;
   const isLocked = activeEvent?.is_active === false;
   // Repairing the external_id needs delegates UPDATE RLS — admin/event_admin only.
   const canRepairExternalId = isAdminRole(user?.role || '') || isEventAdminRole(user?.role || '');
@@ -66,14 +67,14 @@ const IndividualBadgePrint = () => {
     setSearching(true);
     setSearchError(null);
     try {
-      const results = await db.searchDelegates(q, activeEventId, districtFilter);
+      const results = await db.searchDelegates(q, activeEventId, districtFilter, undefined, regionFilter);
       setSearchResults(results as Delegate[]);
     } catch (e: any) {
       setSearchResults([]);
       setSearchError(e?.message || 'Search failed. Check your connection and retry.');
     }
     setSearching(false);
-  }, [activeEventId, districtFilter]);
+  }, [activeEventId, districtFilter, regionFilter]);
 
   useEffect(() => {
     const timeout = setTimeout(() => handleSearch(searchQuery), 300);
@@ -284,7 +285,7 @@ const IndividualBadgePrint = () => {
 
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
         <h2 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-[0.2em]">
-          Select Delegate
+          Select Delegate{activeEvent?.name ? ` — ${activeEvent.name}` : ''}
         </h2>
         {!selected ? (
           <>
@@ -304,7 +305,12 @@ const IndividualBadgePrint = () => {
                 {!searching && !searchError && !searchResults.length && (
                   <p className="p-3 text-[10px] text-gray-400 text-center">No delegates found</p>
                 )}
-                {searchResults.slice(0, 20).map((d) => (
+                {!searching && !searchError && searchResults.length > 0 && (
+                  <p className="px-3 py-2 text-[9px] font-bold text-gray-400 text-center bg-gray-50 uppercase tracking-widest">
+                    {searchResults.length} match{searchResults.length === 1 ? '' : 'es'} — scroll to find your delegate
+                  </p>
+                )}
+                {searchResults.map((d) => (
                   <button
                     key={d.delegate_id}
                     onClick={() => setSelected(d)}

@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.69 (Route-level code splitting + vendor chunking — initial JS bundle 1.98 MB → ~640 kB)
+- **Current Version:** 1.70 (E-Badge WhatsApp share fix + search result-display cap + NULL-safe name-ranked RPC)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1040,6 +1040,23 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **4. pdf-lib dynamic import — intentionally NOT done:** once steps 1–3 land, `pdf-lib` is only reachable through the two lazy badge routes and sits in its own on-demand `pdf-lib` chunk. Threading `rgb`/`StandardFonts` (used synchronously in `drawBadge`) through a dynamic import would be a risky refactor for no additional benefit.
 - **Result (`npm run build`, no warning):** initial path ≈ `index` 152 kB + `react-vendor` 235 kB + `supabase` 216 kB + `tanstack-query` 41 kB (~644 kB raw / ~186 kB gzip), down from ~1.98 MB. `recharts` (377 kB) loads only for the dashboard; `pdf-lib` (431 kB) only for badge PDF routes; each page is a 4–81 kB route chunk. `html5-qrcode` (375 kB) remains on-demand.
 - **Non-disruption:** no `types.ts`/`supabaseService.ts`/`supabaseClient.ts`/DB changes; no behavior change (lazy pages render identically behind a spinner). `npm run typecheck` → 0 errors; `npm run build` passes **without** the chunk-size warning.
+
+## 69. E-Badge WhatsApp Link + Search Result-Display Fix (v1.70)
+
+- **Problem solved (Sep 2026):** (1) "Share via WhatsApp" opened a link but the delegate's number could be malformed (`+2340…` double-zero) and the open mechanism was unreliable; (2) Print Individual Badge still showed "other results, not Patrick Arah" while Check-In showed him — with the migration applied and the same account/event.
+
+### 69a. wa.me formatting + reliable open (`services/utils.ts`, `pages/CheckInPage.tsx`)
+- **Doc rule (WhatsApp FAQ "How to use click to chat"):** `https://wa.me/<number>` where `<number>` is full international format **omitting leading zeroes, brackets, dashes, and `+`**; `?text=urlencodedtext` prefills. The user's example `+23409121234567` had a double zero — valid is `234` + 10 digits.
+- **`toWhatsAppNumber(raw)` rewritten** to strip `00`, a leading `234`, and all leading trunk `0`s, then prefix `234` → always `234` + 10 digits, regardless of stored formatting (tolerates `+`, spaces, dashes, `+2340…` artifacts).
+- **Open via a temporary `<a target="_blank" rel="noopener noreferrer">` click** instead of `window.open(url,'_blank','noopener')` (a `windowFeatures` string can be popup-blocked). The exact URL + resolved number are `console.log`ged; a hint under the button notes desktop may need WhatsApp Web signed in. The "download WhatsApp" landing on desktop is **WhatsApp's own** behaviour when WhatsApp Web isn't signed in — not an app bug.
+
+### 69b. Search — display cap + NULL-safe name-ranked RPC
+- **Root cause (page divergence):** Check-In renders **all** results (`CheckInPage.tsx` `results.map`) while **IndividualBadgePrint capped at `.slice(0,20)`** and **BadgePrintingModule at `.slice(0,25)`** — so a delegate past the cap was visible on Check-In but "missing" on Print. Compounded by the RPC token filter **failing open on NULL `search_text`** (`NOT LIKE` on NULL → subquery empty → `NOT EXISTS` TRUE → every row passed), and by `search_text` including `email`/`chapter` so `Arah` also matched `sarah@…`.
+- **Corrective migration `supabase_migration_search_v2b_fix.sql` (idempotent):** a `DO` block reads `information_schema.columns.is_generated` and rebuilds `search_text` as a populated `GENERATED ALWAYS` column if it was missing or pre-existed as a plain (empty) column; `search_delegates_v2` re-created with `COALESCE(d.search_text,'')` (NULL-safe) and **name-relevance `ORDER BY`** (exact first/last/full-name → name prefix → name contains → `last_name, first_name`) so a surname hit ranks above incidental email matches.
+- **`db.searchDelegates`:** logs path/args/count/RPC error; **falls back to the legacy query when the RPC returns 0 rows** (guards a mis-applied `search_text`); legacy path now `.order('last_name').order('first_name')`; `p_limit` 200.
+- **Badge pages:** removed the `slice(0,20)`/`slice(0,25)` caps (render the full scrollable list with a "N matches" count); `IndividualBadgePrint` now passes `regionFilter` and shows the active event name in the search panel.
+- **Deploy order:** run `supabase_migration_search_v2b_fix.sql` first, then the frontend. Verify `SELECT is_generated … search_text` = `ALWAYS`, `count(*) FILTER (WHERE search_text IS NULL)` = 0, and search `Patrick`/`Arah`/`Patrick Arah` shows him on both pages.
+- **Non-disruption:** additive/derived column + `CREATE OR REPLACE` only. `npm run typecheck` → 0 errors; `npm run build` passes (no chunk-size warning).
 
 ## Code Conventions
 

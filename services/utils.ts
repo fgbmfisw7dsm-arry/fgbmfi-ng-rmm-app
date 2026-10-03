@@ -139,14 +139,17 @@ export const normalizePhone = (raw?: string | null): string => {
     return digits;
 };
 
-// Converts a normalized Nigerian number (0XXXXXXXXXX) to the
-// international digits-only form WhatsApp's wa.me expects (234XXXXXXXXXX).
+// Converts a stored phone into the digits-only international form wa.me expects
+// (Nigeria = 234 + 10 digits). Tolerates +, spaces, dashes, a leading "00", a
+// leading "234", and a stray national trunk zero so no double-zero can leak in.
 export const toWhatsAppNumber = (raw?: string | null): string => {
-    const local = normalizePhone(raw).replace(/[^0-9]/g, '');
-    if (!local) return '';
-    if (local.startsWith('234')) return local;
-    if (local.startsWith('0')) return `234${local.slice(1)}`;
-    return local;
+    let digits = (raw || '').replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.startsWith('234')) digits = digits.slice(3);
+    digits = digits.replace(/^0+/, '');
+    if (!digits) return '';
+    return `234${digits}`;
 };
 
 // Decodes a `data:` URL into a Blob. Used to avoid `fetch(dataUrl)`, which is

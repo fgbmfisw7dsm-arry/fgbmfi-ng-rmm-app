@@ -1026,22 +1026,28 @@ export const db = {
                     p_session_id: sessionId || null,
                     p_district: district || null,
                     p_region: region || null,
-                    p_limit: 100,
+                    p_limit: 200,
                     p_offset: 0,
                 });
                 if (error) {
                     const msg = (error.message || '').toLowerCase();
                     if (msg.includes('could not find the function') || error.code === 'PGRST116' || error.code === 'PGRST202') {
                         searchRpcAvailable = false;
+                        console.warn('[searchDelegates] RPC unavailable — using legacy fallback');
                     } else {
                         throw error;
                     }
                 } else {
-                    const rows = ((data as any)?.delegates || []) as (Delegate & { checkedIn: boolean })[];
-                    return rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' }));
+                    const payload = data as any;
+                    const rows = (payload?.delegates || []) as (Delegate & { checkedIn: boolean })[];
+                    if (rows.length > 0) {
+                        console.log(`[searchDelegates] RPC "${trimmed}" → ${rows.length} of ${payload?.total ?? rows.length} (${district || '-'}/${region || '-'})`);
+                        return rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' }));
+                    }
+                    console.warn(`[searchDelegates] RPC "${trimmed}" returned 0 — cross-checking legacy path (event ${eventId})`);
                 }
             } catch (e) {
-                console.log('[searchDelegates] RPC failed, using fallback:', (e as any)?.message);
+                console.warn('[searchDelegates] RPC error — using legacy fallback:', (e as any)?.message);
             }
         }
 
@@ -1052,7 +1058,7 @@ export const db = {
             q = q.ilike('district', normalize(district));
         }
         if (trimmed.length > 1) q = q.or(`first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`);
-        const { data: delegates, error } = await q.limit(100);
+        const { data: delegates, error } = await q.order('last_name', { ascending: true }).order('first_name', { ascending: true }).limit(200);
         if (error) throw error;
         if (!delegates || delegates.length === 0) return [];
 

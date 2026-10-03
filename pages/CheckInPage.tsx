@@ -393,8 +393,18 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     ].filter(Boolean);
     const text = encodeURIComponent(lines.join('\n'));
     const number = toWhatsAppNumber(badgeDelegate.phone);
+    // https://faq.whatsapp.com/5913398998672934 — digits only, no leading 0/+.
     const url = number ? `https://wa.me/${number}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, '_blank', 'noopener');
+    console.log('[WhatsApp share]', { name, rawPhone: badgeDelegate.phone, waNumber: number || '(none — contact picker)', url });
+    // Anchor click opens a normal tab reliably on desktop AND mobile (window.open
+    // with a features string can be popup-blocked).
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const clearSearch = () => {
@@ -761,6 +771,9 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                   <button onClick={shareBadgeWhatsApp} className="col-span-2 py-3 bg-green-600 hover:bg-green-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95">
                     Share via WhatsApp
                   </button>
+                  <p className="col-span-2 text-[8px] text-gray-400 text-center leading-snug">
+                    Opens wa.me with the delegate's number — on desktop you may need WhatsApp Web signed in.
+                  </p>
                 </div>
                 <div className="mt-2 flex gap-3">
                   <button onClick={closeBadgeModal} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black rounded-xl text-[11px] uppercase tracking-widest transition-all">
