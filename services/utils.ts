@@ -139,19 +139,6 @@ export const normalizePhone = (raw?: string | null): string => {
     return digits;
 };
 
-// Converts a stored phone into the digits-only international form wa.me expects
-// (Nigeria = 234 + 10 digits). Tolerates +, spaces, dashes, a leading "00", a
-// leading "234", and a stray national trunk zero so no double-zero can leak in.
-export const toWhatsAppNumber = (raw?: string | null): string => {
-    let digits = (raw || '').replace(/[^0-9]/g, '');
-    if (!digits) return '';
-    if (digits.startsWith('00')) digits = digits.slice(2);
-    if (digits.startsWith('234')) digits = digits.slice(3);
-    digits = digits.replace(/^0+/, '');
-    if (!digits) return '';
-    return `234${digits}`;
-};
-
 // Decodes a `data:` URL into a Blob. Used to avoid `fetch(dataUrl)`, which is
 // blocked by the connect-src CSP (data: is only allowed for img/font).
 export const dataUrlToBlob = (dataUrl: string): Blob => {

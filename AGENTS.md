@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.71 (E-Badge WhatsApp — clipboard image + open chat, max client-side automation)
+- **Current Version:** 1.72 (E-Badge WhatsApp share button removed — native Share already covers WhatsApp/email)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1069,6 +1069,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   4. **Open the chat** via a temporary `<a target="_blank" rel="noopener noreferrer">` click (`https://wa.me/<number>?text=<name/district/event>`; `https://wa.me/?text=` when no number).
   5. **Feedback toast** states the one remaining manual step — *"Badge copied — in the WhatsApp chat press Ctrl+V (or long-press → Paste), then Send."* (or *"Badge downloaded — attach it…"*).
 - **Net result:** everything is automatic except the final paste + Send. The native **Share** button (Web Share API, image → existing contacts) is unchanged, and `toWhatsAppNumber`'s valid `234` + 10-digit formatting (v1.70) is retained.
+- **Non-disruption:** frontend-only; no DB/`types.ts`/`supabaseClient.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 71. E-Badge WhatsApp Share Button Removed (v1.72)
+
+- **Decision (Sep 2026, product owner):** the dedicated **"Share via WhatsApp"** button is removed from the E-Badge modal. The native **Share** button (Web Share API, `navigator.share({ files })`) already presents WhatsApp *and* email (plus any other installed target) on the OS share sheet with the **actual badge image**, whereas the `wa.me` path cannot attach media and required a manual clipboard paste + Send. Keeping it added confusion for no delivery benefit.
+- **Changes:** `pages/CheckInPage.tsx` — removed `shareBadgeWhatsApp()`, the green button, and the hint paragraph; dropped the now-unused `toWhatsAppNumber` import. `services/utils.ts` — removed the now-unused `toWhatsAppNumber()` helper. The E-Badge export grid is back to Print / PDF / Image / Share (2×2).
+- **Retained:** `shareBadge()` (Web Share with the image; download fallback) and `dataUrlToBlob()` (still used by `shareBadge` to avoid the `connect-src` CSP issue, §67a). The `wa.me` / WhatsApp Business Cloud API discussion remains in §67a/§70 as history — full auto-send to an unknown number is only possible via the server-side Cloud API, intentionally out of scope.
 - **Non-disruption:** frontend-only; no DB/`types.ts`/`supabaseClient.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
