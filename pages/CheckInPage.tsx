@@ -383,9 +383,10 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     }
   };
 
-  const shareBadgeWhatsApp = () => {
+  const shareBadgeWhatsApp = async () => {
     if (!badgeDelegate) return;
     const name = [badgeDelegate.title, badgeDelegate.first_name, badgeDelegate.last_name].filter(Boolean).join(' ').trim();
+    const nameSlug = `${badgeDelegate.first_name || 'delegate'}_${badgeDelegate.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
     const lines = [
       `FGBMFI Badge — ${name}`,
       badgeDelegate.district ? `District: ${badgeDelegate.district}` : '',
@@ -394,10 +395,41 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     const text = encodeURIComponent(lines.join('\n'));
     const number = toWhatsAppNumber(badgeDelegate.phone);
     // https://faq.whatsapp.com/5913398998672934 — digits only, no leading 0/+.
+    // wa.me cannot attach media; we copy the badge so it can be pasted in the chat.
     const url = number ? `https://wa.me/${number}?text=${text}` : `https://wa.me/?text=${text}`;
     console.log('[WhatsApp share]', { name, rawPhone: badgeDelegate.phone, waNumber: number || '(none — contact picker)', url });
-    // Anchor click opens a normal tab reliably on desktop AND mobile (window.open
-    // with a features string can be popup-blocked).
+
+    // 1) Copy the badge image BEFORE opening the tab (opening first can steal
+    //    focus and make clipboard.write() reject).
+    let copied = false;
+    if (badgeCanvasUrl) {
+      try {
+        const clip = navigator.clipboard as Clipboard & { write?: (d: ClipboardItem[]) => Promise<void> };
+        const supportsPng = typeof ClipboardItem !== 'undefined'
+          && !!clip?.write
+          && (typeof (ClipboardItem as any).supports !== 'function' || (ClipboardItem as any).supports('image/png'));
+        if (supportsPng) {
+          await clip.write([new ClipboardItem({ 'image/png': dataUrlToBlob(badgeCanvasUrl) })]);
+          copied = true;
+        }
+      } catch (e) {
+        console.warn('[WhatsApp share] clipboard image copy failed:', e);
+      }
+    }
+
+    // 2) Fallback: download the PNG when image-clipboard is unavailable.
+    if (!copied && badgeCanvasUrl) {
+      const dlUrl = URL.createObjectURL(dataUrlToBlob(badgeCanvasUrl));
+      const dl = document.createElement('a');
+      dl.href = dlUrl;
+      dl.download = `FGBMFI_Badge_${nameSlug}.png`;
+      document.body.appendChild(dl);
+      dl.click();
+      document.body.removeChild(dl);
+      URL.revokeObjectURL(dlUrl);
+    }
+
+    // 3) Open the WhatsApp chat with the delegate's number.
     const a = document.createElement('a');
     a.href = url;
     a.target = '_blank';
@@ -405,6 +437,15 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+
+    // 4) Tell the operator the one remaining manual step.
+    setFeedback({
+      type: 'success',
+      msg: copied
+        ? 'Badge copied — in the WhatsApp chat press Ctrl+V (or long-press → Paste), then Send.'
+        : 'Badge downloaded — attach it in the WhatsApp chat, then Send.',
+    });
+    setTimeout(() => setFeedback(null), 6000);
   };
 
   const clearSearch = () => {
@@ -772,7 +813,7 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
                     Share via WhatsApp
                   </button>
                   <p className="col-span-2 text-[8px] text-gray-400 text-center leading-snug">
-                    Opens wa.me with the delegate's number — on desktop you may need WhatsApp Web signed in.
+                    Copies the badge and opens the wa.me chat — paste it in the chat and press Send (desktop may need WhatsApp Web signed in).
                   </p>
                 </div>
                 <div className="mt-2 flex gap-3">

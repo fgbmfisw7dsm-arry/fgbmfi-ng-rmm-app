@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.70 (E-Badge WhatsApp share fix + search result-display cap + NULL-safe name-ranked RPC)
+- **Current Version:** 1.71 (E-Badge WhatsApp — clipboard image + open chat, max client-side automation)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1057,6 +1057,19 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Badge pages:** removed the `slice(0,20)`/`slice(0,25)` caps (render the full scrollable list with a "N matches" count); `IndividualBadgePrint` now passes `regionFilter` and shows the active event name in the search panel.
 - **Deploy order:** run `supabase_migration_search_v2b_fix.sql` first, then the frontend. Verify `SELECT is_generated … search_text` = `ALWAYS`, `count(*) FILTER (WHERE search_text IS NULL)` = 0, and search `Patrick`/`Arah`/`Patrick Arah` shows him on both pages.
 - **Non-disruption:** additive/derived column + `CREATE OR REPLACE` only. `npm run typecheck` → 0 errors; `npm run build` passes (no chunk-size warning).
+
+## 70. E-Badge WhatsApp — Clipboard Image + Open Chat (v1.71)
+
+- **Problem (Sep 2026):** after v1.70 the "Share via WhatsApp" button correctly opened `https://wa.me/234…?text=…`, but the operator observed WhatsApp's click-to-chat landing ("Chat on WhatsApp with +234… / Open app / Continue to WhatsApp Web") and **no badge image was delivered** — because `wa.me`/`api.whatsapp.com/send` can prefill **text only** and cannot attach media, and the recipient's number is not in the operator's contacts.
+- **Why full automation is impossible client-side:** there is no URL parameter to attach an image to a specific number. The OS/Android share sheet (`navigator.share` with files) can send the image only to **existing** contacts/chats, not an arbitrary number. Fully automated send requires the **WhatsApp Business Cloud API** (server-side: Meta Business account, WhatsApp Business phone-number ID, access token, media upload, approved template, 24-hour session window) — out of scope for a pure SPA. The final **paste + Send** is a browser/WhatsApp security boundary no web app can script.
+- **Shipped — max client-side automation (`pages/CheckInPage.tsx` `shareBadgeWhatsApp`):**
+  1. **Copy the badge PNG to the clipboard** — `navigator.clipboard.write([new ClipboardItem({ 'image/png': dataUrlToBlob(badgeCanvasUrl) })])`, guarded by `typeof ClipboardItem !== 'undefined'`, `navigator.clipboard?.write`, and `ClipboardItem.supports?.('image/png')`. Per MDN, `clipboard.write` requires a secure context + user activation; done **inside the button's gesture**.
+  2. **Order matters — copy FIRST, open SECOND.** Opening the tab first can steal focus and make `clipboard.write()` reject ("Document is not focused"); copying first keeps the badge on the clipboard, then the anchor click opens the chat within the ~5s transient-activation window.
+  3. **Fallback** when image-clipboard is unsupported/denied (e.g., Firefox): download `FGBMFI_Badge_<name>.png` instead.
+  4. **Open the chat** via a temporary `<a target="_blank" rel="noopener noreferrer">` click (`https://wa.me/<number>?text=<name/district/event>`; `https://wa.me/?text=` when no number).
+  5. **Feedback toast** states the one remaining manual step — *"Badge copied — in the WhatsApp chat press Ctrl+V (or long-press → Paste), then Send."* (or *"Badge downloaded — attach it…"*).
+- **Net result:** everything is automatic except the final paste + Send. The native **Share** button (Web Share API, image → existing contacts) is unchanged, and `toWhatsAppNumber`'s valid `234` + 10-digit formatting (v1.70) is retained.
+- **Non-disruption:** frontend-only; no DB/`types.ts`/`supabaseClient.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 
