@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 import {
   subscribePresence,
   getPresenceSnapshot,
@@ -8,6 +8,14 @@ import {
 } from '../services/presenceService';
 import { db } from '../services/supabaseService';
 import type { PresenceSession } from '../types';
+
+const sessionKey = (s: Pick<PresenceSession, 'user_id' | 'device_id'>): string => `${s.user_id}::${s.device_id}`;
+
+// After a kick, a device's presence entry only disappears once the target client
+// honors the kick and untracks. Hide it optimistically; if it is still present
+// and alive past this grace window, un-hide it (the kick was not acknowledged).
+const PENDING_GRACE_MS = 60_000;
+const NOTICE_AUTO_CLEAR_MS = 6_000;
 
 const roleLabel = (role: string): string => {
   switch ((role || '').toLowerCase()) {
@@ -49,6 +57,8 @@ const ConnectedUsersPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // Devices we optimistically hid after issuing a disconnect request.
+  const [hiddenDevices, setHiddenDevices] = useState<Map<string, number>>(new Map());
   const [, setTick] = useState(0);
   const myDeviceId = getDeviceId();
 
@@ -58,16 +68,52 @@ const ConnectedUsersPage: React.FC = () => {
     return () => clearInterval(t);
   }, []);
 
+  // Auto-clear the action notice (user can also dismiss it manually).
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), NOTICE_AUTO_CLEAR_MS);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Visible sessions = live presence minus optimistically-hidden kicked devices.
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => !hiddenDevices.has(sessionKey(s))),
+    [sessions, hiddenDevices]
+  );
+
+  // Reconcile optimistic hides with live presence:
+  //  - gone from presence  -> drop the hidden key (target left; done).
+  //  - still present past the grace window -> un-hide (kick not acknowledged).
+  const liveKeysRef = useRef<Set<string>>(new Set());
+  liveKeysRef.current = useMemo(() => new Set(sessions.map(sessionKey)), [sessions]);
+  useEffect(() => {
+    if (hiddenDevices.size === 0) return;
+    const now = Date.now();
+    let changed = false;
+    const next = new Map(hiddenDevices);
+    hiddenDevices.forEach((hiddenAt, key) => {
+      if (!liveKeysRef.current.has(key)) {
+        next.delete(key);
+        changed = true;
+      } else if (now - hiddenAt > PENDING_GRACE_MS) {
+        next.delete(key);
+        changed = true;
+      }
+    });
+    if (changed) setHiddenDevices(next);
+  }, [sessions, hiddenDevices]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) =>
+    if (!q) return visibleSessions;
+    return visibleSessions.filter((s) =>
       [s.email, s.role, s.district, s.region, s.device_label, s.active_event_id]
         .some((v) => (v || '').toLowerCase().includes(q)));
-  }, [sessions, search]);
+  }, [visibleSessions, search]);
 
-  const accounts = useMemo(() => new Set(sessions.map((s) => s.user_id)).size, [sessions]);
-  const devices = sessions.length;
+  const accounts = useMemo(() => new Set(visibleSessions.map((s) => s.user_id)).size, [visibleSessions]);
+  const devices = visibleSessions.length;
+  const pendingCount = hiddenDevices.size;
 
   const grouped = useMemo(() => {
     const map = new Map<string, { user_id: string; email: string; role: string; devices: PresenceSession[] }>();
@@ -81,12 +127,13 @@ const ConnectedUsersPage: React.FC = () => {
 
   const handleDisconnectDevice = useCallback(async (s: PresenceSession) => {
     if (!window.confirm(`Disconnect this device?\n\n${s.email} — ${s.device_label || s.device_id}${s.device_id === myDeviceId ? '\n\n⚠ This is your current device.' : ''}`)) return;
-    const key = `${s.user_id}::${s.device_id}`;
+    const key = sessionKey(s);
     setBusyKey(key);
     setNotice(null);
     try {
       await db.kickUser(s.user_id, { deviceId: s.device_id, reason: 'Disconnected by administrator (this device)' });
-      setNotice({ kind: 'ok', text: `Disconnect signal sent to ${s.device_label || s.device_id}.` });
+      setHiddenDevices((prev) => new Map(prev).set(key, Date.now()));
+      setNotice({ kind: 'ok', text: `Disconnect requested for ${s.device_label || s.device_id}.` });
     } catch (e: any) {
       setNotice({ kind: 'err', text: e?.message || 'Disconnect failed.' });
     } finally {
@@ -100,13 +147,19 @@ const ConnectedUsersPage: React.FC = () => {
     setNotice(null);
     try {
       await db.kickUser(userId, { deviceId: null, reason: 'Disconnected by administrator (all sessions)' });
-      setNotice({ kind: 'ok', text: `Disconnect signal sent to all sessions for ${email}.` });
+      const now = Date.now();
+      setHiddenDevices((prev) => {
+        const next = new Map(prev);
+        sessions.filter((s) => s.user_id === userId).forEach((s) => next.set(sessionKey(s), now));
+        return next;
+      });
+      setNotice({ kind: 'ok', text: `Disconnect requested for all sessions of ${email}.` });
     } catch (e: any) {
       setNotice({ kind: 'err', text: e?.message || 'Disconnect failed.' });
     } finally {
       setBusyKey(null);
     }
-  }, []);
+  }, [sessions]);
 
   const handleRename = useCallback((s: PresenceSession) => {
     const next = window.prompt('Device label (helps identify shared-login devices):', s.device_label || getDeviceLabel());
@@ -127,6 +180,11 @@ const ConnectedUsersPage: React.FC = () => {
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-2 leading-relaxed">
             Live sessions across all devices. Shared logins count as one account but multiple devices.
           </p>
+          {pendingCount > 0 && (
+            <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mt-2 leading-relaxed">
+              {pendingCount} disconnect request{pendingCount > 1 ? 's' : ''} pending — excluded from counts until acknowledged.
+            </p>
+          )}
         </div>
         <div className="flex gap-3">
           <div className="px-5 py-3 bg-blue-50 border border-blue-100 rounded-2xl text-center min-w-[90px]">
@@ -141,8 +199,15 @@ const ConnectedUsersPage: React.FC = () => {
       </div>
 
       {notice && (
-        <div className={`p-4 rounded-2xl border text-xs font-bold ${notice.kind === 'ok' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
-          {notice.text}
+        <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 ${notice.kind === 'ok' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+          <span>{notice.text}</span>
+          <button
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-lg leading-none opacity-50 hover:opacity-100 transition-opacity"
+          >
+            ×
+          </button>
         </div>
       )}
 
