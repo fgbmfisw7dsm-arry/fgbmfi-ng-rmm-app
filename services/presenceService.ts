@@ -148,58 +148,70 @@ function trackMeta(): Payload {
 
 export function startPresence(user: User, activeEventId?: string): void {
   if (!user?.id) return;
-  if (channel && currentUserId === user.id) {
-    // Same user — just refresh event context + heartbeat payload.
-    currentPayloadBase = { ...(currentPayloadBase as Omit<Payload, 'joined_at' | 'last_seen'>), active_event_id: activeEventId || undefined };
-    channel.track(trackMeta());
-    return;
-  }
-  stopPresence();
-
-  currentUserId = user.id;
-  currentJoinedAt = new Date().toISOString();
-  currentPayloadBase = {
-    user_id: user.id,
-    email: user.email || '',
-    role: (user.role || '') as string,
-    district: user.district,
-    region: user.region,
-    active_event_id: activeEventId || undefined,
-    device_id: getDeviceId(),
-    device_label: getDeviceLabel(),
-  };
-
-  channel = supabase.channel(CHANNEL_NAME, {
-    config: { presence: { key: user.id } },
-  });
-
-  channel.on('presence', { event: 'sync' }, () => {
-    sessions = aggregate(channel?.presenceState() as Record<string, unknown[]> || {});
-    emit();
-  });
-
-  channel.subscribe((status) => {
-    if (status === 'SUBSCRIBED') {
-      channel?.track(trackMeta());
-      sessions = aggregate(channel?.presenceState() as Record<string, unknown[]> || {});
-      emit();
+  // Presence is a monitoring nicety — it must NEVER be able to crash app boot
+  // (e.g. a Realtime/session_kicks hiccup on the very first load after deploy).
+  try {
+    if (channel && currentUserId === user.id) {
+      // Same user — just refresh event context + heartbeat payload.
+      currentPayloadBase = { ...(currentPayloadBase as Omit<Payload, 'joined_at' | 'last_seen'>), active_event_id: activeEventId || undefined };
+      channel.track(trackMeta());
+      return;
     }
-  });
+    stopPresence();
 
-  heartbeat = setInterval(() => {
-    try {
-      if (channel && navigator.onLine !== false) channel.track(trackMeta());
-    } catch { /* ignore */ }
-  }, HEARTBEAT_MS);
+    currentUserId = user.id;
+    currentJoinedAt = new Date().toISOString();
+    currentPayloadBase = {
+      user_id: user.id,
+      email: user.email || '',
+      role: (user.role || '') as string,
+      district: user.district,
+      region: user.region,
+      active_event_id: activeEventId || undefined,
+      device_id: getDeviceId(),
+      device_label: getDeviceLabel(),
+    };
+
+    channel = supabase.channel(CHANNEL_NAME, {
+      config: { presence: { key: user.id } },
+    });
+
+    channel.on('presence', { event: 'sync' }, () => {
+      try {
+        sessions = aggregate(channel?.presenceState() as Record<string, unknown[]> || {});
+        emit();
+      } catch { /* ignore */ }
+    });
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        try {
+          channel?.track(trackMeta());
+          sessions = aggregate(channel?.presenceState() as Record<string, unknown[]> || {});
+          emit();
+        } catch { /* ignore */ }
+      }
+    });
+
+    heartbeat = setInterval(() => {
+      try {
+        if (channel && navigator.onLine !== false) channel.track(trackMeta());
+      } catch { /* ignore */ }
+    }, HEARTBEAT_MS);
+  } catch (e) {
+    console.warn('[presence] start failed (non-fatal):', e);
+  }
 }
 
 export function stopPresence(): void {
-  if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
-  if (channel) {
-    try { channel.untrack(); } catch { /* ignore */ }
-    try { supabase.removeChannel(channel); } catch { /* ignore */ }
-    channel = null;
-  }
+  try {
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+    if (channel) {
+      try { channel.untrack(); } catch { /* ignore */ }
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
+    }
+  } catch { /* ignore */ }
   currentUserId = null;
   currentPayloadBase = null;
   currentJoinedAt = '';
