@@ -396,3 +396,34 @@ export interface AuditLog {
   metadata?: Record<string, any>;
   created_at: string;
 }
+
+// v1.73 (additive exception): Connected Users monitor + per-device sessions.
+// Shared logins produce one app_users row but many concurrent devices; presence
+// is keyed per connection and grouped by (user_id, device_id).
+export type LogoutReason = 'inactivity' | 'disconnected' | 'disconnected-all';
+
+export interface PresenceSession {
+  connection_key: string;
+  user_id: string;
+  email: string;
+  role: string;
+  district?: string;
+  region?: string;
+  active_event_id?: string;
+  device_id: string;
+  device_label?: string;
+  joined_at: string;
+  last_seen: string;
+  tabs: number;
+}
+
+export interface SessionKick {
+  id: string;
+  user_id: string;
+  device_id?: string | null;
+  issued_by?: string | null;
+  issued_email?: string | null;
+  reason?: string | null;
+  created_at: string;
+  consumed_at?: string | null;
+}

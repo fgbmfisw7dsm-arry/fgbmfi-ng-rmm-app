@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User, Event, UserRole, getScopeFilter } from './types';
+import { User, Event, UserRole, getScopeFilter, LogoutReason } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
@@ -11,6 +11,8 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './hooks/useQueryClient';
 import { flushQueueOnConnect } from './services/offlineQueue';
 import { setOfflineWindowOpen } from './services/offlineRoster';
+import { startPresence, stopPresence, getDeviceId } from './services/presenceService';import { useIdleTimeout } from './hooks/useIdleTimeout';
+import IdleTimeoutModal from './components/IdleTimeoutModal';
 
 // Modules — LoginPage stays eager for first paint; the rest are route-level
 // code-split so heavy deps (recharts, pdf-lib, qrcode) load only when needed.
@@ -34,6 +36,7 @@ const BadgePrintingModule = React.lazy(() => import('./pages/BadgePrintingModule
 const IndividualBadgePrint = React.lazy(() => import('./pages/IndividualBadgePrint'));
 const StorageModule = React.lazy(() => import('./pages/StorageModule'));
 const AuditLogPage = React.lazy(() => import('./pages/AuditLogPage'));
+const ConnectedUsersPage = React.lazy(() => import('./pages/ConnectedUsersPage'));
 
 const PageFallback = () => (
   <div className="p-20 text-center flex flex-col items-center gap-4 opacity-60">
@@ -65,6 +68,22 @@ const ADMIN_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
 const ADMIN_EXEC_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
   ...ALL_ADMIN_ROLES, UserRole.EXEC_REGISTRAR, UserRole.EVENT_ADMIN
 ];
+
+// v1.73: offline queue keys must survive a logout so pending check-ins are not
+// silently lost; everything else (active event, caches) is cleared. Auth tokens
+// are managed by Supabase under its own storage key.
+const PRESERVED_LOGOUT_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue'];
+const clearLocalStorageExceptQueues = () => {
+  try {
+    const saved: Record<string, string> = {};
+    PRESERVED_LOGOUT_KEYS.forEach((k) => {
+      const v = localStorage.getItem(k);
+      if (v != null) saved[k] = v;
+    });
+    localStorage.clear();
+    Object.entries(saved).forEach(([k, v]) => localStorage.setItem(k, v));
+  } catch { /* ignore */ }
+};
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -116,16 +135,78 @@ const AppContent = () => {
 
   const logout = useCallback(async () => {
     userIdRef.current = null;
+    try { stopPresence(); } catch { /* ignore */ }
     setUser(null);
     try {
-      await supabase.auth.signOut();
-      localStorage.clear();
+      // v1.73: local scope — on a shared login, this device only. Global scope
+      // (the Supabase default) would revoke the whole account's sessions.
+      await supabase.auth.signOut({ scope: 'local' });
+      // Preserve offline queues; remove everything else.
+      clearLocalStorageExceptQueues();
       window.location.hash = "/login";
     } catch (e) {
-      localStorage.clear();
+      clearLocalStorageExceptQueues();
       window.location.reload();
     }
   }, []);
+
+  const logoutWithReason = useCallback((reason: LogoutReason) => {
+    try { sessionStorage.setItem('fgbmfi_logout_reason', reason); } catch { /* ignore */ }
+    logout();
+  }, [logout]);
+
+  // v1.73 — idle timeout (per device; 15 min + 60s warning).
+  const { warning: idleWarning, secondsLeft: idleSeconds, stayActive, signOutNow } = useIdleTimeout({
+    enabled: !!user?.id,
+    onIdle: () => logoutWithReason('inactivity'),
+  });
+
+  // v1.73 — presence + kick consumer (shared-login aware).
+  useEffect(() => {
+    if (!user?.id) { stopPresence(); return; }
+    const myDeviceId = getDeviceId();
+
+    const shouldHonor = (deviceId?: string | null) => !deviceId || deviceId === myDeviceId;
+    const seenKicks = new Set<string>();
+    const markSeen = (id: string) => {
+      try {
+        const raw = sessionStorage.getItem('fgbmfi_seen_kicks');
+        const arr: string[] = raw ? JSON.parse(raw) : [];
+        if (!arr.includes(id)) { arr.push(id); sessionStorage.setItem('fgbmfi_seen_kicks', JSON.stringify(arr.slice(-50))); }
+      } catch { /* ignore */ }
+    };
+    try {
+      const raw = sessionStorage.getItem('fgbmfi_seen_kicks');
+      (raw ? JSON.parse(raw) : []).forEach((id: string) => seenKicks.add(id));
+    } catch { /* ignore */ }
+
+    startPresence(user, activeEventId || undefined);
+
+    const honor = async (kick: any) => {
+      if (!kick?.id || seenKicks.has(kick.id)) return;
+      seenKicks.add(kick.id);
+      markSeen(kick.id);
+      await db.consumeKick(kick.id);
+      logoutWithReason(kick.device_id ? 'disconnected' : 'disconnected-all');
+    };
+
+    // Catch kicks issued while this device was offline.
+    db.getRecentKicks(user.id).then((kicks) => {
+      kicks.filter((k) => !k.consumed_at && shouldHonor(k.device_id)).forEach((k) => { void honor(k); });
+    }).catch(() => {});
+
+    const kickChannel = supabase
+      .channel(`kicks_${user.id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'session_kicks', filter: `user_id=eq.${user.id}` },
+        (payload) => { const k: any = payload.new; if (shouldHonor(k?.device_id)) void honor(k); })
+      .subscribe();
+
+    return () => {
+      stopPresence();
+      try { supabase.removeChannel(kickChannel); } catch { /* ignore */ }
+    };
+  }, [user?.id, activeEventId, logoutWithReason]);
 
   useEffect(() => {
     let mounted = true;
@@ -169,6 +250,7 @@ const AppContent = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
           userIdRef.current = null;
+          try { stopPresence(); } catch { /* ignore */ }
           if (mounted) setUser(null);
         } else if (event === 'SIGNED_IN' && session?.user) {
           if (userIdRef.current !== session.user.id) {
@@ -247,6 +329,9 @@ const AppContent = () => {
       refreshActiveEvent,
       refreshEvents: fetchEvents 
     }}>
+      {user?.id && idleWarning && (
+        <IdleTimeoutModal secondsLeft={idleSeconds} onStay={stayActive} onSignOut={signOutNow} />
+      )}
       <HashRouter>
         <Routes>
           {!user ? (
@@ -299,6 +384,9 @@ const AppContent = () => {
                      } />
                      <Route path="/admin/audit" element={
                        <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><AuditLogPage /></ProtectedRoute>
+                     } />
+                     <Route path="/admin/connections" element={
+                       <ProtectedRoute allowedRoles={ALL_ADMIN_ROLES}><ConnectedUsersPage /></ProtectedRoute>
                      } />
                      <Route path="/admin/badges" element={
                        <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><BadgePrintingModule /></ProtectedRoute>

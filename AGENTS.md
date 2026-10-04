@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.72 (E-Badge WhatsApp share button removed — native Share already covers WhatsApp/email)
+- **Current Version:** 1.73 (Idle timeout + Connected Users monitor — shared-login aware)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1077,6 +1077,21 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Changes:** `pages/CheckInPage.tsx` — removed `shareBadgeWhatsApp()`, the green button, and the hint paragraph; dropped the now-unused `toWhatsAppNumber` import. `services/utils.ts` — removed the now-unused `toWhatsAppNumber()` helper. The E-Badge export grid is back to Print / PDF / Image / Share (2×2).
 - **Retained:** `shareBadge()` (Web Share with the image; download fallback) and `dataUrlToBlob()` (still used by `shareBadge` to avoid the `connect-src` CSP issue, §67a). The `wa.me` / WhatsApp Business Cloud API discussion remains in §67a/§70 as history — full auto-send to an unknown number is only possible via the server-side Cloud API, intentionally out of scope.
 - **Non-disruption:** frontend-only; no DB/`types.ts`/`supabaseClient.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 72. Idle Timeout + Connected Users Monitor (v1.73)
+
+- **Shared-login model:** the system expects multiple officers to use the **same login credentials** on different devices. This means one `app_users` row but many concurrent sessions. All features below key on **(user_id, device_id)** — a persistent `fgbmfi_device_id` in `localStorage` (stable across tabs/reloads) — never on `user_id` alone.
+- **Idle timeout (`hooks/useIdleTimeout.ts` + `components/IdleTimeoutModal.tsx`, wired in `App.tsx`):** 15 min of inactivity with a 60s warning modal ("Stay signed in" / "Sign out now"). Timers are **per device**; an idle tab never affects sibling tabs (BroadcastChannel keeps same-browser tabs in sync) or other devices. `visibilitychange` recomputes elapsed time on return (background-tab timer throttling). Constants `IDLE_TIMEOUT_MS` / `IDLE_WARNING_MS` exported for tuning.
+- **Sign-out scope change (required):** `logout()` in `App.tsx` now calls `supabase.auth.signOut({ scope: 'local' })` (was global default) so an idle/manual sign-out on a shared login ends **this device only**; global scope would revoke every officer's session on the account.
+- **Offline queue preserved on logout:** `clearLocalStorageExceptQueues()` replaces the old wholesale `localStorage.clear()`, keeping `fgbmfi_checkin_queue` / `fgbmfi_session_response_queue` so pending offline check-ins are not lost by an automatic idle sign-out. (Same fix in the logout catch branch; `LoginPage.handleDeepReset` still clears everything as an explicit connection reset.)
+- **Login message:** `App.tsx` stores `fgbmfi_logout_reason` in `sessionStorage` (`inactivity` | `disconnected` | `disconnected-all`); `LoginPage` reads+clears it and shows the matching notice.
+- **Live list — Realtime Presence (`services/presenceService.ts`):** every signed-in client joins `supabase.channel('online-users', { config: { presence: { key: user.id } } })`, `track`s `{ user_id, email, role, district, region, active_event_id, device_id, device_label, joined_at, last_seen }`, re-tracks every 45s (heartbeat), and re-tracks on active-event change. `presenceState()` is aggregated to **one row per (user_id, device_id)** with a `tabs` count. No schema/polling — presence auto-prunes on disconnect. `subscribePresence`/`getPresenceSnapshot` feed React via `useSyncExternalStore`. Device label defaults from the UA (`getDeviceLabel`) and is editable **only from the owning device** (`setDeviceLabel`).
+- **Page (`pages/ConnectedUsersPage.tsx`, route `/admin/connections`, nav "Connected Users" under Administration):** dual counters (**Accounts** = distinct `user_id`, **Devices** = distinct devices), grouped table (account → device rows), search, per-device **Disconnect**, per-account **Disconnect all sessions**, "This device" badge + Rename, relative connected/last-seen, scope + active event. Admin-only (`ALL_ADMIN_ROLES`).
+- **Disconnect — DB-backed cooperative kick (`supabase_migration_session_kicks.sql`, `db.kickUser`):** new table `session_kicks(id, user_id fk app_users, device_id NULL, issued_by, issued_email, reason, created_at, consumed_at)`; RLS = INSERT `is_admin_user()`, SELECT `is_admin_user() or user_id = auth.uid()`, UPDATE own; added to `supabase_realtime`. `device_id NULL` = all devices on the account; specific = one device. Client consumer (in `App.tsx`) subscribes to `postgres_changes` INSERT filtered `user_id=eq.<self>`, honors only when `device_id` is null or matches its own, `db.consumeKick`s, sets the reason, and calls `logout()` (local). A boot/login `db.getRecentKicks` pass catches kicks issued while offline; `sessionStorage['fgbmfi_seen_kicks']` dedupes. `recordAuditLog('user_disconnect', …)` on issuance.
+- **Cooperative limitation (documented):** a kick relies on the target client honoring it — a modified client could ignore it, and `scope:'local'` does not revoke the refresh token server-side. For a hard block pair with `deactivate_app_user`; true token revocation needs a Supabase Edge Function (deferred).
+- **types.ts additive exception (documented):** `LogoutReason`, `PresenceSession`, `SessionKick`.
+- **Deploy order:** run `supabase_migration_session_kicks.sql` (idempotent) **first** in the Supabase SQL editor (Realtime must be enabled), then deploy the frontend. `npm run typecheck` → 0 errors; `npm run build` passes (route-level code-splitting keeps `ConnectedUsersPage` at ~8.5 kB gzip 2.9).
+- **Non-disruption:** no changes to `supabaseClient.ts`, check-in/import/report/badge/financial paths, RLS policies, or RPCs. Pure additive feature.
 
 ## Code Conventions
 

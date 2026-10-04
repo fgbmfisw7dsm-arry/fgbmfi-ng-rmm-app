@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
@@ -1000,6 +1000,50 @@ export const db = {
 
     bulkDeactivateEventUsers: async () => 
         handleRpcResponse(await supabase.rpc('deactivate_all_event_users'), 'deactivate_all_event_users'),
+
+    // v1.73 — Connected Users monitor. A kick asks the target client to sign
+    // itself out locally; deviceId null = all devices on the shared login.
+    kickUser: async (userId: string, opts?: { deviceId?: string | null; reason?: string }): Promise<void> => {
+        if (!userId) throw new Error('kickUser: user id is required.');
+        const { data: { user } } = await supabase.auth.getUser();
+        const scope = opts?.deviceId ? 'device' : 'all';
+        const payload = {
+            user_id: userId,
+            device_id: opts?.deviceId ?? null,
+            issued_by: user?.id ?? null,
+            issued_email: normalizeEmail(user?.email) || null,
+            reason: (opts?.reason || '').trim() || (scope === 'device'
+                ? 'Disconnected by administrator (this device)'
+                : 'Disconnected by administrator (all sessions)')
+        };
+        handleSupabaseError(await supabase.from('session_kicks').insert(payload));
+        recordAuditLog('', 'user_disconnect',
+            `User disconnected (${scope}${opts?.deviceId ? `: ${opts.deviceId}` : ''})`,
+            null, 'app_users', userId, { device_id: opts?.deviceId ?? null, scope });
+    },
+
+    getRecentKicks: async (userId: string, days: number = 7): Promise<SessionKick[]> => {
+        if (!userId) return [];
+        const since = new Date(Date.now() - days * 86_400_000).toISOString();
+        const { data, error } = await supabase
+            .from('session_kicks')
+            .select('*')
+            .eq('user_id', userId)
+            .gte('created_at', since)
+            .order('created_at', { ascending: true });
+        if (error) {
+            console.warn('[getRecentKicks] failed:', error.message);
+            return [];
+        }
+        return (data || []) as SessionKick[];
+    },
+
+    consumeKick: async (id: string): Promise<void> => {
+        if (!id) return;
+        try {
+            await supabase.from('session_kicks').update({ consumed_at: new Date().toISOString() }).eq('id', id);
+        } catch { /* best-effort */ }
+    },
 
     getDelegateById: async (delegateId: string, eventId?: string): Promise<Delegate | null> => {
         if (!delegateId) return null;

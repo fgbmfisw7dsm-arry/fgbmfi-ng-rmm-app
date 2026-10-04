@@ -171,6 +171,9 @@ case UserRole.FINANCE: return 'Finance Admin';
                 <Link to="/admin/audit" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/audit')}`}>
                   Audit Log
                 </Link>
+                <Link to="/admin/connections" className={`block px-4 py-2 mx-2 rounded-lg transition-colors text-sm font-medium ${isActive('/admin/connections')}`}>
+                  Connected Users
+                </Link>
             </MenuSection>
           )}
 

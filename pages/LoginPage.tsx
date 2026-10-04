@@ -13,6 +13,19 @@ const LoginPage = () => {
 
   useEffect(() => {
     setError('');
+    try {
+      const reason = sessionStorage.getItem('fgbmfi_logout_reason');
+      if (reason) {
+        sessionStorage.removeItem('fgbmfi_logout_reason');
+        if (reason === 'inactivity') {
+          setError('You were signed out on this device after a period of inactivity.');
+        } else if (reason === 'disconnected-all') {
+          setError('An administrator ended all sessions for your account. Please sign in again.');
+        } else if (reason === 'disconnected') {
+          setError('This device was disconnected by an administrator. Please sign in again.');
+        }
+      }
+    } catch { /* ignore */ }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
