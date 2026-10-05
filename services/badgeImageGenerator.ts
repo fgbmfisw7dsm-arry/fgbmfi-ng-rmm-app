@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { Delegate, FeeCategory } from '../types';
-import { V2_ZONES } from './badgeZones';
+import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC } from './badgeZones';
 
 export interface BadgeImageOptions {
   showRank: boolean;
@@ -247,20 +247,25 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     ctx.fill();
 
     const stampLabel = 'REGULAR';
-    const cx = z.stampCX * bw;
-    const cy = z.stampCY * bh;
-    const maxW = Math.max(10, z.stampMaxW * bw - 3 * k);
-    // 10*k px — one point larger than the default, mirroring the PDF (fix3).
-    let stampSize = 10 * k;
+    // Design-matched: left-aligned, cap height scales with card width, to
+    // approximate the baked 'EARLY BIRD'. Position mirrors the PDF path.
+    const sx = (z.stampTL[0] + STAMP_TEXT_X) * bw;
+    const bandTopY = z.stampTR[1] * bh;    // top edge of trapezoid (from top)
+    const bandBottomY = z.stampBL[1] * bh; // bottom edge (from top)
+    const maxW = Math.max(10, STAMP_MAX_W_FRAC * bw - 3 * k);
+    let stampSize = STAMP_CAP_PT * k;
     ctx.font = 'bold ' + stampSize + 'px sans-serif';
-    while (stampSize > 5 * k && ctx.measureText(stampLabel).width > maxW) {
+    while (stampSize > STAMP_MIN_PT * k && ctx.measureText(stampLabel).width > maxW) {
       stampSize -= 0.25;
       ctx.font = 'bold ' + stampSize + 'px sans-serif';
     }
     ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.fillText(stampLabel, cx, cy + stampSize * 0.35, maxW);
     ctx.textAlign = 'left';
+    // Canvas text baseline: center the cap height within the trapezoid band.
+    ctx.textBaseline = 'middle';
+    ctx.fillText(stampLabel, sx, (bandTopY + bandBottomY) / 2, maxW);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   }
 
   return canvas.toDataURL('image/png');

@@ -3,7 +3,7 @@ import { Delegate, Event, BadgeLayout, BadgeLayoutConfig, BadgeGenerationProgres
 import QRCode from 'qrcode';
 // V2_ZONES lives in a pdf-lib-free module so geometry-only consumers (the canvas
 // generator / Check-In E-Badge) do not pull pdf-lib into their bundle.
-import { V2_ZONES } from './badgeZones';
+import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC, STAMP_REF_WIDTH_MM } from './badgeZones';
 export { V2_ZONES };
 
 const PT_PER_MM = 72 / 25.4;
@@ -93,23 +93,27 @@ function drawStampText(
   page.drawText(label, { x: tx, y: ty, size, font, color, maxWidth: Math.max(1, w - pad * 2) });
 }
 
-// Auto-fit white stamp text centered on a point (for the slanted box centroid).
-function drawStampTextCentered(
+// v1.65-fix4: design-matched stamp text — left-aligned in the navy trapezoid to
+// approximate the baked 'EARLY BIRD' (heavy bold, left-set, cap height scaling
+// with the card width). Used for the app-drawn REGULAR only.
+function drawStampTextDesignMatched(
   page: PDFPage,
-  cx: number,
-  cy: number,
+  xLeft: number,
+  bandTop: number,
+  bandBottom: number,
   maxW: number,
   label: string,
   font: any,
-  color: ReturnType<typeof rgb>
+  color: ReturnType<typeof rgb>,
+  cardWidthMm: number
 ) {
   if (!label || maxW <= 0) return;
-  // 10pt — one point larger than the default 9pt so REGULAR reads beside the
-  // bold baked EARLY BIRD (v1.65-fix3).
-  let size = 10;
-  while (size > 4.5 && font.widthOfTextAtSize(label, size) > maxW) size -= 0.25;
-  const textW = font.widthOfTextAtSize(label, size);
-  page.drawText(label, { x: cx - textW / 2, y: cy - size * 0.38, size, font, color, maxWidth: Math.max(1, maxW) });
+  const scale = cardWidthMm / STAMP_REF_WIDTH_MM;
+  let size = STAMP_CAP_PT * scale;
+  while (size > STAMP_MIN_PT && font.widthOfTextAtSize(label, size) > maxW) size -= 0.25;
+  // Vertically center within the trapezoid band.
+  const y = (bandTop + bandBottom) / 2 - size * 0.36;
+  page.drawText(label, { x: xLeft, y, size, font, color, maxWidth: Math.max(1, maxW) });
 }
 
 const bandTextColor = (band: readonly [number, number, number]) => {
@@ -426,11 +430,14 @@ function drawV2Content(
       `L ${xOf(trFx)} ${ySvgOf(trFy)} ` +
       `L ${xOf(tlFx)} ${ySvgOf(tlFy)} Z`;
     page.drawSvgPath(path, { x: 0, y: 0, color: STAMP_BOX_FILL });
-    // "REGULAR" centered on the trapezoid centroid (drawText IS y-up).
-    const cxAbs = xOf(V2_ZONES.stampCX);
-    const cyAbs = yUpOf(V2_ZONES.stampCY);
-    const maxTextW = Math.max(mmToPt(4), V2_ZONES.stampMaxW * bw - mmToPt(1));
-    drawStampTextCentered(page, cxAbs, cyAbs, maxTextW, 'REGULAR', fontBold, STAMP_LIGHT);
+    // "REGULAR" drawn design-matched (left-aligned, card-scaled cap height) to
+    // approximate the baked 'EARLY BIRD'. drawText IS y-up.
+    const textX = xOf(STAMP_TEXT_X);
+    const bandTopY = yUpOf(trFy);      // smaller fy => lower on card => smaller y-up
+    const bandBottomY = yUpOf(blFy);
+    const maxTextW = Math.max(mmToPt(4), STAMP_MAX_W_FRAC * bw);
+    const cardWidthMm = bw / mmToPt(1);
+    drawStampTextDesignMatched(page, textX, bandTopY, bandBottomY, maxTextW, 'REGULAR', fontBold, STAMP_LIGHT, cardWidthMm);
   }
 }
 

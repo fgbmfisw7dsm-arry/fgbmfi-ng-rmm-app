@@ -34,3 +34,16 @@ export const V2_ZONES = {
   stampCY: 0.951,   // centroid y as a from-top fraction
   stampMaxW: 0.33,  // text width fraction at the centroid height (~33mm on 100mm)
 };
+
+// v1.65-fix4: design-matched fee stamp (REGULAR) — approximate the baked
+// 'EARLY BIRD' in badge-design-v2.png (heavy bold, left-aligned in the navy
+// trapezoid, cap height ≈ 2.9mm on a 100×140mm card). The design's exact font
+// is rasterized and unavailable, so we approximate via size + left alignment +
+// bold weight, scaled to the card width on both the PDF and canvas paths.
+// NOTE: Early Bird is NOT drawn by the app (it is baked into the design); these
+// constants only affect the app-drawn REGULAR stamp.
+export const STAMP_TEXT_X = 0.018;     // left inset of the text within the trapezoid (fraction of bw)
+export const STAMP_CAP_PT = 8.2;       // target cap height in pt at the 100mm reference card
+export const STAMP_MIN_PT = 5;         // auto-shrink floor (pt at reference / px*k on canvas)
+export const STAMP_MAX_W_FRAC = 0.37;  // usable text width allowance (fraction of bw)
+export const STAMP_REF_WIDTH_MM = 100; // reference card width the cap height was measured against
