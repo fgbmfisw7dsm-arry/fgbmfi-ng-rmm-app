@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { Delegate, FeeCategory } from '../types';
-import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC } from './badgeZones';
+import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC, STAMP_FAUX_BOLD_MM } from './badgeZones';
 
 export interface BadgeImageOptions {
   showRank: boolean;
@@ -263,6 +263,15 @@ const renderBadgeCanvas = async (delegate: Delegate, qrDataUrl: string, designDa
     ctx.textAlign = 'left';
     // Canvas text baseline: center the cap height within the trapezoid band.
     ctx.textBaseline = 'middle';
+    // Faux-bold: stroke the glyphs to match the heavy weight of the design's
+    // baked 'EARLY BIRD' (bold sans-serif is lighter). lineWidth scales with k.
+    const stroke = STAMP_FAUX_BOLD_MM * k * (96 / 25.4);
+    if (stroke > 0) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = stroke;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(stampLabel, sx, (bandTopY + bandBottomY) / 2, maxW);
+    }
     ctx.fillText(stampLabel, sx, (bandTopY + bandBottomY) / 2, maxW);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';

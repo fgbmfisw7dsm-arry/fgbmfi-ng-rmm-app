@@ -51,3 +51,7 @@ export const STAMP_CAP_PT = 11.4;      // font point (em) size at the 100mm refe
 export const STAMP_MIN_PT = 5;         // auto-shrink floor (pt at reference / px*k on canvas)
 export const STAMP_MAX_W_FRAC = 0.37;  // usable text width allowance (fraction of bw)
 export const STAMP_REF_WIDTH_MM = 100; // reference card width the cap height was measured against
+// v1.65-fix6: the design's baked 'EARLY BIRD' is a heavy/black weight; Helvetica-Bold
+// (PDF) and 'bold sans-serif' (canvas) are lighter, so REGULAR is thickened with a
+// faux-bold pass (PDF: repeat-draw at sub-point offsets; canvas: strokeText) to match.
+export const STAMP_FAUX_BOLD_MM = 0.18; // extra weight thickness in mm at the reference card

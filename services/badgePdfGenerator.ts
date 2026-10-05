@@ -3,7 +3,7 @@ import { Delegate, Event, BadgeLayout, BadgeLayoutConfig, BadgeGenerationProgres
 import QRCode from 'qrcode';
 // V2_ZONES lives in a pdf-lib-free module so geometry-only consumers (the canvas
 // generator / Check-In E-Badge) do not pull pdf-lib into their bundle.
-import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC, STAMP_REF_WIDTH_MM } from './badgeZones';
+import { V2_ZONES, STAMP_TEXT_X, STAMP_CAP_PT, STAMP_MIN_PT, STAMP_MAX_W_FRAC, STAMP_REF_WIDTH_MM, STAMP_FAUX_BOLD_MM } from './badgeZones';
 export { V2_ZONES };
 
 const PT_PER_MM = 72 / 25.4;
@@ -113,7 +113,15 @@ function drawStampTextDesignMatched(
   while (size > STAMP_MIN_PT && font.widthOfTextAtSize(label, size) > maxW) size -= 0.25;
   // Vertically center within the trapezoid band.
   const y = (bandTop + bandBottom) / 2 - size * 0.36;
-  page.drawText(label, { x: xLeft, y, size, font, color, maxWidth: Math.max(1, maxW) });
+  // Faux-bold: draw the glyphs several times at tiny offsets so REGULAR matches
+  // the heavy weight of the design's baked 'EARLY BIRD' (Helvetica-Bold is lighter).
+  const w = Math.max(0.02, STAMP_FAUX_BOLD_MM * scale);
+  const offsets: Array<[number, number]> = [
+    [0, 0], [w, 0], [-w, 0], [0, w], [0, -w],
+  ];
+  for (const [dx, dy] of offsets) {
+    page.drawText(label, { x: xLeft + dx, y: y + dy, size, font, color, maxWidth: Math.max(1, maxW + w) });
+  }
 }
 
 const bandTextColor = (band: readonly [number, number, number]) => {
