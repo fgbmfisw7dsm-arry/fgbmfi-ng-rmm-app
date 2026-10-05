@@ -16,6 +16,7 @@ const sessionKey = (s: Pick<PresenceSession, 'user_id' | 'device_id'>): string =
 // and alive past this grace window, un-hide it (the kick was not acknowledged).
 const PENDING_GRACE_MS = 60_000;
 const NOTICE_AUTO_CLEAR_MS = 6_000;
+const ACCOUNTS_PER_PAGE = 25;
 
 const roleLabel = (role: string): string => {
   switch ((role || '').toLowerCase()) {
@@ -59,6 +60,7 @@ const ConnectedUsersPage: React.FC = () => {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   // Devices we optimistically hid after issuing a disconnect request.
   const [hiddenDevices, setHiddenDevices] = useState<Map<string, number>>(new Map());
+  const [page, setPage] = useState(1);
   const [, setTick] = useState(0);
   const myDeviceId = getDeviceId();
 
@@ -124,6 +126,22 @@ const ConnectedUsersPage: React.FC = () => {
     });
     return Array.from(map.values());
   }, [filtered]);
+
+  // Paginate by account (each row's devices stay together); 25 accounts/page.
+  const totalPages = Math.max(1, Math.ceil(grouped.length / ACCOUNTS_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const pagedAccounts = useMemo(
+    () => grouped.slice((safePage - 1) * ACCOUNTS_PER_PAGE, safePage * ACCOUNTS_PER_PAGE),
+    [grouped, safePage]
+  );
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
 
   const handleDisconnectDevice = useCallback(async (s: PresenceSession) => {
     if (!window.confirm(`Disconnect this device?\n\n${s.email} — ${s.device_label || s.device_id}${s.device_id === myDeviceId ? '\n\n⚠ This is your current device.' : ''}`)) return;
@@ -220,7 +238,7 @@ const ConnectedUsersPage: React.FC = () => {
             onChange={(e) => setSearch(e.target.value)}
           />
           <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest hidden sm:inline">
-            {filtered.length} shown
+            {filtered.length} device{filtered.length === 1 ? '' : 's'} · {grouped.length} account{grouped.length === 1 ? '' : 's'}
           </span>
         </div>
 
@@ -230,7 +248,7 @@ const ConnectedUsersPage: React.FC = () => {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {grouped.map((acct) => (
+            {pagedAccounts.map((acct) => (
               <div key={acct.user_id} className="p-4 sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                   <div className="min-w-0">
@@ -288,6 +306,28 @@ const ConnectedUsersPage: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {grouped.length > ACCOUNTS_PER_PAGE && (
+          <div className="p-4 border-t flex items-center justify-between gap-3 bg-gray-50/50">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="text-[9px] font-black uppercase tracking-widest text-blue-600 border border-blue-100 px-4 py-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition-all disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-blue-600"
+            >
+              ‹ Prev
+            </button>
+            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest tabular-nums">
+              Page {safePage} / {totalPages} · {grouped.length} accounts
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="text-[9px] font-black uppercase tracking-widest text-blue-600 border border-blue-100 px-4 py-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition-all disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-blue-600"
+            >
+              Next ›
+            </button>
           </div>
         )}
       </div>
