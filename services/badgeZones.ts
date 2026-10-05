@@ -43,7 +43,11 @@ export const V2_ZONES = {
 // NOTE: Early Bird is NOT drawn by the app (it is baked into the design); these
 // constants only affect the app-drawn REGULAR stamp.
 export const STAMP_TEXT_X = 0.018;     // left inset of the text within the trapezoid (fraction of bw)
-export const STAMP_CAP_PT = 8.2;       // target cap height in pt at the 100mm reference card
+// v1.65-fix5: STAMP_CAP_PT is a FONT POINT (em) size, NOT a cap height. To match
+// the baked 'EARLY BIRD' cap height (~2.9mm) on the 100mm reference card, the
+// point size must be ~2.9mm / 0.72 (Helvetica cap ratio) ≈ 11.4pt — the previous
+// 8.2pt only produced a ~2.08mm cap and read far smaller than Early Bird.
+export const STAMP_CAP_PT = 11.4;      // font point (em) size at the 100mm reference card
 export const STAMP_MIN_PT = 5;         // auto-shrink floor (pt at reference / px*k on canvas)
 export const STAMP_MAX_W_FRAC = 0.37;  // usable text width allowance (fraction of bw)
 export const STAMP_REF_WIDTH_MM = 100; // reference card width the cap height was measured against
