@@ -7,6 +7,8 @@ import { AppContext } from '../context/AppContext';
 import { generateSingleBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
 
+const SEARCH_PAGE_SIZE = 25;
+
 const IndividualBadgePrint = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
   const [searchParams] = useSearchParams();
@@ -25,6 +27,9 @@ const IndividualBadgePrint = () => {
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState<Delegate | null>(null);
 
   const [generating, setGenerating] = useState(false);
@@ -61,20 +66,42 @@ const IndividualBadgePrint = () => {
   const handleSearch = useCallback(async (q: string) => {
     if (!activeEventId || q.trim().length < 2) {
       setSearchResults([]);
+      setSearchTotal(0);
       setSearchError(null);
+      setSearchPage(1);
       return;
     }
     setSearching(true);
     setSearchError(null);
+    setSearchPage(1);
     try {
-      const results = await db.searchDelegates(q, activeEventId, districtFilter, undefined, regionFilter);
-      setSearchResults(results as Delegate[]);
+      const { data, total } = await db.searchDelegatesPaged(q, activeEventId, districtFilter, undefined, regionFilter, 1, SEARCH_PAGE_SIZE);
+      setSearchResults(data as Delegate[]);
+      setSearchTotal(total);
     } catch (e: any) {
       setSearchResults([]);
+      setSearchTotal(0);
       setSearchError(e?.message || 'Search failed. Check your connection and retry.');
     }
     setSearching(false);
   }, [activeEventId, districtFilter, regionFilter]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!activeEventId || searching || loadingMore || searchResults.length >= searchTotal) return;
+    const next = searchPage + 1;
+    setLoadingMore(true);
+    try {
+      const { data } = await db.searchDelegatesPaged(searchQuery, activeEventId, districtFilter, undefined, regionFilter, next, SEARCH_PAGE_SIZE);
+      setSearchResults(prev => {
+        const seen = new Set(prev.map(d => d.delegate_id));
+        return [...prev, ...(data as Delegate[]).filter(d => !seen.has(d.delegate_id))];
+      });
+      setSearchPage(next);
+    } catch (e: any) {
+      setSearchError(e?.message || 'Could not load more results.');
+    }
+    setLoadingMore(false);
+  }, [activeEventId, districtFilter, regionFilter, searching, loadingMore, searchPage, searchQuery, searchResults.length, searchTotal]);
 
   useEffect(() => {
     const timeout = setTimeout(() => handleSearch(searchQuery), 300);
@@ -101,6 +128,8 @@ const IndividualBadgePrint = () => {
     setSelected(null);
     setSearchQuery('');
     setSearchResults([]);
+    setSearchPage(1);
+    setSearchTotal(0);
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current);
       previewUrlRef.current = null;
@@ -307,7 +336,7 @@ const IndividualBadgePrint = () => {
                 )}
                 {!searching && !searchError && searchResults.length > 0 && (
                   <p className="px-3 py-2 text-[9px] font-bold text-gray-400 text-center bg-gray-50 uppercase tracking-widest">
-                    {searchResults.length} match{searchResults.length === 1 ? '' : 'es'} — scroll to find your delegate
+                    Showing {searchResults.length} of {searchTotal} — scroll to find your delegate
                   </p>
                 )}
                 {searchResults.map((d) => (
@@ -329,6 +358,15 @@ const IndividualBadgePrint = () => {
                     </div>
                   </button>
                 ))}
+                {searchResults.length > 0 && searchResults.length < searchTotal && (
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="w-full p-3 text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                  >
+                    {loadingMore ? 'Loading…' : `Load more (${searchResults.length} of ${searchTotal})`}
+                  </button>
+                )}
               </div>
             )}
           </>

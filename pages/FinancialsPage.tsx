@@ -9,6 +9,7 @@ import { formatCurrency, exportToCSV, exportToPDF, escapeHtml } from '../service
 type PdfRow = { cells: string[]; kind?: 'header' | 'subtotal' | 'grand' | 'row' };
 
 const esc = escapeHtml;
+const SEARCH_PAGE_SIZE = 25;
 
 const buildPdfHtml = (heading: string, subheading: string, headers: string[], rows: PdfRow[], numericCols: number[]): string => {
     const th = headers.map(h => `<th class="p-3 border text-left text-[9px] font-black uppercase text-gray-500 bg-gray-50">${esc(h)}</th>`).join('');
@@ -108,6 +109,9 @@ const FinancialsPage = () => {
 
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<Delegate[]>([]);
+    const [searchPage, setSearchPage] = useState(1);
+    const [searchTotal, setSearchTotal] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [redemptionSearch, setRedemptionSearch] = useState('');
     const [redemptionResults, setRedemptionResults] = useState<Pledge[]>([]);
 
@@ -145,12 +149,34 @@ const FinancialsPage = () => {
         const timer = setTimeout(async () => {
             if (searchTerm.length > 2 && activeEventId) {
                 const scope = getScopeFilter(user);
-                const res = await db.searchDelegates(searchTerm, activeEventId, scope.district, undefined, scope.region);
-                setSearchResults(res);
-            } else setSearchResults([]);
+                const { data, total } = await db.searchDelegatesPaged(searchTerm, activeEventId, scope.district, undefined, scope.region, 1, SEARCH_PAGE_SIZE);
+                setSearchResults(data);
+                setSearchTotal(total);
+                setSearchPage(1);
+            } else {
+                setSearchResults([]);
+                setSearchTotal(0);
+                setSearchPage(1);
+            }
         }, 400);
         return () => clearTimeout(timer);
     }, [searchTerm, activeEventId, user]);
+
+    const handleLoadMoreDonors = async () => {
+        if (!activeEventId || !user || loadingMore || searchResults.length >= searchTotal) return;
+        const next = searchPage + 1;
+        const scope = getScopeFilter(user);
+        setLoadingMore(true);
+        try {
+            const { data } = await db.searchDelegatesPaged(searchTerm, activeEventId, scope.district, undefined, scope.region, next, SEARCH_PAGE_SIZE);
+            setSearchResults(prev => {
+                const seen = new Set(prev.map(d => d.delegate_id));
+                return [...prev, ...data.filter(d => !seen.has(d.delegate_id))];
+            });
+            setSearchPage(next);
+        } catch { /* keep existing results */ }
+        setLoadingMore(false);
+    };
 
     useEffect(() => {
         const timer = setTimeout(async () => {
@@ -176,6 +202,8 @@ const FinancialsPage = () => {
         });
         setSearchTerm('');
         setSearchResults([]);
+        setSearchPage(1);
+        setSearchTotal(0);
     };
 
     const handleSelectPledge = (p: Pledge) => {
@@ -595,11 +623,24 @@ const FinancialsPage = () => {
                             <input className="w-full p-3 border rounded-xl bg-gray-50 font-bold text-sm" placeholder="Search master list..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             {searchResults.length > 0 && (
                                 <div className="absolute z-20 w-full bg-white border shadow-2xl mt-1 rounded-xl max-h-56 overflow-auto divide-y border-gray-100">
+                                    <div className="px-3 py-1.5 text-[9px] font-bold text-gray-400 uppercase tracking-widest bg-gray-50">
+                                        Showing {searchResults.length} of {searchTotal}
+                                    </div>
                                     {searchResults.map(d => (
                                         <div key={d.delegate_id} onClick={() => selectDonorForPledge(d)} className="p-3 hover:bg-blue-50 cursor-pointer text-[11px] font-black text-gray-700 uppercase transition-all">
                                             {d.first_name} {d.last_name} <span className="text-blue-500 ml-1">({d.district})</span>
                                         </div>
                                     ))}
+                                    {searchResults.length < searchTotal && (
+                                        <button
+                                            type="button"
+                                            onClick={handleLoadMoreDonors}
+                                            disabled={loadingMore}
+                                            className="w-full p-3 text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                        >
+                                            {loadingMore ? 'Loading…' : `Load more (${searchResults.length} of ${searchTotal})`}
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>

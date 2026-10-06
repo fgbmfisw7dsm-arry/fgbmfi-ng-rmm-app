@@ -121,6 +121,9 @@ const BadgePrintingModule = () => {
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedDelegates, setSelectedDelegates] = useState<Delegate[]>([]);
 
   const [generating, setGenerating] = useState(false);
@@ -157,6 +160,7 @@ const BadgePrintingModule = () => {
   const showRank = eventConfig.show_rank !== false;
   const showOffice = eventConfig.show_office !== false;
   const A6_PREVIEW_LIMIT = 8;
+  const SEARCH_PAGE_SIZE = 25;
 
   useEffect(() => {
     db.getSettings()
@@ -255,6 +259,8 @@ const BadgePrintingModule = () => {
     setSelectedDelegates([]);
     setSearchQuery('');
     setSearchResults([]);
+    setSearchPage(1);
+    setSearchTotal(0);
     setPreviewCount(0);
     setAllStatusesCount(0);
   };
@@ -263,22 +269,44 @@ const BadgePrintingModule = () => {
     async (q: string) => {
       if (!activeEventId || q.trim().length < 2) {
         setSearchResults([]);
+        setSearchTotal(0);
         setSearchError(null);
+        setSearchPage(1);
         return;
       }
       setSearching(true);
       setSearchError(null);
+      setSearchPage(1);
       try {
-        const results = await db.searchDelegates(q, activeEventId, districtFilter);
-        setSearchResults(results as Delegate[]);
+        const { data, total } = await db.searchDelegatesPaged(q, activeEventId, districtFilter, undefined, undefined, 1, SEARCH_PAGE_SIZE);
+        setSearchResults(data as Delegate[]);
+        setSearchTotal(total);
       } catch (e: any) {
         setSearchResults([]);
+        setSearchTotal(0);
         setSearchError(e?.message || 'Search failed. Check your connection and retry.');
       }
       setSearching(false);
     },
     [activeEventId, districtFilter]
   );
+
+  const handleLoadMoreDelegates = useCallback(async () => {
+    if (!activeEventId || searching || loadingMore || searchResults.length >= searchTotal) return;
+    const next = searchPage + 1;
+    setLoadingMore(true);
+    try {
+      const { data } = await db.searchDelegatesPaged(searchQuery, activeEventId, districtFilter, undefined, undefined, next, SEARCH_PAGE_SIZE);
+      setSearchResults(prev => {
+        const seen = new Set(prev.map(d => d.delegate_id));
+        return [...prev, ...(data as Delegate[]).filter(d => !seen.has(d.delegate_id))];
+      });
+      setSearchPage(next);
+    } catch (e: any) {
+      setSearchError(e?.message || 'Could not load more results.');
+    }
+    setLoadingMore(false);
+  }, [activeEventId, districtFilter, searching, loadingMore, searchPage, searchQuery, searchResults.length, searchTotal]);
 
   useEffect(() => {
     const timeout = setTimeout(() => handleSearchDelegates(searchQuery), 300);
@@ -1138,7 +1166,7 @@ const BadgePrintingModule = () => {
                   )}
                   {!searching && !searchError && searchResults.length > 0 && (
                     <p className="px-3 py-2 text-[9px] font-bold text-gray-400 text-center bg-gray-50 uppercase tracking-widest">
-                      {searchResults.length} match{searchResults.length === 1 ? '' : 'es'} — scroll to find your delegate
+                      Showing {searchResults.length} of {searchTotal} — scroll to find your delegate
                     </p>
                   )}
                   {searchResults.map((d) => {
@@ -1177,6 +1205,15 @@ const BadgePrintingModule = () => {
                       </button>
                     );
                   })}
+                  {searchResults.length > 0 && searchResults.length < searchTotal && (
+                    <button
+                      onClick={handleLoadMoreDelegates}
+                      disabled={loadingMore}
+                      className="w-full p-3 text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                    >
+                      {loadingMore ? 'Loading…' : `Load more (${searchResults.length} of ${searchTotal})`}
+                    </button>
+                  )}
                 </div>
               )}
               {selectedDelegates.length > 0 && (

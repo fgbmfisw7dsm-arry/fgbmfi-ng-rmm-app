@@ -1054,14 +1054,16 @@ export const db = {
         return data as Delegate;
     },
 
-    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean })[]> => {
-        if (!eventId) return [];
+    // v1.74: tokenized, name word-prefix, server-paginated search. Returns the
+    // total so callers can page ("N of M") instead of silently truncating.
+    searchDelegatesPaged: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string, page: number = 1, pageSize: number = 200): Promise<{ data: (Delegate & { checkedIn: boolean })[]; total: number }> => {
+        if (!eventId) return { data: [], total: 0 };
         const trimmed = (query || '').trim();
-        if (trimmed.length < 2) return [];
+        if (trimmed.length < 2) return { data: [], total: 0 };
+        const safePage = Math.max(1, page);
+        const safeSize = Math.max(1, pageSize);
+        const offset = (safePage - 1) * safeSize;
 
-        // v1.68: tokenized, indexed, server-paginated search (matches "Patrick
-        // Arah" full names). Falls back to the legacy per-column query on any
-        // error / when the migration has not been applied yet.
         if (USE_SEARCH_RPC && searchRpcAvailable) {
             try {
                 const { data, error } = await supabase.rpc('search_delegates_v2', {
@@ -1070,47 +1072,55 @@ export const db = {
                     p_session_id: sessionId || null,
                     p_district: district || null,
                     p_region: region || null,
-                    p_limit: 200,
-                    p_offset: 0,
+                    p_limit: safeSize,
+                    p_offset: offset,
                 });
                 if (error) {
                     const msg = (error.message || '').toLowerCase();
                     if (msg.includes('could not find the function') || error.code === 'PGRST116' || error.code === 'PGRST202') {
                         searchRpcAvailable = false;
-                        console.warn('[searchDelegates] RPC unavailable — using legacy fallback');
+                        console.warn('[searchDelegatesPaged] RPC unavailable — using legacy fallback');
                     } else {
                         throw error;
                     }
                 } else {
                     const payload = data as any;
                     const rows = (payload?.delegates || []) as (Delegate & { checkedIn: boolean })[];
-                    if (rows.length > 0) {
-                        console.log(`[searchDelegates] RPC "${trimmed}" → ${rows.length} of ${payload?.total ?? rows.length} (${district || '-'}/${region || '-'})`);
-                        return rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' }));
-                    }
-                    console.warn(`[searchDelegates] RPC "${trimmed}" returned 0 — cross-checking legacy path (event ${eventId})`);
+                    const total = Number(payload?.total ?? rows.length);
+                    console.log(`[searchDelegatesPaged] RPC "${trimmed}" p${safePage} → ${rows.length} of ${total} (${district || '-'}/${region || '-'})`);
+                    return { data: rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' })), total };
                 }
             } catch (e) {
-                console.warn('[searchDelegates] RPC error — using legacy fallback:', (e as any)?.message);
+                console.warn('[searchDelegatesPaged] RPC error — using legacy fallback:', (e as any)?.message);
             }
         }
 
-        let q = supabase.from('delegates').select('*').eq('event_id', eventId);
+        // Legacy fallback (pre-migration only): broad per-column match.
+        let q = supabase.from('delegates').select('*', { count: 'exact' }).eq('event_id', eventId);
         if (region) {
             q = q.ilike('district', `${normalize(region)}%`);
         } else if (district) {
             q = q.ilike('district', normalize(district));
         }
-        if (trimmed.length > 1) q = q.or(`first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`);
-        const { data: delegates, error } = await q.order('last_name', { ascending: true }).order('first_name', { ascending: true }).limit(200);
+        if (trimmed.length > 1) q = q.or(`first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%,email.ilike.%${trimmed}%,external_id.ilike.%${trimmed}%`);
+        const { data: delegates, error, count } = await q.order('last_name', { ascending: true }).order('first_name', { ascending: true }).range(offset, offset + safeSize - 1);
         if (error) throw error;
-        if (!delegates || delegates.length === 0) return [];
+        const rows = delegates || [];
+        if (rows.length === 0) return { data: [], total: count || 0 };
 
-        const { data: allCheckins } = await supabase.from('checkins').select('delegate_id, session_id').eq('event_id', eventId).in('delegate_id', delegates.map(d => d.delegate_id));
+        const { data: allCheckins } = await supabase.from('checkins').select('delegate_id, session_id').eq('event_id', eventId).in('delegate_id', rows.map(d => d.delegate_id));
         const checkedInSet = new Set((allCheckins || []).filter(c =>
             sessionId ? c.session_id === sessionId : c.session_id == null
         ).map(c => c.delegate_id));
-        return delegates.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '' }));
+        return {
+            data: rows.map(d => ({ ...d, checkedIn: checkedInSet.has(d.delegate_id), qr_hash: d.qr_hash || '' })),
+            total: count || rows.length,
+        };
+    },
+
+    searchDelegates: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string): Promise<(Delegate & { checkedIn: boolean })[]> => {
+        const { data } = await db.searchDelegatesPaged(query, eventId, district, sessionId, region, 1, 200);
+        return data;
     },
 
     getAllDelegates: async (eventId?: string): Promise<Delegate[]> => {

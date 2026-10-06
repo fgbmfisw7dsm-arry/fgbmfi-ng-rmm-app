@@ -9,6 +9,7 @@ import { useMinistry } from '../hooks/useMinistry';
 import { exportToPDF, exportToCSV } from '../services/utils';
 
 const RESPONSE_TYPES: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
+const SEARCH_PAGE_SIZE = 25;
 
 const SessionMinistryPage: React.FC = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -26,6 +27,9 @@ const SessionMinistryPage: React.FC = () => {
   const [query, setQuery] = useState('');
   const [code, setCode] = useState('');
   const [results, setResults] = useState<(Delegate & { recorded: boolean; code?: string })[]>([]);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
   const verifiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,25 +119,39 @@ const SessionMinistryPage: React.FC = () => {
   const districtFilter = scope.district;
   const regionFilter = scope.region;
 
-  const { data: searchResults } = useQuery({
-    queryKey: ['delegates', activeEventId, query, districtFilter, regionFilter],
-    queryFn: () => db.searchDelegates(query, activeEventId, districtFilter, undefined, regionFilter),
-    enabled: query.trim().length > 1 && !!activeEventId,
-    staleTime: 15000,
-  });
-
+  // v1.74: bounded replace-page search (constant DOM count on phones)
   useEffect(() => {
-    if (!searchResults) return;
-    if (query.trim().length === 0) {
+    const trimmed = query.trim();
+    if (trimmed.length < 2 || !activeEventId) {
       setResults([]);
+      setSearchTotal(0);
+      setSearchLoading(false);
       return;
     }
-    const combined = new Set([...recordedIds, ...localRecordedIds.current]);
-    setResults((searchResults as any[]).map((d: any) => ({
-      ...d,
-      recorded: combined.has(d.delegate_id),
-    })));
-  }, [searchResults, query, activeEventId, recordedIds]);
+    let cancelled = false;
+    setSearchLoading(true);
+    const handle = setTimeout(() => {
+      db.searchDelegatesPaged(trimmed, activeEventId, districtFilter, undefined, regionFilter, searchPage, SEARCH_PAGE_SIZE)
+        .then(({ data, total }) => {
+          if (cancelled) return;
+          setSearchTotal(total);
+          const combined = new Set([...recordedIds, ...localRecordedIds.current]);
+          setResults(data.map(d => ({ ...d, recorded: combined.has(d.delegate_id) })));
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          console.warn('[SessionMinistryPage] search failed:', e?.message);
+          setResults([]);
+          setSearchTotal(0);
+        })
+        .finally(() => { if (!cancelled) setSearchLoading(false); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [query, activeEventId, districtFilter, regionFilter, searchPage, recordedIds]);
+
+  useEffect(() => {
+    setSearchPage(1);
+  }, [activeEventId, districtFilter, regionFilter]);
 
   const handleRecord = async (delegateId: string) => {
     if (isLocked) return;
@@ -268,6 +286,8 @@ const SessionMinistryPage: React.FC = () => {
 
   const clearSearch = () => {
     setQuery('');
+    setSearchPage(1);
+    setSearchTotal(0);
     setResults([]);
     clearVerifiedSnapshot();
     setFeedback(null);
@@ -352,7 +372,7 @@ const SessionMinistryPage: React.FC = () => {
           <select
             className="w-full p-4 border-2 border-gray-100 rounded-2xl bg-gray-50 font-black text-lg text-blue-900 focus:bg-white focus:border-blue-500 outline-none transition-all"
             value={selectedSessionId}
-            onChange={e => setSelectedSessionId(e.target.value)}
+            onChange={e => { setSelectedSessionId(e.target.value); setSearchPage(1); }}
           >
             {sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title}</option>)}
           </select>
@@ -510,6 +530,7 @@ const SessionMinistryPage: React.FC = () => {
               value={query}
               onChange={e => {
                 setQuery(e.target.value);
+                setSearchPage(1);
                 if (feedback?.type === 'error') setFeedback(null);
                 setPendingReg(null);
               }}
@@ -556,6 +577,21 @@ const SessionMinistryPage: React.FC = () => {
             );
           })}
         </div>
+
+        {query.trim().length >= 2 && (searchLoading || searchTotal > 0) && (
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+              {searchLoading ? 'Searching…' : `${results.length} shown · ${searchTotal} match${searchTotal === 1 ? '' : 'es'}`}
+            </p>
+            {searchTotal > SEARCH_PAGE_SIZE && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSearchPage(p => Math.max(1, p - 1))} disabled={searchPage <= 1 || searchLoading} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Prev</button>
+                <span className="text-[10px] font-black uppercase text-gray-500">Page {searchPage} of {Math.max(1, Math.ceil(searchTotal / SEARCH_PAGE_SIZE))}</span>
+                <button onClick={() => setSearchPage(p => p + 1)} disabled={searchPage >= Math.ceil(searchTotal / SEARCH_PAGE_SIZE) || searchLoading} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Next</button>
+              </div>
+            )}
+          </div>
+        )}
 
         {selectedSessionId && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border">
