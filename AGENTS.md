@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.74 (Name word-prefix search + bounded paging — see §73)
+- **Current Version:** 1.74b (Search RPC CTE-scope fix — see §74)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1113,6 +1113,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **UI:** `CheckInPage` + `SessionMinistryPage` use **bounded replace-page** (25/page, 250ms debounce, `Page X of Y · N matches`), keeping DOM nodes and per-row QR canvases bounded on phones (check-in write path untouched). `IndividualBadgePrint`, `BadgePrintingModule`, `FinancialsPage` use **Load More + "Showing N of M"**. `MasterListModule` needs no UI change (already server-paginated; inherits prefix search from the rebuilt RPC).
 - **Deploy order:** run the migration in the Supabase SQL editor first, then deploy the frontend (frontend-first is non-breaking via the legacy fallback). `npm run typecheck` → 0 errors; `npm run build` passes.
 - **Verify:** `Ayode` returns only names with a word starting `Ayode`; `Ayo Ola` and `Ola Ayo` both find him; phone/email/Reg ID still find him; Master List search follows the same rule; the door page's result DOM stays bounded.
+
+## 74. Search RPC CTE-Scope Bug — `relation "base" does not exist` (v1.74b)
+
+- **Symptom (Sep 2026, after deploying v1.74):** the lookup search listed **hundreds of pages for every query** and **prefix matching did nothing**. Browser console showed, per keystroke:
+  `[searchDelegatesPaged] RPC error — using legacy fallback: relation "base" does not exist`.
+- **Root cause (definitive):** a PostgreSQL **CTE scoping error** in `search_delegates_v2`. The body declared `WITH base AS (...)` and then referenced `base` from **two separate SQL statements** — `SELECT count(*) INTO v_total FROM base;` (stmt 1) and `SELECT … FROM (… FROM base b …) sub;` (stmt 2). A CTE is only visible within the **single statement** it is declared on, so the second statement raised `relation "base" does not exist`. The RPC therefore **never returned a row**. `searchDelegatesPaged` caught the error and silently ran the legacy broad `%contains%` query (name + phone + email + external_id via `.or(...)`). v1.74 then added `count:'exact'` + pagination, which **exposed** the legacy result set as "hundreds of pages" (the old UI silently showed the first 200 with no page count). This is why the same class of complaint kept recurring: the "unified search" has never actually served since v1.68.
+- **Scope of the bug:** present in `supabase_migration_search_v2.sql` (§67b), `supabase_migration_search_v2b_fix.sql` (§69b), **and** `supabase_migration_search_v3_prefix.sql` (§73) — all three split `base` across statements. `get_paginated_delegates` (Master List) was **not** affected (it uses two self-contained `delegates` queries, no `base` CTE).
+- **Fix (`supabase_migration_search_v3b_fix_base_cte.sql`, idempotent):** `search_delegates_v2` rebuilt as **one statement** — `WITH base AS (...) SELECT (SELECT count(*)::int FROM base) AS total, COALESCE(jsonb_agg(page ORDER BY page.ord),'[]'::jsonb) AS rows INTO v_total, v_rows FROM (SELECT b.*, EXISTS(...) AS "checkedIn", row_number() OVER (ORDER BY <relevance>) AS ord FROM base b) page WHERE page.ord > GREATEST(p_offset,0) AND page.ord <= GREATEST(p_offset,0)+GREATEST(p_limit,1);`. Same predicate/relevance ordering; returns correct `total` + page. Also **drops the stale 7-arg `get_paginated_delegates` overload** (old substring body — it also made 5-arg `getAllDelegates` calls ambiguous) and runs `NOTIFY pgrst, 'reload schema';`. `supabase_migration_search_v3_prefix.sql` patched to the same body for fresh installs.
+- **Service hardening (`supabaseService.ts` `searchDelegatesPaged`):** the legacy fallback no longer does broad `%contains%` — it now does **tokenized name-prefix** matching (AND across tokens via `and(or(first_name.ilike.tok%,last_name.ilike.tok%),…)`, plus whole-query identifier contains), so even a fallback preserves v1.74 semantics and can't flood. A failed RPC now logs at `console.error` (was an easy-to-miss `console.warn`), since a silent fallback previously disguised a 100%-broken RPC as "valid large results". Error classification (only permanently disable the RPC on genuine function-missing) was already correct and is unchanged.
+- **Deploy:** run `supabase_migration_search_v3b_fix_base_cte.sql` in the Supabase SQL editor, then hard-refresh the browser. Verify the RPC directly: `SELECT (search_delegates_v2('<event>','Ayode',NULL,NULL,NULL,100,0))->>'total';` must return a number (not `relation "base" does not exist`); `count(*) FROM pg_proc WHERE proname='get_paginated_delegates'` = 1.
+- **Lesson:** a client-side "resilient" fallback can mask a total server failure for months. Keep fallbacks semantically equivalent to the primary path, and log failures loudly.
 
 ## Code Conventions
 

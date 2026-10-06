@@ -80,6 +80,9 @@ BEGIN
   v_q := lower(btrim(coalesce(p_query, '')));
   v_tokens := array_remove(regexp_split_to_array(v_q, '\s+'), '');
 
+  -- SINGLE statement: the CTE `base` is scoped to this one statement and used by
+  -- both the count and the paged aggregate. (A prior version referenced `base`
+  -- from a SECOND statement, which raised `relation "base" does not exist`.)
   WITH base AS (
     SELECT d.*
     FROM delegates d
@@ -114,9 +117,10 @@ BEGIN
         )
       )
   )
-  SELECT count(*)::integer INTO v_total FROM base;
-
-  SELECT COALESCE(jsonb_agg(sub), '[]'::jsonb) INTO v_rows
+  SELECT
+    (SELECT count(*)::integer FROM base) AS total,
+    COALESCE(jsonb_agg(page ORDER BY page.ord), '[]'::jsonb) AS rows
+  INTO v_total, v_rows
   FROM (
     SELECT b.*,
       EXISTS (
@@ -127,23 +131,25 @@ BEGIN
             (p_session_id IS NULL AND c.session_id IS NULL)
             OR (p_session_id IS NOT NULL AND c.session_id = p_session_id)
           )
-      ) AS "checkedIn"
+      ) AS "checkedIn",
+      row_number() OVER (ORDER BY
+        (lower(coalesce(b.external_id, '')) = v_q
+          OR lower(b.delegate_id::text) = v_q
+          OR (length(v_q) >= 3 AND normalize_phone_sql(p_query) = b.phone_normalized)
+          OR (position('@' in v_q) > 0 AND lower(coalesce(b.email, '')) = v_q)) DESC,
+        (lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) = v_q
+          OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) = v_q) DESC,
+        (lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) LIKE search_escape(v_q) || '%'
+          OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) LIKE search_escape(v_q) || '%') DESC,
+        (lower(coalesce(b.first_name, '')) = v_q OR lower(coalesce(b.last_name, '')) = v_q) DESC,
+        (lower(coalesce(b.first_name, '')) LIKE search_escape(v_q) || '%'
+          OR lower(coalesce(b.last_name, '')) LIKE search_escape(v_q) || '%') DESC,
+        b.last_name, b.first_name
+      ) AS ord
     FROM base b
-    ORDER BY
-      (lower(coalesce(b.external_id, '')) = v_q
-        OR lower(b.delegate_id::text) = v_q
-        OR (length(v_q) >= 3 AND normalize_phone_sql(p_query) = b.phone_normalized)
-        OR (position('@' in v_q) > 0 AND lower(coalesce(b.email, '')) = v_q)) DESC,
-      (lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) = v_q
-        OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) = v_q) DESC,
-      (lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) LIKE search_escape(v_q) || '%'
-        OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) LIKE search_escape(v_q) || '%') DESC,
-      (lower(coalesce(b.first_name, '')) = v_q OR lower(coalesce(b.last_name, '')) = v_q) DESC,
-      (lower(coalesce(b.first_name, '')) LIKE search_escape(v_q) || '%'
-        OR lower(coalesce(b.last_name, '')) LIKE search_escape(v_q) || '%') DESC,
-      b.last_name, b.first_name
-    LIMIT GREATEST(p_limit, 1) OFFSET GREATEST(p_offset, 0)
-  ) sub;
+  ) page
+  WHERE page.ord >  GREATEST(p_offset, 0)
+    AND page.ord <= GREATEST(p_offset, 0) + GREATEST(p_limit, 1);
 
   RETURN jsonb_build_object(
     'delegates', v_rows,
@@ -156,6 +162,12 @@ $func$;
 
 REVOKE ALL ON FUNCTION search_delegates_v2(uuid, text, uuid, text, text, integer, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION search_delegates_v2(uuid, text, uuid, text, text, integer, integer) TO authenticated, service_role;
+
+-- Remove the stale 7-arg get_paginated_delegates overload (old substring body);
+-- the 8-arg prefix version below is the only one that should remain. Also reloads
+-- the PostgREST schema cache so the API picks up the changes immediately.
+DROP FUNCTION IF EXISTS get_paginated_delegates(integer, integer, text, text, text, uuid, text);
+NOTIFY pgrst, 'reload schema';
 
 -- 3) Master List paginated search — same predicate, 8-arg signature preserved --
 CREATE OR REPLACE FUNCTION get_paginated_delegates(

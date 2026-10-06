@@ -1091,18 +1091,34 @@ export const db = {
                     return { data: rows.map(d => ({ ...d, checkedIn: !!d.checkedIn, qr_hash: d.qr_hash || '' })), total };
                 }
             } catch (e) {
-                console.warn('[searchDelegatesPaged] RPC error — using legacy fallback:', (e as any)?.message);
+                console.error('[searchDelegatesPaged] RPC FAILED — using prefix fallback. Verify the search_delegates_v2 function:', (e as any)?.message);
             }
         }
 
-        // Legacy fallback (pre-migration only): broad per-column match.
+        // Legacy fallback (only when the RPC is genuinely unavailable). Uses
+        // tokenized NAME-PREFIX matching (AND across tokens) instead of the old
+        // broad `%contains%`, so it preserves the v1.74 search semantics and can
+        // never flood a common name with substring/email/chapter hits.
+        const safeTok = (s: string) => s.replace(/[(),%\\]/g, '');
+        const tokens = trimmed.toLowerCase().split(/\s+/).map(safeTok).filter(t => t.length > 0).slice(0, 4);
         let q = supabase.from('delegates').select('*', { count: 'exact' }).eq('event_id', eventId);
         if (region) {
             q = q.ilike('district', `${normalize(region)}%`);
         } else if (district) {
             q = q.ilike('district', normalize(district));
         }
-        if (trimmed.length > 1) q = q.or(`first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%,email.ilike.%${trimmed}%,external_id.ilike.%${trimmed}%`);
+        const orParts: string[] = [];
+        if (tokens.length === 1) {
+            orParts.push(`or(first_name.ilike.${tokens[0]}%,last_name.ilike.${tokens[0]}%)`);
+        } else if (tokens.length > 1) {
+            const tokenAnd = tokens.map(t => `or(first_name.ilike.${t}%,last_name.ilike.${t}%)`).join(',');
+            orParts.push(`and(${tokenAnd})`);
+        }
+        const idQ = safeTok(trimmed);
+        if (idQ) {
+            orParts.push(`phone.ilike.%${idQ}%`, `email.ilike.%${idQ}%`, `external_id.ilike.%${idQ}%`);
+        }
+        if (orParts.length > 0) q = q.or(orParts.join(','));
         const { data: delegates, error, count } = await q.order('last_name', { ascending: true }).order('first_name', { ascending: true }).range(offset, offset + safeSize - 1);
         if (error) throw error;
         const rows = delegates || [];
