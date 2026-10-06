@@ -1,6 +1,11 @@
 -- ============================================================================
 -- v1.68-fix — search_text auto-repair + NULL-safe search + name ranking
 -- ----------------------------------------------------------------------------
+-- ⛔ SUPERSEDED by supabase_migration_search_v3b_fix_base_cte.sql (v1.74b).
+--    Do NOT run this file standalone to "fix search" — run v3b instead. This
+--    file is kept as history; its body was patched to the single-statement
+--    form so a replay can no longer break the RPC (`relation "base"`).
+-- ----------------------------------------------------------------------------
 -- Fixes the "Print Individual Badge lookup shows other delegates, not the one
 -- searched" regression introduced when the token filter failed OPEN on a NULL
 -- search_text (every row matched), and adds name-relevance ordering so an exact
@@ -89,6 +94,9 @@ BEGIN
   v_q := lower(btrim(coalesce(p_query, '')));
   v_tokens := array_remove(regexp_split_to_array(v_q, '\s+'), '');
 
+  -- SINGLE statement: the CTE `base` is scoped to this statement and used by
+  -- both the count and the paged aggregate. (Earlier versions referenced `base`
+  -- from a SECOND statement -> `relation "base" does not exist`.)
   WITH base AS (
     SELECT d.*
     FROM delegates d
@@ -105,9 +113,10 @@ BEGIN
         )
       )
   )
-  SELECT count(*)::integer INTO v_total FROM base;
-
-  SELECT COALESCE(jsonb_agg(sub), '[]'::jsonb) INTO v_rows
+  SELECT
+    (SELECT count(*)::integer FROM base) AS total,
+    COALESCE(jsonb_agg(page ORDER BY page.ord), '[]'::jsonb) AS rows
+  INTO v_total, v_rows
   FROM (
     SELECT b.*,
       EXISTS (
@@ -118,19 +127,21 @@ BEGIN
             (p_session_id IS NULL AND c.session_id IS NULL)
             OR (p_session_id IS NOT NULL AND c.session_id = p_session_id)
           )
-      ) AS "checkedIn"
+      ) AS "checkedIn",
+      row_number() OVER (ORDER BY
+        (lower(coalesce(b.first_name, '')) = v_q
+          OR lower(coalesce(b.last_name, '')) = v_q
+          OR lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) = v_q
+          OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) = v_q) DESC,
+        (lower(coalesce(b.first_name, '')) LIKE v_q || '%'
+          OR lower(coalesce(b.last_name, '')) LIKE v_q || '%') DESC,
+        (position(v_q in lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, ''))) > 0) DESC,
+        b.last_name, b.first_name
+      ) AS ord
     FROM base b
-    ORDER BY
-      (lower(coalesce(b.first_name, '')) = v_q
-        OR lower(coalesce(b.last_name, '')) = v_q
-        OR lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, '')) = v_q
-        OR lower(coalesce(b.last_name, '') || ' ' || coalesce(b.first_name, '')) = v_q) DESC,
-      (lower(coalesce(b.first_name, '')) LIKE v_q || '%'
-        OR lower(coalesce(b.last_name, '')) LIKE v_q || '%') DESC,
-      (position(v_q in lower(coalesce(b.first_name, '') || ' ' || coalesce(b.last_name, ''))) > 0) DESC,
-      b.last_name, b.first_name
-    LIMIT GREATEST(p_limit, 1) OFFSET GREATEST(p_offset, 0)
-  ) sub;
+  ) page
+  WHERE page.ord >  GREATEST(p_offset, 0)
+    AND page.ord <= GREATEST(p_offset, 0) + GREATEST(p_limit, 1);
 
   RETURN jsonb_build_object(
     'delegates', v_rows,

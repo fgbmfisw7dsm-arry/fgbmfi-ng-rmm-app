@@ -1,6 +1,11 @@
 -- ============================================================================
 -- v1.68 — Unified delegate search (full-name + fast)
 -- ----------------------------------------------------------------------------
+-- ⛔ SUPERSEDED by supabase_migration_search_v3b_fix_base_cte.sql (v1.74b).
+--    Do NOT run this file standalone to "fix search" — run v3b instead. This
+--    file is kept as history; its body was patched to the single-statement
+--    form so a replay can no longer break the RPC (`relation "base"`).
+-- ----------------------------------------------------------------------------
 -- Replaces the fragile client-side `.or(first_name.ilike, last_name.ilike,
 -- phone.ilike)` search (which cannot match multi-word full names, cannot use
 -- the multi-column GIN index, and truncates at limit(100) with no ordering)
@@ -64,6 +69,9 @@ BEGIN
 
   v_tokens := array_remove(regexp_split_to_array(lower(btrim(coalesce(p_query, ''))), '\s+'), '');
 
+  -- SINGLE statement: the CTE `base` is scoped to this statement and used by
+  -- both the count and the paged aggregate. (Earlier versions referenced `base`
+  -- from a SECOND statement -> `relation "base" does not exist`.)
   WITH base AS (
     SELECT d.*
     FROM delegates d
@@ -75,14 +83,15 @@ BEGIN
         OR NOT EXISTS (
           SELECT 1
           FROM unnest(v_tokens) AS tok
-          WHERE d.search_text NOT LIKE
+          WHERE coalesce(d.search_text, '') NOT LIKE
             '%' || replace(replace(replace(tok, '\', '\\'), '%', '\%'), '_', '\_') || '%'
         )
       )
   )
-  SELECT count(*)::integer INTO v_total FROM base;
-
-  SELECT COALESCE(jsonb_agg(sub), '[]'::jsonb) INTO v_rows
+  SELECT
+    (SELECT count(*)::integer FROM base) AS total,
+    COALESCE(jsonb_agg(page ORDER BY page.ord), '[]'::jsonb) AS rows
+  INTO v_total, v_rows
   FROM (
     SELECT b.*,
       EXISTS (
@@ -93,11 +102,12 @@ BEGIN
             (p_session_id IS NULL AND c.session_id IS NULL)
             OR (p_session_id IS NOT NULL AND c.session_id = p_session_id)
           )
-      ) AS "checkedIn"
+      ) AS "checkedIn",
+      row_number() OVER (ORDER BY b.last_name, b.first_name) AS ord
     FROM base b
-    ORDER BY b.last_name, b.first_name
-    LIMIT GREATEST(p_limit, 1) OFFSET GREATEST(p_offset, 0)
-  ) sub;
+  ) page
+  WHERE page.ord >  GREATEST(p_offset, 0)
+    AND page.ord <= GREATEST(p_offset, 0) + GREATEST(p_limit, 1);
 
   RETURN jsonb_build_object(
     'delegates', v_rows,
