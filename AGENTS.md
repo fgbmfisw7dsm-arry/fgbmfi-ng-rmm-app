@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.74b (Search RPC CTE-scope fix — see §74)
+- **Current Version:** 1.75 (Dashboard Session Ministry Totals — see §75)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1125,6 +1125,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Deploy:** run `supabase_migration_search_v3b_fix_base_cte.sql` in the Supabase SQL editor, then hard-refresh the browser. Verify the RPC directly: `SELECT (search_delegates_v2('<event>','Ayode',NULL,NULL,NULL,100,0))->>'total';` must return a number (not `relation "base" does not exist`); `count(*) FROM pg_proc WHERE proname='get_paginated_delegates'` = 1.
 - **Permanence (v1.74c):** the historical `supabase_migration_search_v2.sql` and `supabase_migration_search_v2b_fix.sql` bodies were **patched to the single-statement form** and header-flagged `⛔ SUPERSEDED … run v3b`, so a replay can no longer reintroduce the bug. New guard `supabase_migration_search_v3c_verify.sql` (idempotent, safe to re-run) **RAISES EXCEPTION** if `search_delegates_v2` is missing or lacks `row_number() OVER` (broken body), **auto-drops** a re-created stale 7-arg `get_paginated_delegates` overload, and `NOTIFY pgrst, 'reload schema'`. Run v3b then v3c after any migration replay / fresh setup.
 - **Lesson:** a client-side "resilient" fallback can mask a total server failure for months. Keep fallbacks semantically equivalent to the primary path, and log failures loudly.
+
+## 75. Dashboard Session Ministry Totals (v1.75)
+
+- **Feature:** the Dashboard (`AdminDashboard.tsx`) gained a **"Session Ministry Totals (All Sessions)"** card row under the existing 4 top stat cards: **Total First Timers (FT)**, **Total Membership Intentions (MI)**, **Total Salvations (SLV)**, **Total Holy Baptisms (HGB)**, **Total Voice Distributions (VD)** — one event-wide aggregate across all sessions, updating live.
+- **Counting basis (decision):** FT/MI/SLV/HGB are **individual `session_responses` counts only** (`COUNT(*) FILTER (WHERE response_type=…)`). Manual `session_response_summaries` are **deliberately excluded** — they are separate validation figures and never additive (see §19). This matches the Sessions Summary page/CSV `_count` columns.
+- **Scoping:** FT/MI/SLV/HGB apply the **same caller district/region clamp** as attendance/arrivals (join `delegates`, `district_key` LIKE/=). **VD is event-wide for every caller** — `session_voice_distribution` has no delegate link (only `event_id`/`session_id`/`total_distributed`), so it cannot be district-scoped; the card shows an "Event-wide" `subValue` so scoped officers aren't misled.
+- **Backend (`supabase_migration_v1.75_dashboard_ministry_totals.sql`, idempotent `CREATE OR REPLACE`):** extends the existing caller-scoped `get_event_dashboard_stats(p_event_id, p_district, p_region)` with five new JSON fields (`totalFirstTimers`/`totalMembershipIntentions`/`totalSalvations`/`totalHolyBaptisms`/`totalVoiceDistributions`), added to **both** return paths (the `v_none` fail-closed zero object and the final `json_build_object`); re-asserts the anon/PUBLIC revoke + authenticated/service_role grants; `NOTIFY pgrst, 'reload schema'`. `supabase_schema.sql` reconciled to the same body. **Deploy migration BEFORE the frontend** (frontend-first is non-breaking via `?? 0`).
+- **types.ts additive exception (documented):** `DashboardStats` += the five `number` fields.
+- **Service (`supabaseService.ts` `getStats`):** empty-event early return gains the five `0`s; RPC success path coerces the five fields with `Number(...) || 0` (safe pre/post-migration); bounded client fallback computes them best-effort (`head` counts on `session_responses` per type — RLS-scoped via `sr_select_scoped` — + `SUM` on `session_voice_distribution`); no full-table scans.
+- **Realtime:** the Dashboard's existing `dashboard_{eventId}` channel gained `session_responses` and `session_voice_distribution` Postgres-Changes subscriptions (both filtered `event_id=eq.{activeEventId}`), invalidating `['stats', activeEventId]` — same pattern as the `checkins` subscription. No `session_response_summaries` subscription (individual-only).
+- **Non-disruption:** check-in, session recording, badges, financials, existing dashboard stats, RPC signatures/grants, and RLS are untouched. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

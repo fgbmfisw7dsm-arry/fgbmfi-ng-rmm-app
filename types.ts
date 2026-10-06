@@ -225,6 +225,14 @@ export interface DashboardStats {
   checkInsByDistrict: Record<string, number>;
   totalFinancials: number;
   recentActivity: CheckIn[];
+  // v1.75 (additive exception): event-wide session ministry totals.
+  // FT/MI/SLV/HGB are individual session_responses (caller-scoped);
+  // VD is inherently event-wide (session_voice_distribution has no delegate link).
+  totalFirstTimers: number;
+  totalMembershipIntentions: number;
+  totalSalvations: number;
+  totalHolyBaptisms: number;
+  totalVoiceDistributions: number;
 }
 
 export interface SystemSettings {

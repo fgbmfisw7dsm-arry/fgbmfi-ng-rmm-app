@@ -974,6 +974,11 @@ DECLARE
   total_arrivals BIGINT := 0;
   total_session_attendance BIGINT := 0;
   total_financials BIGINT := 0;
+  total_first_timers BIGINT := 0;
+  total_membership_intentions BIGINT := 0;
+  total_salvations BIGINT := 0;
+  total_holy_baptisms BIGINT := 0;
+  total_voice_distributions BIGINT := 0;
   rank_counts JSON := '{}'::JSON;
   district_counts JSON := '{}'::JSON;
   recent_activity JSON := '[]'::JSON;
@@ -1000,6 +1005,8 @@ BEGIN
     RETURN json_build_object(
       'totalDelegates', 0, 'totalCheckIns', 0, 'totalArrivals', 0,
       'totalSessionAttendance', 0, 'totalFinancials', 0,
+      'totalFirstTimers', 0, 'totalMembershipIntentions', 0,
+      'totalSalvations', 0, 'totalHolyBaptisms', 0, 'totalVoiceDistributions', 0,
       'checkInsByRank', '{}'::JSON, 'checkInsByDistrict', '{}'::JSON, 'recentActivity', '[]'::JSON);
   END IF;
 
@@ -1036,6 +1043,24 @@ BEGIN
   WHERE c.event_id = p_event_id AND c.session_id IS NOT NULL
     AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
       OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district));
+
+  -- v1.75: individual session responses (FT/MI/SLV/HGB), caller-scoped.
+  SELECT
+    COUNT(*) FILTER (WHERE sr.response_type = 'FT'),
+    COUNT(*) FILTER (WHERE sr.response_type = 'MI'),
+    COUNT(*) FILTER (WHERE sr.response_type = 'SLV'),
+    COUNT(*) FILTER (WHERE sr.response_type = 'HGB')
+  INTO total_first_timers, total_membership_intentions, total_salvations, total_holy_baptisms
+  FROM session_responses sr
+  JOIN delegates d ON sr.delegate_id = d.delegate_id AND d.event_id = p_event_id
+  WHERE sr.event_id = p_event_id
+    AND (norm_region IS NOT NULL AND district_key(d.district) LIKE norm_region || '%'
+      OR norm_region IS NULL AND (norm_district IS NULL OR district_key(d.district) = norm_district));
+
+  -- v1.75: voice distribution is event-wide (no delegate link to scope by).
+  SELECT COALESCE(SUM(total_distributed), 0) INTO total_voice_distributions
+  FROM session_voice_distribution
+  WHERE event_id = p_event_id;
 
   -- Financial gate: admins / event admins / finance / executive_admin
   IF is_admin_user() OR is_event_admin_user()
@@ -1097,6 +1122,11 @@ BEGIN
     'totalArrivals', total_arrivals,
     'totalSessionAttendance', total_session_attendance,
     'totalFinancials', total_financials,
+    'totalFirstTimers', total_first_timers,
+    'totalMembershipIntentions', total_membership_intentions,
+    'totalSalvations', total_salvations,
+    'totalHolyBaptisms', total_holy_baptisms,
+    'totalVoiceDistributions', total_voice_distributions,
     'checkInsByRank', rank_counts,
     'checkInsByDistrict', district_counts,
     'recentActivity', recent_activity

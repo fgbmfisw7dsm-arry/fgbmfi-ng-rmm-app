@@ -43,6 +43,14 @@ const AdminDashboard = () => {
         { event: '*', schema: 'public', table: 'checkins', filter: `event_id=eq.${activeEventId}` },
         () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
       )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'session_responses', filter: `event_id=eq.${activeEventId}` },
+        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'session_voice_distribution', filter: `event_id=eq.${activeEventId}` },
+        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeEventId, queryClient]);
@@ -74,6 +82,16 @@ const AdminDashboard = () => {
         <StatCard title="Event Arrivals" value={`${stats.totalArrivals || 0} (${arrivalPct}%)`} color="green" />
         <StatCard title="Session Attendance" value={stats.totalSessionAttendance || 0} color="amber" />
         <StatCard title="Total Financials" value={formatCurrency(stats.totalFinancials || 0)} color="purple" />
+      </div>
+      <div className="space-y-3">
+        <h3 className="font-black text-gray-400 uppercase text-[10px] tracking-widest border-b pb-2">Session Ministry Totals (All Sessions)</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+          <StatCard title="Total First Timers" value={stats.totalFirstTimers || 0} color="blue" />
+          <StatCard title="Total Membership Intentions" value={stats.totalMembershipIntentions || 0} color="purple" />
+          <StatCard title="Total Salvations" value={stats.totalSalvations || 0} color="green" />
+          <StatCard title="Total Holy Baptisms" value={stats.totalHolyBaptisms || 0} color="amber" />
+          <StatCard title="Total Voice Distributions" value={stats.totalVoiceDistributions || 0} subValue="Event-wide" color="red" />
+        </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {showRank && (

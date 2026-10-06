@@ -1965,7 +1965,7 @@ export const db = {
     getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {
         if (!eventId) {
             console.warn('[getStats] BLOCKED: no eventId provided, returning empty stats');
-            return { totalDelegates: 0, totalCheckIns: 0, totalArrivals: 0, totalSessionAttendance: 0, totalFinancials: 0, checkInsByRank: {}, checkInsByDistrict: {}, recentActivity: [] };
+            return { totalDelegates: 0, totalCheckIns: 0, totalArrivals: 0, totalSessionAttendance: 0, totalFinancials: 0, totalFirstTimers: 0, totalMembershipIntentions: 0, totalSalvations: 0, totalHolyBaptisms: 0, totalVoiceDistributions: 0, checkInsByRank: {}, checkInsByDistrict: {}, recentActivity: [] };
         }
 
         try {
@@ -1979,7 +1979,15 @@ export const db = {
                 if (data.totalArrivals > data.totalDelegates) {
                     console.warn('[getStats] DIAGNOSTIC: arrivals exceed delegates — data-integrity gap detected. totalArrivals:', data.totalArrivals, 'totalDelegates:', data.totalDelegates, 'eventId:', eventId);
                 }
-                return data as DashboardStats;
+                const rpcStats = data as Partial<DashboardStats>;
+                return {
+                    ...(data as DashboardStats),
+                    totalFirstTimers: Number(rpcStats.totalFirstTimers) || 0,
+                    totalMembershipIntentions: Number(rpcStats.totalMembershipIntentions) || 0,
+                    totalSalvations: Number(rpcStats.totalSalvations) || 0,
+                    totalHolyBaptisms: Number(rpcStats.totalHolyBaptisms) || 0,
+                    totalVoiceDistributions: Number(rpcStats.totalVoiceDistributions) || 0,
+                };
             }
         } catch {}
 
@@ -2015,12 +2023,32 @@ export const db = {
         const { data: financials } = await supabase.from('financial_entries').select('amount').eq('event_id', eventId);
         financialsSum = financials?.reduce((s, f) => s + (Number(f.amount) || 0), 0) || 0;
 
+        // v1.75: bounded best-effort ministry totals (RPC is the primary path).
+        // session_responses SELECT is RLS-scoped, so counts respect the caller's scope.
+        const ministryCount = async (type: string): Promise<number> => {
+            const { count } = await supabase.from('session_responses')
+                .select('response_id', { count: 'exact', head: true })
+                .eq('event_id', eventId)
+                .eq('response_type', type);
+            return count || 0;
+        };
+        const [ftCount, miCount, slvCount, hgbCount] = await Promise.all([
+            ministryCount('FT'), ministryCount('MI'), ministryCount('SLV'), ministryCount('HGB'),
+        ]);
+        const { data: vdRows } = await supabase.from('session_voice_distribution').select('total_distributed').eq('event_id', eventId);
+        const vdTotal = (vdRows || []).reduce((s, v) => s + (Number(v.total_distributed) || 0), 0);
+
         const stats: DashboardStats = {
             totalDelegates: totalDelegatesCount || 0,
             totalCheckIns: totalArrivals || 0,
             totalArrivals: totalArrivals || 0,
             totalSessionAttendance: totalSessionAttendance || 0,
             totalFinancials: financialsSum,
+            totalFirstTimers: ftCount,
+            totalMembershipIntentions: miCount,
+            totalSalvations: slvCount,
+            totalHolyBaptisms: hgbCount,
+            totalVoiceDistributions: vdTotal,
             checkInsByRank: {},
             checkInsByDistrict: {},
             recentActivity
