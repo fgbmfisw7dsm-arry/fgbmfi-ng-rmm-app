@@ -89,7 +89,7 @@ const AdminDashboard = () => {
           <StatCard title="Total First Timers" value={stats.totalFirstTimers || 0} color="blue" />
           <StatCard title="Total Membership Intentions" value={stats.totalMembershipIntentions || 0} color="purple" />
           <StatCard title="Total Salvations" value={stats.totalSalvations || 0} color="green" />
-          <StatCard title="Total Holy Baptisms" value={stats.totalHolyBaptisms || 0} color="amber" />
+          <StatCard title="Total Holy Ghost Baptism" value={stats.totalHolyBaptisms || 0} color="amber" />
           <StatCard title="Total Voice Distributions" value={stats.totalVoiceDistributions || 0} subValue="Event-wide" color="red" />
         </div>
       </div>
