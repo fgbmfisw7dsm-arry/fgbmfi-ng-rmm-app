@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.75 (Dashboard Session Ministry Totals — see §75)
+- **Current Version:** 1.76 (Manual Session Total Attendance + Sessions Report Manual/Summary Totals — see §76)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1136,6 +1136,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Service (`supabaseService.ts` `getStats`):** empty-event early return gains the five `0`s; RPC success path coerces the five fields with `Number(...) || 0` (safe pre/post-migration); bounded client fallback computes them best-effort (`head` counts on `session_responses` per type — RLS-scoped via `sr_select_scoped` — + `SUM` on `session_voice_distribution`); no full-table scans.
 - **Realtime:** the Dashboard's existing `dashboard_{eventId}` channel gained `session_responses` and `session_voice_distribution` Postgres-Changes subscriptions (both filtered `event_id=eq.{activeEventId}`), invalidating `['stats', activeEventId]` — same pattern as the `checkins` subscription. No `session_response_summaries` subscription (individual-only).
 - **Non-disruption:** check-in, session recording, badges, financials, existing dashboard stats, RPC signatures/grants, and RLS are untouched. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 76. Manual Session Total Attendance + Sessions Report Manual Totals / Summary Totals (v1.76)
+
+- **Feature:** officers can now enter a **manual head-count per session** ("Total Attendance") on the **Session Details** page, implemented exactly like **Voice Distribution** (one aggregate row per session). The figure feeds the **Manual** column of the Attendance row and the new **Manual Total** column in the **Sessions Report**, plus a new bottom **Summary Totals** block.
+- **Data model (`supabase_migration_v1.76_session_manual_attendance.sql`, idempotent):** new table `session_attendance_manual(id, event_id FK cascade, session_id UNIQUE FK cascade, total_count INT >= 0, updated_at, updated_by)` mirroring `session_voice_distribution`. Index `idx_sam_event_session`. RLS mirrors the live `svd_*` set (`sam_select` open; `sam_insert`/`sam_update` = admin + event_admin + registrar tier + `executive_admin` + `exec_registrar`; `sam_delete` admin-only).
+- **RPCs (in the same migration):** `get_session_ministry_stats` gains an `attendance_manual` `LEFT JOIN LATERAL` (Session Details dashboard). `get_ministry_export_data` (kept at the pass-4 **caller-scoped** body) gains an `attendanceManual` JSON array (event-wide, like `voiceDistribution` — no delegate link to scope by). `NOTIFY pgrst, 'reload schema'`. `supabase_schema.sql` reconciled (table DDL + RLS §12e.1 + the export RPC body/return).
+- **types.ts additive exceptions (documented):** new `SessionAttendanceManual` interface; `SessionMinistryDashboard.attendance_manual: number`; `MinistryExportData.attendanceManual: SessionAttendanceManual[]`.
+- **Service (`supabaseService.ts`):** `recordAttendanceManual(eventId, sessionId, total, registrar)` (upsert `onConflict:'session_id'` + `ensureEventActive()` + audit `session_attendance_manual`, mirroring `recordVoiceDistribution`) and `getAttendanceManual(sessionId)`. `getSessionMinistryDashboard` maps `attendance_manual` (RPC + fallback fetch of the new table). `getMinistryDataForExport` reads `attendanceManual` from the RPC + fallback fetch + returns it. `clearEventData` now also deletes `session_attendance_manual`.
+- **Hook (`useMinistry.ts`):** new `recordAttendance` mutation → `db.recordAttendanceManual`, invalidating `ministry-dashboard` + `ministry-export`.
+- **Session Details (`SessionMinistryPage.tsx`):** new **"Manual Total Attendance"** card (blue) beside the Voice Magazine Distribution card — number input + Save (disabled when `isLocked || recordAttendance.isPending`) + "Current: N attendance recorded (manual)".
+- **Sessions Report (`ReportsPage.tsx` `renderMinistryReport`):** per-session table columns are now `Category | Scanned | Manual | Scanned Total | Manual Total`. Attendance row shows the manual attendance in **Manual**/**Manual Total**; FT/SLV/MI/HGB rows mirror `summaries`; **Voice Distribution** moved to the manual side (Scanned `—`, Manual/Manual Total = VD). A new **Summary Totals** block at the bottom aggregates every category across the sessions currently shown (respects `selectedSessionId`; `alterCallFilter` limits the response-type rows) with a highlighted **Grand Total** row (`print-gold`). PDF inherits it via the `reportRef` DOM clone. **CSV export for the Sessions Report is unchanged** (individual records only, per product decision).
+- **Deploy order:** run the migration first, then the frontend (frontend-first is non-breaking via `?? 0` / optional arrays, but writes need the table). `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
@@ -2222,6 +2222,7 @@ export const db = {
         await supabase.from('session_responses').delete().eq('event_id', eventId);
         await supabase.from('session_response_summaries').delete().eq('event_id', eventId);
         await supabase.from('session_voice_distribution').delete().eq('event_id', eventId); 
+        await supabase.from('session_attendance_manual').delete().eq('event_id', eventId); 
         await supabase.from('financial_entries').delete().eq('event_id', eventId); 
         await supabase.from('pledges').delete().eq('event_id', eventId); 
         recordAuditLog(eventId, 'event_clear_data', 'All checkins, session calls, financials, and pledges cleared', null, 'event', eventId);
@@ -3356,6 +3357,26 @@ export const db = {
         return (data || null) as VoiceDistribution | null;
     },
 
+    recordAttendanceManual: async (eventId: string, sessionId: string, total: number, registrar: User): Promise<SessionAttendanceManual> => {
+        await ensureEventActive(eventId);
+        const { data, error } = await supabase.from('session_attendance_manual')
+            .upsert({
+                event_id: eventId, session_id: sessionId, total_count: total, updated_by: registrar.id
+            }, { onConflict: 'session_id' })
+            .select().single();
+        if (error) throw error;
+        const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
+        recordAuditLog(eventId, 'session_attendance_manual', `Manual Total Attendance: ${total} (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
+        return data as SessionAttendanceManual;
+    },
+
+    getAttendanceManual: async (sessionId: string): Promise<SessionAttendanceManual | null> => {
+        const { data, error } = await supabase.from('session_attendance_manual')
+            .select('*').eq('session_id', sessionId).maybeSingle();
+        if (error) throw error;
+        return (data || null) as SessionAttendanceManual | null;
+    },
+
     getSessionMinistryDashboard: async (eventId: string): Promise<SessionMinistryDashboard[]> => {
         try {
             const { data, error } = await supabase.rpc('get_session_ministry_stats', { p_event_id: eventId });
@@ -3367,6 +3388,7 @@ export const db = {
                         start_time: r.start_time,
                         end_time: r.end_time,
                         attendance: Number(r.attendance) || 0,
+                        attendance_manual: Number(r.attendance_manual) || 0,
                         ft_count: Number(r.ft_count) || 0,
                         slv_count: Number(r.slv_count) || 0,
                         hgb_count: Number(r.hgb_count) || 0,
@@ -3390,11 +3412,13 @@ export const db = {
         const { data: responses } = await supabase.from('session_responses').select('*').eq('event_id', eventId).in('session_id', sessionIds);
         const { data: summaries } = await supabase.from('session_response_summaries').select('*').eq('event_id', eventId).in('session_id', sessionIds);
         const { data: vdEntries } = await supabase.from('session_voice_distribution').select('*').eq('event_id', eventId).in('session_id', sessionIds);
+        const { data: samEntries } = await supabase.from('session_attendance_manual').select('*').eq('event_id', eventId).in('session_id', sessionIds);
 
         return sessions.map(s => {
             const resp = (responses || []).filter(r => r.session_id === s.session_id);
             const sum = (summaries || []).filter(r => r.session_id === s.session_id);
             const vd = (vdEntries || []).find(v => v.session_id === s.session_id);
+            const sam = (samEntries || []).find(v => v.session_id === s.session_id);
             const att = new Set((checkins || []).filter(c => c.session_id === s.session_id).map(c => c.delegate_id));
             return {
                 session_id: s.session_id,
@@ -3402,6 +3426,7 @@ export const db = {
                 start_time: s.start_time,
                 end_time: s.end_time,
                 attendance: att.size,
+                attendance_manual: sam?.total_count || 0,
                 ft_count: resp.filter(r => r.response_type === 'FT').length,
                 slv_count: resp.filter(r => r.response_type === 'SLV').length,
                 hgb_count: resp.filter(r => r.response_type === 'HGB').length,
@@ -3429,6 +3454,7 @@ export const db = {
         let rpcResponses: any[] = [];
         let rpcSummaries: any[] = [];
         let rpcVD: any[] = [];
+        let rpcAttendanceManual: any[] = [];
 
         try {
             const { data, error } = await supabase.rpc('get_ministry_export_data', { p_event_id: eventId });
@@ -3437,12 +3463,13 @@ export const db = {
                 rpcResponses = Array.isArray(d.responses) ? d.responses : [];
                 rpcSummaries = Array.isArray(d.summaries) ? d.summaries : [];
                 rpcVD = Array.isArray(d.voiceDistribution) ? d.voiceDistribution : [];
+                rpcAttendanceManual = Array.isArray(d.attendanceManual) ? d.attendanceManual : [];
             }
         } catch {}
 
         const { data: sessions } = await supabase.from('sessions').select('*').eq('event_id', eventId);
         const sessionIds = (sessions || []).map(s => s.session_id);
-        if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [], attendance: [] };
+        if (!sessionIds.length) return { responses: [], summaries: [], voiceDistribution: [], attendance: [], attendanceManual: [] };
 
         if (!rpcResponses.length) {
             const { data: responses } = await supabase.from('session_responses')
@@ -3474,6 +3501,12 @@ export const db = {
             const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
             rpcVD = (vd || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' }));
         }
+        if (!rpcAttendanceManual.length) {
+            const { data: am } = await supabase.from('session_attendance_manual')
+                .select('*').eq('event_id', eventId).in('session_id', sessionIds);
+            const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
+            rpcAttendanceManual = (am || []).map((v: any) => ({ ...v, session_title: sessionMap.get(v.session_id) || '' }));
+        }
 
         const { data: ck } = await supabase.from('checkins')
             .select('delegate_id, session_id').eq('event_id', eventId).in('session_id', sessionIds).not('session_id', 'is', null);
@@ -3489,6 +3522,7 @@ export const db = {
             summaries: rpcSummaries,
             voiceDistribution: rpcVD,
             attendance,
+            attendanceManual: rpcAttendanceManual,
         };
     },
 

@@ -1219,6 +1219,7 @@ DECLARE
     summaries_json JSON := '[]'::JSON;
     vd_json JSON := '[]'::JSON;
     attendance_json JSON := '[]'::JSON;
+    attendance_manual_json JSON := '[]'::JSON;
     v_scope_region TEXT := NULL;
     v_scope_district TEXT := NULL;
 BEGIN
@@ -1266,6 +1267,14 @@ BEGIN
         WHERE svd.event_id = p_event_id
         ORDER BY svd.updated_at DESC
     ) v;
+    SELECT COALESCE(json_agg(am), '[]'::JSON) INTO attendance_manual_json
+    FROM (
+        SELECT sam.*, s.title AS session_title
+        FROM session_attendance_manual sam
+        JOIN sessions s ON sam.session_id = s.session_id
+        WHERE sam.event_id = p_event_id
+        ORDER BY sam.updated_at DESC
+    ) am;
     SELECT COALESCE(json_agg(a), '[]'::JSON) INTO attendance_json
     FROM (
         SELECT
@@ -1286,7 +1295,8 @@ BEGIN
         'responses', responses_json,
         'summaries', summaries_json,
         'voiceDistribution', vd_json,
-        'attendance', attendance_json
+        'attendance', attendance_json,
+        'attendanceManual', attendance_manual_json
     );
 END;
 $func$;
@@ -2032,6 +2042,40 @@ WITH CHECK (is_admin_user() OR is_event_admin_user()
              AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
              AND (is_active IS NULL OR is_active = true)));
 CREATE POLICY "svd_delete" ON session_voice_distribution FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12e.1 v1.76: manual total attendance (mirrors session_voice_distribution)
+CREATE TABLE IF NOT EXISTS session_attendance_manual (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_id UUID NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    session_id UUID NOT NULL UNIQUE REFERENCES sessions(session_id) ON DELETE CASCADE,
+    total_count INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_by UUID
+);
+CREATE INDEX IF NOT EXISTS idx_sam_event_session
+    ON session_attendance_manual(event_id, session_id);
+ALTER TABLE session_attendance_manual ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "sam_select" ON session_attendance_manual;
+DROP POLICY IF EXISTS "sam_insert" ON session_attendance_manual;
+DROP POLICY IF EXISTS "sam_update" ON session_attendance_manual;
+DROP POLICY IF EXISTS "sam_delete" ON session_attendance_manual;
+CREATE POLICY "sam_select" ON session_attendance_manual FOR SELECT TO authenticated USING (true);
+CREATE POLICY "sam_insert" ON session_attendance_manual FOR INSERT TO authenticated WITH CHECK (
+  is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin','exec_registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "sam_update" ON session_attendance_manual FOR UPDATE TO authenticated
+USING (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin','exec_registrar')
+             AND (is_active IS NULL OR is_active = true)))
+WITH CHECK (is_admin_user() OR is_event_admin_user()
+  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
+             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin','exec_registrar')
+             AND (is_active IS NULL OR is_active = true)));
+CREATE POLICY "sam_delete" ON session_attendance_manual FOR DELETE TO authenticated USING (is_admin_user());
 
 -- 12f. session_responses: SELECT scoped by role + district (pass 4); delete
 --      admin-only; insert scoped to officers (unchanged from live)

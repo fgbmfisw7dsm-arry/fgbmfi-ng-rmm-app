@@ -314,11 +314,12 @@ const ReportsPage = () => {
 
     const renderMinistryReport = () => {
         if (!ministryData) return <div className="text-center text-gray-400 py-8">Loading sessions data...</div>;
-        const { responses, summaries, voiceDistribution } = ministryData;
+        const { responses, summaries, voiceDistribution, attendanceManual } = ministryData;
         const responseTypes: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
 
         const attendanceArr: { session_id: string; attendance: number }[] = ministryData.attendance || [];
         const attMap = new Map(attendanceArr.map(a => [a.session_id, a.attendance]));
+        const attManualMap = new Map((attendanceManual || []).map((a: any) => [a.session_id, Number(a.total_count) || 0]));
 
         const groupedBySession = new Map<string, {
             title: string;
@@ -326,6 +327,7 @@ const ReportsPage = () => {
             summaries: Map<SessionResponseType, number>;
             vd: number;
             att: number;
+            attManual: number;
         }>();
 
         sessions.forEach(s => {
@@ -335,6 +337,7 @@ const ReportsPage = () => {
                 summaries: new Map(responseTypes.map(t => [t, 0])),
                 vd: voiceDistribution.find(v => v.session_id === s.session_id)?.total_distributed || 0,
                 att: attMap.get(s.session_id) || 0,
+                attManual: attManualMap.get(s.session_id) || 0,
             });
         });
 
@@ -384,14 +387,16 @@ const ReportsPage = () => {
                                             <th className="border p-2 text-center">Scanned</th>
                                             <th className="border p-2 text-center">Manual</th>
                                             <th className="border p-2 text-center bg-blue-50">Scanned Total</th>
+                                            <th className="border p-2 text-center bg-blue-50">Manual Total</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr className="border-b bg-gray-50">
                                             <td className="border p-2 font-black uppercase text-blue-900">Attendance</td>
                                             <td className="border p-2 text-center font-bold">{group.att}</td>
-                                            <td className="border p-2 text-center">-</td>
+                                            <td className="border p-2 text-center font-bold">{group.attManual || '-'}</td>
                                             <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.att}</td>
+                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.attManual || '-'}</td>
                                         </tr>
                                         {responseTypes.map(type => {
                                             const scanned = (group.responses.get(type) || []).length;
@@ -403,12 +408,15 @@ const ReportsPage = () => {
                                                     <td className="border p-2 text-center font-bold">{scanned}</td>
                                                     <td className="border p-2 text-center font-bold">{manual}</td>
                                                     <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned}</td>
+                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{manual}</td>
                                                 </tr>
                                             );
                                         })}
                                         <tr className="border-b bg-gray-50">
                                                 <td className="border p-2 font-black uppercase">Voice Distribution</td>
-                                                <td className="border p-2" colSpan={2}></td>
+                                                <td className="border p-2 text-center">-</td>
+                                                <td className="border p-2 text-center font-bold">{group.vd}</td>
+                                                <td className="border p-2 text-center">-</td>
                                                 <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.vd}</td>
                                             </tr>
                                     </tbody>
@@ -458,6 +466,75 @@ const ReportsPage = () => {
                         </div>
                     );
                 })}
+
+                {(() => {
+                    const visibleEntries = Array.from(groupedBySession.entries()).filter(([sid]) => !selectedSessionId || sid === selectedSessionId);
+                    if (visibleEntries.length === 0) return null;
+                    const catTypes = alterCallFilter ? responseTypes.filter(t => t === alterCallFilter) : responseTypes;
+                    const rows = [
+                        {
+                            label: 'Attendance',
+                            scanned: visibleEntries.reduce((s, [, g]) => s + (g.att || 0), 0),
+                            manual: visibleEntries.reduce((s, [, g]) => s + (g.attManual || 0), 0),
+                        },
+                        ...catTypes.map(t => ({
+                            label: RESPONSE_TYPE_LABELS[t],
+                            scanned: visibleEntries.reduce((s, [, g]) => s + ((g.responses.get(t) || []).length), 0),
+                            manual: visibleEntries.reduce((s, [, g]) => s + (g.summaries.get(t) || 0), 0),
+                        })),
+                        {
+                            label: 'Voice Distribution',
+                            scanned: 0,
+                            manual: visibleEntries.reduce((s, [, g]) => s + (g.vd || 0), 0),
+                        },
+                    ];
+                    const grandScanned = rows.reduce((s, r) => s + r.scanned, 0);
+                    const grandManual = rows.reduce((s, r) => s + r.manual, 0);
+                    const sessionLabel = selectedSessionId
+                        ? (sessions.find(s => s.session_id === selectedSessionId)?.title || 'Selected Session')
+                        : `${visibleEntries.length} Session${visibleEntries.length === 1 ? '' : 's'}`;
+                    return (
+                        <div className="mt-10">
+                            <div className="bg-blue-900 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
+                                <span>Summary Totals</span>
+                                <span className="opacity-80">{sessionLabel}{alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[10px] border-collapse border border-gray-300">
+                                    <thead className="bg-gray-50 uppercase text-gray-400 font-black">
+                                        <tr>
+                                            <th className="border p-2 text-left">Category</th>
+                                            <th className="border p-2 text-center">Scanned</th>
+                                            <th className="border p-2 text-center">Manual</th>
+                                            <th className="border p-2 text-center bg-blue-50">Scanned Total</th>
+                                            <th className="border p-2 text-center bg-blue-50">Manual Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {rows.map(r => (
+                                            <tr key={r.label} className="border-b hover:bg-gray-50">
+                                                <td className="border p-2 font-black uppercase text-blue-900">{r.label}</td>
+                                                <td className="border p-2 text-center font-bold">{r.scanned || '-'}</td>
+                                                <td className="border p-2 text-center font-bold">{r.manual || '-'}</td>
+                                                <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{r.scanned || '-'}</td>
+                                                <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{r.manual || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
+                                            <td className="border p-2 uppercase">Grand Total</td>
+                                            <td className="border p-2 text-center">{grandScanned}</td>
+                                            <td className="border p-2 text-center">{grandManual}</td>
+                                            <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900">{grandScanned}</td>
+                                            <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900">{grandManual}</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    );
+                })()}
             </div>
         );
     };

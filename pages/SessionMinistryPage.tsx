@@ -41,6 +41,7 @@ const SessionMinistryPage: React.FC = () => {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [registering, setRegistering] = useState(false);
   const [vdValue, setVdValue] = useState<Record<string, string>>({});
+  const [attManualValue, setAttManualValue] = useState<Record<string, string>>({});
   const [recordedIds, setRecordedIds] = useState<Set<string>>(new Set());
   const [summaryRef, setSummaryRef] = useState<HTMLDivElement | null>(null);
   const [manualType, setManualType] = useState<SessionResponseType | null>(null);
@@ -79,7 +80,7 @@ const SessionMinistryPage: React.FC = () => {
     }
   }, [sessions, selectedSessionId]);
 
-  const { dashboard, recordResponse, recordVD, recordSummary } = useMinistry(activeEventId, user);
+  const { dashboard, recordResponse, recordVD, recordSummary, recordAttendance } = useMinistry(activeEventId, user);
 
   const currentDashboard = dashboard.data?.find(d => d.session_id === selectedSessionId);
 
@@ -313,6 +314,15 @@ const SessionMinistryPage: React.FC = () => {
     try {
       await recordVD.mutateAsync({ sessionId, total: val });
       setVdValue(prev => ({ ...prev, [sessionId]: '' }));
+    } catch {}
+  };
+
+  const handleAttManualSave = async (sessionId: string) => {
+    const val = parseInt(attManualValue[sessionId] || '', 10);
+    if (isNaN(val) || val < 0) return;
+    try {
+      await recordAttendance.mutateAsync({ sessionId, total: val });
+      setAttManualValue(prev => ({ ...prev, [sessionId]: '' }));
     } catch {}
   };
 
@@ -665,6 +675,31 @@ const SessionMinistryPage: React.FC = () => {
                   })()}
                 </tfoot>
               </table>
+            </div>
+
+            <div className="mt-6 p-5 bg-blue-50 rounded-2xl border border-blue-100 no-print">
+              <h3 className="text-sm font-black uppercase text-blue-700 mb-1">Manual Total Attendance</h3>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-3">Enter the head-count taken for this session (appears in the Manual column of the Sessions Report).</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="0"
+                  className="flex-1 border-2 border-blue-200 rounded-xl p-3 text-lg font-black text-center"
+                  placeholder="Total attendance..."
+                  value={attManualValue[selectedSessionId] || ''}
+                  onChange={e => setAttManualValue(prev => ({ ...prev, [selectedSessionId]: e.target.value }))}
+                />
+                <button
+                  onClick={() => handleAttManualSave(selectedSessionId)}
+                  disabled={isLocked || recordAttendance.isPending}
+                  className="px-6 py-3 bg-blue-700 text-white rounded-xl font-black uppercase text-sm hover:bg-blue-800 disabled:opacity-40"
+                >
+                  {recordAttendance.isPending ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+              {(currentDashboard?.attendance_manual ?? 0) > 0 && (
+                <p className="mt-2 text-xs font-bold text-blue-700">Current: {currentDashboard?.attendance_manual ?? 0} attendance recorded (manual)</p>
+              )}
             </div>
 
             <div className="mt-6 p-5 bg-gray-50 rounded-2xl border no-print">

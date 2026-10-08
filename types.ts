@@ -303,12 +303,25 @@ export interface VoiceDistribution {
   session_title?: string;
 }
 
+// v1.76 (additive exception): manually-entered per-session total attendance
+// aggregate — mirrors VoiceDistribution.
+export interface SessionAttendanceManual {
+  id: string;
+  event_id: string;
+  session_id: string;
+  total_count: number;
+  updated_at: string;
+  updated_by: string;
+  session_title?: string;
+}
+
 export interface SessionMinistryDashboard {
   session_id: string;
   session_title: string;
   start_time: string;
   end_time: string;
   attendance: number;
+  attendance_manual: number;
   ft_count: number;
   slv_count: number;
   hgb_count: number;
@@ -325,6 +338,8 @@ export interface MinistryExportData {
   summaries: SessionResponseSummary[];
   voiceDistribution: VoiceDistribution[];
   attendance: { session_id: string; session_title: string; attendance: number }[];
+  // v1.76 (additive exception): manual total attendance aggregates.
+  attendanceManual: SessionAttendanceManual[];
 }
 
 export type BadgeLayout = '8-up' | '10-up' | '6-up-portrait' | '9-up-portrait' | '8-up-portrait' | '4-up-3x4' | '4-up-portrait' | 'a6-single';

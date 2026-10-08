@@ -39,7 +39,13 @@ export function useMinistry(eventId: string, user: User | null) {
     onSuccess: () => invalidateDashboard(),
   });
 
-  return { dashboard, recordResponse, recordSummary, recordVD, invalidateDashboard };
+  const recordAttendance = useMutation({
+    mutationFn: (params: { sessionId: string; total: number }) =>
+      db.recordAttendanceManual(eventId, params.sessionId, params.total, user!),
+    onSuccess: () => invalidateDashboard(),
+  });
+
+  return { dashboard, recordResponse, recordSummary, recordVD, recordAttendance, invalidateDashboard };
 }
 
 export function useMinistryExport(eventId: string) {
