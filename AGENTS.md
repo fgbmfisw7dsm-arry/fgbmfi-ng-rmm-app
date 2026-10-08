@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.76 (Manual Session Total Attendance + Sessions Report Manual/Summary Totals — see §76)
+- **Current Version:** 1.77 (Session Details manual-count visibility + Sessions Report Summary Totals simplification — see §77)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1148,6 +1148,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Session Details (`SessionMinistryPage.tsx`):** new **"Manual Total Attendance"** card (blue) beside the Voice Magazine Distribution card — number input + Save (disabled when `isLocked || recordAttendance.isPending`) + "Current: N attendance recorded (manual)".
 - **Sessions Report (`ReportsPage.tsx` `renderMinistryReport`):** per-session table columns are now `Category | Scanned | Manual | Scanned Total | Manual Total`. Attendance row shows the manual attendance in **Manual**/**Manual Total**; FT/SLV/MI/HGB rows mirror `summaries`; **Voice Distribution** moved to the manual side (Scanned `—`, Manual/Manual Total = VD). A new **Summary Totals** block at the bottom aggregates every category across the sessions currently shown (respects `selectedSessionId`; `alterCallFilter` limits the response-type rows) with a highlighted **Grand Total** row (`print-gold`). PDF inherits it via the `reportRef` DOM clone. **CSV export for the Sessions Report is unchanged** (individual records only, per product decision).
 - **Deploy order:** run the migration first, then the frontend (frontend-first is non-breaking via `?? 0` / optional arrays, but writes need the table). `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 77. Session Details Manual-Count Visibility + Sessions Report Summary Totals (v1.77)
+
+- **Context (follow-up to §76):** manual FT/SLV/MI/HGB and manual attendance were only visible in the Sessions Report; the Session Details page showed scanned `_count` only. Also the Sessions Report bottom "Summary Totals" block had redundant Scanned/Scanned-Total + Manual/Manual-Total columns and a Grand Total footer row.
+- **Frontend-only — no DB/RPC/service/`types.ts` changes.** All manual figures were already delivered by `get_session_ministry_stats` (`_summary`, `attendance_manual`, `voice_distribution`) into `dashboard.data` (`SessionMinistryDashboard`).
+- **`pages/SessionMinistryPage.tsx`:**
+  - New `manual(type)` accessor (`currentDashboard[`${type}_summary`]`).
+  - The 4 response-type cards now show `Manual: {n}` under the scanned count, so manual FT/SLV/MI/HGB are visible at the point of recording.
+  - **"Sessions Summary (All Sessions)" always shows both figures:** grouped two-tier header — `Session | ATT (Scanned|Manual) | FT (Scanned|Manual) | SLV (Scanned|Manual) | MI (Scanned|Manual) | HGB (Scanned|Manual) | VD`. ATT manual = `attendance_manual`; FT/SLV/MI/HGB manual = `_summary`; **VD stays a single (manual) column** — it has no scanned equivalent. Footer Totals sums Scanned and Manual **separately** (never combined, per §19).
+  - **CSV/Excel export** (`handleExportCSV`) now passes an explicit `cols` array and emits `ATT_Scanned`/`ATT_Manual`, `FT_Scanned`/`FT_Manual`, …, `VD` (also fixes a latent bug where the header rows' `''` key made `exportToCSV` derive the wrong column set).
+- **`pages/ReportsPage.tsx` (`renderMinistryReport`) Summary Totals:** collapsed the value columns to exactly two — **`Scanned Grand Totals`** and **`Manual Grand Totals`** (both highlighted `bg-blue-50`/`bg-blue-100`, `text-blue-900`) — with the per-category rows retained and the **`Grand Total` footer row removed** (and the now-unused `grandScanned`/`grandManual` variables deleted). Filtering (`selectedSessionId` / `alterCallFilter`) unchanged; PDF inherits via the `reportRef` DOM clone.
+- **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

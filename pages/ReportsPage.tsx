@@ -488,8 +488,6 @@ const ReportsPage = () => {
                             manual: visibleEntries.reduce((s, [, g]) => s + (g.vd || 0), 0),
                         },
                     ];
-                    const grandScanned = rows.reduce((s, r) => s + r.scanned, 0);
-                    const grandManual = rows.reduce((s, r) => s + r.manual, 0);
                     const sessionLabel = selectedSessionId
                         ? (sessions.find(s => s.session_id === selectedSessionId)?.title || 'Selected Session')
                         : `${visibleEntries.length} Session${visibleEntries.length === 1 ? '' : 's'}`;
@@ -504,32 +502,19 @@ const ReportsPage = () => {
                                     <thead className="bg-gray-50 uppercase text-gray-400 font-black">
                                         <tr>
                                             <th className="border p-2 text-left">Category</th>
-                                            <th className="border p-2 text-center">Scanned</th>
-                                            <th className="border p-2 text-center">Manual</th>
-                                            <th className="border p-2 text-center bg-blue-50">Scanned Total</th>
-                                            <th className="border p-2 text-center bg-blue-50">Manual Total</th>
+                                            <th className="border p-2 text-center bg-blue-100 text-blue-900">Scanned Grand Totals</th>
+                                            <th className="border p-2 text-center bg-blue-100 text-blue-900">Manual Grand Totals</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {rows.map(r => (
                                             <tr key={r.label} className="border-b hover:bg-gray-50">
                                                 <td className="border p-2 font-black uppercase text-blue-900">{r.label}</td>
-                                                <td className="border p-2 text-center font-bold">{r.scanned || '-'}</td>
-                                                <td className="border p-2 text-center font-bold">{r.manual || '-'}</td>
                                                 <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{r.scanned || '-'}</td>
                                                 <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{r.manual || '-'}</td>
                                             </tr>
                                         ))}
                                     </tbody>
-                                    <tfoot>
-                                        <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
-                                            <td className="border p-2 uppercase">Grand Total</td>
-                                            <td className="border p-2 text-center">{grandScanned}</td>
-                                            <td className="border p-2 text-center">{grandManual}</td>
-                                            <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900">{grandScanned}</td>
-                                            <td className="border p-2 text-center print-gold bg-yellow-400 text-blue-900">{grandManual}</td>
-                                        </tr>
-                                    </tfoot>
                                 </table>
                             </div>
                         </div>

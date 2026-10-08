@@ -332,29 +332,41 @@ const SessionMinistryPage: React.FC = () => {
     return Number((currentDashboard as any)[`${key}_count`] || 0);
   };
 
+  const manual = (type: SessionResponseType): number => {
+    if (!currentDashboard) return 0;
+    const key = type.toLowerCase();
+    return Number((currentDashboard as any)[`${key}_summary`] || 0);
+  };
+
   const handleExportPDF = () => {
     if (summaryRef) exportToPDF(summaryRef, `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.pdf`, 'landscape', 1600);
   };
 
   const handleExportCSV = () => {
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const cols = ['Session', 'ATT_Scanned', 'ATT_Manual', 'FT_Scanned', 'FT_Manual', 'SLV_Scanned', 'SLV_Manual', 'MI_Scanned', 'MI_Manual', 'HGB_Scanned', 'HGB_Manual', 'VD'];
     const headerRows = [
-      { '': 'FGBMFI Nigeria — Events Management System' },
-      { '': activeEvent?.name || '' },
-      { '': 'Sessions Summary (All Sessions)' },
-      { '': `Generated: ${today}` },
-      { '': '' },
+      { Session: 'FGBMFI Nigeria — Events Management System' },
+      { Session: activeEvent?.name || '' },
+      { Session: 'Sessions Summary (All Sessions)' },
+      { Session: `Generated: ${today}` },
+      { Session: '' },
     ];
     const dataRows = (dashboard.data || []).map(d => ({
       Session: d.session_title,
-      ATT: d.attendance,
-      FT: d.ft_count || 0,
-      SLV: d.slv_count || 0,
-      MI: d.mi_count || 0,
-      HGB: d.hgb_count || 0,
+      ATT_Scanned: d.attendance || 0,
+      ATT_Manual: d.attendance_manual || 0,
+      FT_Scanned: d.ft_count || 0,
+      FT_Manual: d.ft_summary || 0,
+      SLV_Scanned: d.slv_count || 0,
+      SLV_Manual: d.slv_summary || 0,
+      MI_Scanned: d.mi_count || 0,
+      MI_Manual: d.mi_summary || 0,
+      HGB_Scanned: d.hgb_count || 0,
+      HGB_Manual: d.hgb_summary || 0,
       VD: d.voice_distribution || 0,
     }));
-    exportToCSV([...headerRows, ...dataRows], `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.csv`);
+    exportToCSV([...headerRows, ...dataRows], `Sessions_Summary_${activeEvent?.name?.replace(/\s+/g, '_') || 'Report'}.csv`, cols);
   };
 
   if (!activeEventId) {
@@ -402,6 +414,7 @@ const SessionMinistryPage: React.FC = () => {
               >
                 <div className="text-2xl mb-1">{total(type)}</div>
                 <div className="text-[9px] tracking-wider">{RESPONSE_TYPE_LABELS[type]}</div>
+                <div className={`text-[8px] mt-0.5 tracking-wider ${activeResponseType === type ? 'text-blue-100' : 'text-gray-400'}`}>Manual: {manual(type)}</div>
               </button>
             ))}
           </div>
@@ -628,13 +641,25 @@ const SessionMinistryPage: React.FC = () => {
               <table className="w-full text-xs">
                 <thead className="bg-slate-100 uppercase font-black text-gray-500">
                   <tr>
-                    <th className="p-3 text-left rounded-l-lg">Session</th>
-                    <th className="p-3 text-center">ATT</th>
-                    <th className="p-3 text-center">FT</th>
-                    <th className="p-3 text-center">SLV</th>
-                    <th className="p-3 text-center">MI</th>
-                    <th className="p-3 text-center">HGB</th>
-                    <th className="p-3 text-center rounded-r-lg">VD</th>
+                    <th className="p-3 text-left rounded-tl-lg border-r border-slate-200" rowSpan={2}>Session</th>
+                    <th className="p-2 text-center border-l border-slate-200" colSpan={2}>ATT</th>
+                    <th className="p-2 text-center border-l border-slate-200" colSpan={2}>FT</th>
+                    <th className="p-2 text-center border-l border-slate-200" colSpan={2}>SLV</th>
+                    <th className="p-2 text-center border-l border-slate-200" colSpan={2}>MI</th>
+                    <th className="p-2 text-center border-l border-slate-200" colSpan={2}>HGB</th>
+                    <th className="p-3 text-center border-l border-slate-200 rounded-tr-lg" rowSpan={2}>VD</th>
+                  </tr>
+                  <tr className="text-[9px]">
+                    <th className="p-1 text-center border-l border-slate-200">Scanned</th>
+                    <th className="p-1 text-center text-blue-700">Manual</th>
+                    <th className="p-1 text-center border-l border-slate-200">Scanned</th>
+                    <th className="p-1 text-center text-blue-700">Manual</th>
+                    <th className="p-1 text-center border-l border-slate-200">Scanned</th>
+                    <th className="p-1 text-center text-blue-700">Manual</th>
+                    <th className="p-1 text-center border-l border-slate-200">Scanned</th>
+                    <th className="p-1 text-center text-blue-700">Manual</th>
+                    <th className="p-1 text-center border-l border-slate-200">Scanned</th>
+                    <th className="p-1 text-center text-blue-700">Manual</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -643,10 +668,15 @@ const SessionMinistryPage: React.FC = () => {
                       <tr key={d.session_id} className={`hover:bg-blue-50 transition-colors ${d.session_id === selectedSessionId ? 'bg-blue-50' : ''}`}>
                         <td className="p-3 font-bold uppercase text-blue-900">{d.session_title}</td>
                         <td className="p-3 text-center font-bold">{d.attendance || '-'}</td>
+                        <td className="p-3 text-center font-bold text-blue-700">{d.attendance_manual || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.ft_count || '-'}</td>
+                        <td className="p-3 text-center font-bold text-blue-700">{d.ft_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.slv_count || '-'}</td>
+                        <td className="p-3 text-center font-bold text-blue-700">{d.slv_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.mi_count || '-'}</td>
+                        <td className="p-3 text-center font-bold text-blue-700">{d.mi_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.hgb_count || '-'}</td>
+                        <td className="p-3 text-center font-bold text-blue-700">{d.hgb_summary || '-'}</td>
                         <td className="p-3 text-center font-bold">{d.voice_distribution || '-'}</td>
                       </tr>
                     );
@@ -656,19 +686,29 @@ const SessionMinistryPage: React.FC = () => {
                   {(() => {
                     const data = dashboard.data || [];
                     const sumAtt = data.reduce((s, d) => s + (d.attendance || 0), 0);
+                    const sumAttM = data.reduce((s, d) => s + (d.attendance_manual || 0), 0);
                     const sumFT = data.reduce((s, d) => s + (d.ft_count || 0), 0);
+                    const sumFTM = data.reduce((s, d) => s + (d.ft_summary || 0), 0);
                     const sumSLV = data.reduce((s, d) => s + (d.slv_count || 0), 0);
+                    const sumSLVM = data.reduce((s, d) => s + (d.slv_summary || 0), 0);
                     const sumMI = data.reduce((s, d) => s + (d.mi_count || 0), 0);
+                    const sumMIM = data.reduce((s, d) => s + (d.mi_summary || 0), 0);
                     const sumHGB = data.reduce((s, d) => s + (d.hgb_count || 0), 0);
+                    const sumHGBM = data.reduce((s, d) => s + (d.hgb_summary || 0), 0);
                     const sumVD = data.reduce((s, d) => s + (d.voice_distribution || 0), 0);
                     return (
                       <tr className="bg-blue-900 text-white font-black">
                         <td className="p-3 uppercase">Totals</td>
                         <td className="p-3 text-center">{sumAtt || '-'}</td>
+                        <td className="p-3 text-center text-blue-200">{sumAttM || '-'}</td>
                         <td className="p-3 text-center">{sumFT || '-'}</td>
+                        <td className="p-3 text-center text-blue-200">{sumFTM || '-'}</td>
                         <td className="p-3 text-center">{sumSLV || '-'}</td>
+                        <td className="p-3 text-center text-blue-200">{sumSLVM || '-'}</td>
                         <td className="p-3 text-center">{sumMI || '-'}</td>
+                        <td className="p-3 text-center text-blue-200">{sumMIM || '-'}</td>
                         <td className="p-3 text-center">{sumHGB || '-'}</td>
+                        <td className="p-3 text-center text-blue-200">{sumHGBM || '-'}</td>
                         <td className="p-3 text-center">{sumVD || '-'}</td>
                       </tr>
                     );
