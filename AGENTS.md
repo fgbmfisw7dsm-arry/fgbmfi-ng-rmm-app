@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.77 (Session Details manual-count visibility + Sessions Report Summary Totals simplification — see §77)
+- **Current Version:** 1.78 (Sessions Report per-session tables reduced to Scanned/Manual — see §78)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1159,6 +1159,15 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - **"Sessions Summary (All Sessions)" always shows both figures:** grouped two-tier header — `Session | ATT (Scanned|Manual) | FT (Scanned|Manual) | SLV (Scanned|Manual) | MI (Scanned|Manual) | HGB (Scanned|Manual) | VD`. ATT manual = `attendance_manual`; FT/SLV/MI/HGB manual = `_summary`; **VD stays a single (manual) column** — it has no scanned equivalent. Footer Totals sums Scanned and Manual **separately** (never combined, per §19).
   - **CSV/Excel export** (`handleExportCSV`) now passes an explicit `cols` array and emits `ATT_Scanned`/`ATT_Manual`, `FT_Scanned`/`FT_Manual`, …, `VD` (also fixes a latent bug where the header rows' `''` key made `exportToCSV` derive the wrong column set).
 - **`pages/ReportsPage.tsx` (`renderMinistryReport`) Summary Totals:** collapsed the value columns to exactly two — **`Scanned Grand Totals`** and **`Manual Grand Totals`** (both highlighted `bg-blue-50`/`bg-blue-100`, `text-blue-900`) — with the per-category rows retained and the **`Grand Total` footer row removed** (and the now-unused `grandScanned`/`grandManual` variables deleted). Filtering (`selectedSessionId` / `alterCallFilter`) unchanged; PDF inherits via the `reportRef` DOM clone.
+- **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 78. Sessions Report Per-Session Table — Redundant Total Columns Removed (v1.78)
+
+- **Context (follow-up to §76/§77):** the per-session tables in the Sessions Report (`ReportsPage.tsx` `renderMinistryReport`) rendered **5 columns** — `Category | Scanned | Manual | Scanned Total | Manual Total` — but the two `… Total` columns were **exact duplicates** of `Scanned`/`Manual` on every row (Attendance, FT/SLV/MI/HGB, Voice Distribution). Removed for consistency with the Summary Totals block (which was already reduced to `Scanned Grand Totals` / `Manual Grand Totals` in §77).
+- **`pages/ReportsPage.tsx` (`renderMinistryReport`), frontend-only:**
+  - Per-session table collapsed to **3 columns `Category | Scanned | Manual`**; the two `Scanned Total`/`Manual Total` `<th>` and every redundant `<td>` (Attendance, response-type rows, VD row) were removed. Row styling, `alterCallFilter` highlight, and `selectedSessionId` filtering unchanged.
+  - **Header caption fixed (§19):** the per-session header line previously showed a "total" that **summed scanned + manual** (`reduce(... responses.length + summaries ...)`) — a non-additive anti-pattern. It now shows them **separately**: `ATT: N | Scanned: X · Manual: Y | VD: Z`.
+- **No DB/RPC/service/`types.ts` changes.** PDF inherits via the `reportRef` DOM clone; Sessions Report CSV (individual records only) unaffected.
 - **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions

@@ -375,7 +375,7 @@ const ReportsPage = () => {
                             <div className="bg-slate-800 text-white p-3 font-black uppercase text-xs rounded-t-lg flex justify-between" style={{ backgroundColor: '#1e293b', color: '#ffffff' }}>
                                 <span>{group.title}{alterCallFilter ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</span>
                                 <span className="opacity-70">
-                                    ATT: {group.att} | {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length + (group.summaries.get(t) || 0), 0)} total | VD: {group.vd}
+                                    ATT: {group.att} | Scanned: {responseTypes.reduce((sum, t) => sum + (group.responses.get(t) || []).length, 0)} · Manual: {responseTypes.reduce((sum, t) => sum + (group.summaries.get(t) || 0), 0)} | VD: {group.vd}
                                 </span>
                             </div>
 
@@ -386,8 +386,6 @@ const ReportsPage = () => {
                                             <th className="border p-2 text-left">Category</th>
                                             <th className="border p-2 text-center">Scanned</th>
                                             <th className="border p-2 text-center">Manual</th>
-                                            <th className="border p-2 text-center bg-blue-50">Scanned Total</th>
-                                            <th className="border p-2 text-center bg-blue-50">Manual Total</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -395,8 +393,6 @@ const ReportsPage = () => {
                                             <td className="border p-2 font-black uppercase text-blue-900">Attendance</td>
                                             <td className="border p-2 text-center font-bold">{group.att}</td>
                                             <td className="border p-2 text-center font-bold">{group.attManual || '-'}</td>
-                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.att}</td>
-                                            <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.attManual || '-'}</td>
                                         </tr>
                                         {responseTypes.map(type => {
                                             const scanned = (group.responses.get(type) || []).length;
@@ -407,8 +403,6 @@ const ReportsPage = () => {
                                                     <td className="border p-2 font-black uppercase text-blue-900">{RESPONSE_TYPE_LABELS[type]}</td>
                                                     <td className="border p-2 text-center font-bold">{scanned}</td>
                                                     <td className="border p-2 text-center font-bold">{manual}</td>
-                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{scanned}</td>
-                                                    <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{manual}</td>
                                                 </tr>
                                             );
                                         })}
@@ -416,8 +410,6 @@ const ReportsPage = () => {
                                                 <td className="border p-2 font-black uppercase">Voice Distribution</td>
                                                 <td className="border p-2 text-center">-</td>
                                                 <td className="border p-2 text-center font-bold">{group.vd}</td>
-                                                <td className="border p-2 text-center">-</td>
-                                                <td className="border p-2 text-center font-black bg-blue-50 text-blue-900">{group.vd}</td>
                                             </tr>
                                     </tbody>
                                 </table>
