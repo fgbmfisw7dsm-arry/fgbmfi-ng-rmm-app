@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.78 (Sessions Report per-session tables reduced to Scanned/Manual — see §78)
+- **Current Version:** 1.79 (Sessions Summary Totals row highlighted in PDF export — see §79)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1169,6 +1169,13 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
   - **Header caption fixed (§19):** the per-session header line previously showed a "total" that **summed scanned + manual** (`reduce(... responses.length + summaries ...)`) — a non-additive anti-pattern. It now shows them **separately**: `ATT: N | Scanned: X · Manual: Y | VD: Z`.
 - **No DB/RPC/service/`types.ts` changes.** PDF inherits via the `reportRef` DOM clone; Sessions Report CSV (individual records only) unaffected.
 - **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 79. Sessions Summary Totals Row Highlighted in PDF Export (v1.79)
+
+- **Bug (Sep 2026):** in the **Sessions Summary (All Sessions)** table on the Session Details page, the **Totals** row showed highlighted (blue-900 background, white text) on screen but printed **white** in the PDF export.
+- **Root cause (`index.html` print CSS):** `.print-mode td, .print-mode th { background-color:#ffffff !important; color:#000000 !important }` forces every cell white/black during export. The Totals row's highlight lived only on the `<tr class="bg-blue-900">`; the `<td>` cells carried no `bg-blue-900` class, so the existing `.print-mode .bg-blue-900 { background-color:#1e3a8a !important; color:white !important }` rule (and `exportToPDF`'s `reportOnclone` `.bg-blue-900` inline pass) never applied to them → the row background was overridden away.
+- **Fix (`pages/SessionMinistryPage.tsx`):** added `bg-blue-900` to **each `<td>`** of the Totals row. `.print-mode .bg-blue-900` (specificity 0,2,0) beats `.print-mode td` (0,1,1), and `reportOnclone` sets an inline `#1e3a8a !important` + white on each cell → the row now prints highlighted, matching the screen. The `text-blue-200` manual cells render white in the PDF (consistent with the dark row). No screen change.
+- **Frontend-only.** No DB/RPC/service/`types.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

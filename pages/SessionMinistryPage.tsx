@@ -698,18 +698,18 @@ const SessionMinistryPage: React.FC = () => {
                     const sumVD = data.reduce((s, d) => s + (d.voice_distribution || 0), 0);
                     return (
                       <tr className="bg-blue-900 text-white font-black">
-                        <td className="p-3 uppercase">Totals</td>
-                        <td className="p-3 text-center">{sumAtt || '-'}</td>
-                        <td className="p-3 text-center text-blue-200">{sumAttM || '-'}</td>
-                        <td className="p-3 text-center">{sumFT || '-'}</td>
-                        <td className="p-3 text-center text-blue-200">{sumFTM || '-'}</td>
-                        <td className="p-3 text-center">{sumSLV || '-'}</td>
-                        <td className="p-3 text-center text-blue-200">{sumSLVM || '-'}</td>
-                        <td className="p-3 text-center">{sumMI || '-'}</td>
-                        <td className="p-3 text-center text-blue-200">{sumMIM || '-'}</td>
-                        <td className="p-3 text-center">{sumHGB || '-'}</td>
-                        <td className="p-3 text-center text-blue-200">{sumHGBM || '-'}</td>
-                        <td className="p-3 text-center">{sumVD || '-'}</td>
+                        <td className="p-3 uppercase bg-blue-900">Totals</td>
+                        <td className="p-3 text-center bg-blue-900">{sumAtt || '-'}</td>
+                        <td className="p-3 text-center text-blue-200 bg-blue-900">{sumAttM || '-'}</td>
+                        <td className="p-3 text-center bg-blue-900">{sumFT || '-'}</td>
+                        <td className="p-3 text-center text-blue-200 bg-blue-900">{sumFTM || '-'}</td>
+                        <td className="p-3 text-center bg-blue-900">{sumSLV || '-'}</td>
+                        <td className="p-3 text-center text-blue-200 bg-blue-900">{sumSLVM || '-'}</td>
+                        <td className="p-3 text-center bg-blue-900">{sumMI || '-'}</td>
+                        <td className="p-3 text-center text-blue-200 bg-blue-900">{sumMIM || '-'}</td>
+                        <td className="p-3 text-center bg-blue-900">{sumHGB || '-'}</td>
+                        <td className="p-3 text-center text-blue-200 bg-blue-900">{sumHGBM || '-'}</td>
+                        <td className="p-3 text-center bg-blue-900">{sumVD || '-'}</td>
                       </tr>
                     );
                   })()}
