@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.79 (Sessions Summary Totals row highlighted in PDF export — see §79)
+- **Current Version:** 1.80 (Reports Center Sessions Summary Manual/Scanned basis toggle — see §80)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1176,6 +1176,16 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Root cause (`index.html` print CSS):** `.print-mode td, .print-mode th { background-color:#ffffff !important; color:#000000 !important }` forces every cell white/black during export. The Totals row's highlight lived only on the `<tr class="bg-blue-900">`; the `<td>` cells carried no `bg-blue-900` class, so the existing `.print-mode .bg-blue-900 { background-color:#1e3a8a !important; color:white !important }` rule (and `exportToPDF`'s `reportOnclone` `.bg-blue-900` inline pass) never applied to them → the row background was overridden away.
 - **Fix (`pages/SessionMinistryPage.tsx`):** added `bg-blue-900` to **each `<td>`** of the Totals row. `.print-mode .bg-blue-900` (specificity 0,2,0) beats `.print-mode td` (0,1,1), and `reportOnclone` sets an inline `#1e3a8a !important` + white on each cell → the row now prints highlighted, matching the screen. The `text-blue-200` manual cells render white in the PDF (consistent with the dark row). No screen change.
 - **Frontend-only.** No DB/RPC/service/`types.ts` changes. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 80. Reports Center — Sessions Summary Manual/Scanned Basis Toggle (v1.80)
+
+- **Feature:** the **Reports Center → "Sessions Summary" tab** (`pages/ReportsPage.tsx`) gained a **Scanned | Manual segmented toggle**. It switches the displayed basis of the **Attendance / FT / SLV / MI / HGB** columns; **VD** stays a single (manual) column (no scanned equivalent) and the **financial** columns are untouched.
+- **Scope decision (differ from the Session Details page):** that page's "Sessions Summary (All Sessions)" table (`SessionMinistryPage.tsx`) intentionally keeps showing **Scanned|Manual side-by-side**; the Reports Center copy uses a **strict toggle** so the report stays compact. They are independent surfaces.
+- **Data source = already fetched (no DB/RPC/service change):** `db.getMinistryDataForExport` already returns `summaries` (manual FT/SLV/MI/HGB via `session_response_summaries.total_count`) and `attendanceManual` (manual attendance via `session_attendance_manual.total_count`). Scanned = `ministryData.responses` length (FT/SLV/MI/HGB) and `reportData.sessionAttendance` (attendance). Per §19 Scanned and Manual remain separate figures — the toggle only chooses which is **displayed**, never sums them.
+- **Session scope wired to the existing dropdown:** `summarySessionsList = sessions.filter(s => !selectedSessionId || s.session_id === selectedSessionId)` now drives the tab (previously it always showed all sessions). This aligns the tab with the Sessions Report tab's behaviour. The dropdown lives in the shared toolbar; the toggle renders only when `activeTab === 'sessionsSummary'`, mirroring the `alterCallFilter` conditional.
+- **Basis caption + CSV filename:** the report header renders `Basis: Scanned|Manual` for this tab, and the CSV branch (`handleExportCSV`) uses the same basis + session filter and emits `FGBMFI_Report_sessionsSummary_{Scanned|Manual}.csv`. PDF inherits everything via the existing `reportRef` DOM clone.
+- **Default basis = `scanned`** reproduces today's output byte-for-byte until an operator flips it.
+- **Non-disruption:** single-file change (`pages/ReportsPage.tsx`) — no `supabaseService.ts` / RPC / migration / `types.ts` / RLS / `SessionMinistryPage.tsx` changes; all other report tabs and the Sessions Report `alterCallFilter` are untouched. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

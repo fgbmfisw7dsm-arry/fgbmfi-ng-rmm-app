@@ -20,6 +20,7 @@ const ReportsPage = () => {
     const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'sessionsSummary' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
     const [alterCallFilter, setAlterCallFilter] = useState<'' | SessionResponseType>('');
+    const [summaryBasis, setSummaryBasis] = useState<'scanned' | 'manual'>('scanned');
     const reportRef = useRef<HTMLDivElement>(null);
 
     const norm = (v?: string) => (v || '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -91,6 +92,28 @@ const ReportsPage = () => {
 
         return { attendedDelegates: dedupedAttended, officialDistricts, rankColumns, officeColumns, delegateTypeColumns, financials, pledges: calculatedPledges, sessionAttendance };
     }, [aggregateData, settings, user]);
+
+    const summarySessionsList = useMemo(
+        () => sessions.filter(s => !selectedSessionId || s.session_id === selectedSessionId),
+        [sessions, selectedSessionId]
+    );
+    const attManualMap = useMemo(
+        () => new Map<string, number>((ministryData?.attendanceManual || []).map((a: any) => [a.session_id, Number(a.total_count) || 0])),
+        [ministryData]
+    );
+    const summaryManualOf = (sid: string, type: SessionResponseType): number =>
+        (ministryData?.summaries || [])
+            .filter((s: any) => s.session_id === sid && s.response_type === type)
+            .reduce((sum: number, s: any) => sum + (Number(s.total_count) || 0), 0);
+    const summaryScannedOf = (sid: string, type: SessionResponseType): number =>
+        (ministryData?.responses || [])
+            .filter((r: any) => r.session_id === sid && r.response_type === type).length;
+    const summaryAttendanceOf = (sid: string): number =>
+        summaryBasis === 'manual'
+            ? (attManualMap.get(sid) || 0)
+            : (reportData?.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0);
+    const summaryCountOf = (sid: string, type: SessionResponseType): number =>
+        summaryBasis === 'manual' ? summaryManualOf(sid, type) : summaryScannedOf(sid, type);
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
@@ -170,23 +193,21 @@ const ReportsPage = () => {
 
         if (activeTab === 'sessionsSummary') {
             const cols = ['Session', 'Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD', 'Offering', 'Pledge Redemption', 'Financial Total'];
-            const attOf = (sid: string) => reportData.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0;
-            const respOf = (sid: string, type: SessionResponseType) => (ministryData?.responses || []).filter((r: any) => r.session_id === sid && r.response_type === type).length;
             const vdOf = (sid: string) => (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === sid).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
             const offOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const redOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const masterOff = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const masterRed = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
-            const rows: Record<string, any>[] = sessions.map(s => {
+            const rows: Record<string, any>[] = summarySessionsList.map(s => {
                 const offering = offOf(s.session_id);
                 const redemption = redOf(s.session_id);
                 return {
                     Session: s.title,
-                    Attendance: attOf(s.session_id),
-                    FT: respOf(s.session_id, SessionResponseType.FT),
-                    SLV: respOf(s.session_id, SessionResponseType.SLV),
-                    MI: respOf(s.session_id, SessionResponseType.MI),
-                    HGB: respOf(s.session_id, SessionResponseType.HGB),
+                    Attendance: summaryAttendanceOf(s.session_id),
+                    FT: summaryCountOf(s.session_id, SessionResponseType.FT),
+                    SLV: summaryCountOf(s.session_id, SessionResponseType.SLV),
+                    MI: summaryCountOf(s.session_id, SessionResponseType.MI),
+                    HGB: summaryCountOf(s.session_id, SessionResponseType.HGB),
                     VD: vdOf(s.session_id),
                     Offering: offering,
                     'Pledge Redemption': redemption,
@@ -195,12 +216,12 @@ const ReportsPage = () => {
             });
             const totals: Record<string, any> = { Session: 'Totals' };
             (['Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD'] as const).forEach(k => totals[k] = rows.reduce((s, r) => s + Number(r[k]) || 0, 0));
-            totals['Offering'] = sessions.reduce((s, sess) => s + offOf(sess.session_id), 0) + masterOff;
-            totals['Pledge Redemption'] = sessions.reduce((s, sess) => s + redOf(sess.session_id), 0) + masterRed;
+            totals['Offering'] = summarySessionsList.reduce((s, sess) => s + offOf(sess.session_id), 0) + masterOff;
+            totals['Pledge Redemption'] = summarySessionsList.reduce((s, sess) => s + redOf(sess.session_id), 0) + masterRed;
             totals['Financial Total'] = totals['Offering'] + totals['Pledge Redemption'];
             rows.push({ Session: 'Full Event (Master)', Attendance: '-', FT: '-', SLV: '-', MI: '-', HGB: '-', VD: '-', Offering: masterOff, 'Pledge Redemption': masterRed, 'Financial Total': masterOff + masterRed });
             rows.push(totals);
-            exportToCSV(rows, filename, cols);
+            exportToCSV(rows, `FGBMFI_Report_sessionsSummary_${summaryBasis === 'manual' ? 'Manual' : 'Scanned'}.csv`, cols);
             return;
         }
 
@@ -661,6 +682,12 @@ const ReportsPage = () => {
                             <option value={SessionResponseType.HGB}>{RESPONSE_TYPE_LABELS[SessionResponseType.HGB]}</option>
                         </select>
                     )}
+                    {activeTab === 'sessionsSummary' && (
+                        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl" title="Columns show the selected entry basis">
+                            <button onClick={() => setSummaryBasis('scanned')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${summaryBasis === 'scanned' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}>Scanned</button>
+                            <button onClick={() => setSummaryBasis('manual')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${summaryBasis === 'manual' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}>Manual</button>
+                        </div>
+                    )}
                     <button onClick={handleExportCSV} className="px-6 py-3 bg-green-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-700 transition-colors">Export CSV</button>
                     <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
                 </div>
@@ -684,6 +711,9 @@ const ReportsPage = () => {
                         )}
                     </div>
                     {selectedSessionId && <div className="text-xs font-black text-blue-700 uppercase mt-2">Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}{alterCallFilter && activeTab === 'ministryReport' ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</div>}
+                    {activeTab === 'sessionsSummary' && (
+                        <div className="text-xs font-black text-blue-700 uppercase mt-2">Basis: {summaryBasis === 'manual' ? 'Manual' : 'Scanned'}</div>
+                    )}
                 </div>
                 
                 <div className="relative z-10">
@@ -704,12 +734,12 @@ const ReportsPage = () => {
                                     <tr><th className="p-3 border text-left">Session</th><th className="p-3 border text-center">Attendance</th><th className="p-3 border text-center">FT</th><th className="p-3 border text-center">SLV</th><th className="p-3 border text-center">MI</th><th className="p-3 border text-center">HGB</th><th className="p-3 border text-center">VD</th><th className="p-3 border text-right">Offering</th><th className="p-3 border text-right">Pledge Redemption</th><th className="p-3 border text-right bg-blue-50">Financial Total</th></tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                    {sessions.map(s => {
-                                        const att = reportData.sessionAttendance.find((a: any) => a.session_id === s.session_id)?.attendance || 0;
-                                        const ft = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length;
-                                        const slv = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length;
-                                        const mi = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length;
-                                        const hgb = (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length;
+                                    {summarySessionsList.map(s => {
+                                        const att = summaryAttendanceOf(s.session_id);
+                                        const ft = summaryCountOf(s.session_id, SessionResponseType.FT);
+                                        const slv = summaryCountOf(s.session_id, SessionResponseType.SLV);
+                                        const mi = summaryCountOf(s.session_id, SessionResponseType.MI);
+                                        const hgb = summaryCountOf(s.session_id, SessionResponseType.HGB);
                                         const vd = (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
                                         const offering = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
                                         const redemption = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
@@ -741,15 +771,15 @@ const ReportsPage = () => {
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (reportData.sessionAttendance.find((a: any) => a.session_id === s.session_id)?.attendance || 0), 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.FT).length, 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.SLV).length, 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.MI).length, 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.responses || []).filter((r: any) => r.session_id === s.session_id && r.response_type === SessionResponseType.HGB).length, 0)}</td>
-                                        <td className="p-3 border text-center">{sessions.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
-                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
-                                        <td className="p-3 border text-right">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
-                                        <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(sessions.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryAttendanceOf(s.session_id), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.FT), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.SLV), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.MI), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.HGB), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
+                                        <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                     </tr>
                                 </tfoot>
                             </table>
