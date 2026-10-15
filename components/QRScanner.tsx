@@ -331,11 +331,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
         verbose: false
       });
-      const h5VideoConstraints = {
+      // html5-qrcode ignores cameraIdOrConfig (facingMode/deviceId) whenever a
+      // videoConstraints object is supplied, so the camera selection must be
+      // merged into the constraints themselves (iOS defaults to the front camera).
+      const h5VideoConstraints: any = {
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        focusMode: { ideal: 'continuous' } as any
+        focusMode: { ideal: 'continuous' }
       };
+      if (deviceId) {
+        h5VideoConstraints.deviceId = { exact: deviceId };
+      } else {
+        h5VideoConstraints.facingMode = facing;
+      }
       await scanner.start(
         cameraSelection,
         {
@@ -344,7 +352,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onClose }) => {
             const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
             return { width: size, height: size };
           },
-          videoConstraints: h5VideoConstraints as any
+          videoConstraints: h5VideoConstraints
         },
         (decodedText: string) => {
           setScanning(false);
