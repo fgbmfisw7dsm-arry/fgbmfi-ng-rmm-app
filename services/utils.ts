@@ -153,6 +153,44 @@ export const dataUrlToBlob = (dataUrl: string): Blob => {
     return new Blob([bytes], { type: mime });
 };
 
+export type SharePdfResult = 'shared' | 'downloaded' | 'cancelled';
+
+/**
+ * Shares a PDF Blob via the native Web Share API, falling back to a download
+ * when the platform cannot share PDF files. A user-cancelled share sheet
+ * resolves to 'cancelled' (never downloads, never throws).
+ */
+export const sharePdfBlob = async (
+    blob: Blob,
+    fileName: string,
+    meta?: { title?: string; text?: string }
+): Promise<SharePdfResult> => {
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    if (
+        typeof navigator !== 'undefined' &&
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [file] })
+    ) {
+        try {
+            await navigator.share({ files: [file], title: meta?.title, text: meta?.text });
+            return 'shared';
+        } catch (e: any) {
+            if (e?.name === 'AbortError') return 'cancelled';
+        }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return 'downloaded';
+};
+
 // Proper CSV line parser: respects double-quoted fields (fields may contain
 // commas, e.g. DOB "7th June,1958"). Returns trimmed, unquoted fields.
 // Falls back gracefully on malformed input (stray quotes treated literally).

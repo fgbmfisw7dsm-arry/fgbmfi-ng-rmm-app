@@ -6,6 +6,7 @@ import { Delegate, getScopeFilter, isAdminRole, isEventAdminRole } from '../type
 import { AppContext } from '../context/AppContext';
 import { generateSingleBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
+import { sharePdfBlob } from '../services/utils';
 
 const SEARCH_PAGE_SIZE = 25;
 
@@ -202,6 +203,24 @@ const IndividualBadgePrint = () => {
       setFeedback({ type: 'error', msg: e?.message || 'A6 badge generation failed.' });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleShare = async () => {
+    const bytes = generatedPdfBytes;
+    if (!bytes) return;
+    try {
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const text = [selected?.title, selected?.first_name, selected?.last_name].filter(Boolean).join(' ').trim();
+      const result = await sharePdfBlob(blob, buildFileName(), { title: 'FGBMFI Badge', text });
+      if (result === 'shared') {
+        setFeedback({ type: 'success', msg: 'Badge shared.' });
+      } else if (result === 'downloaded') {
+        setFeedback({ type: 'success', msg: 'Share not supported — PDF downloaded instead' });
+      }
+      if (result !== 'cancelled') setTimeout(() => setFeedback(null), 3000);
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: e?.message || 'Share failed. Please try again.' });
     }
   };
 
@@ -444,6 +463,12 @@ const IndividualBadgePrint = () => {
                 className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95"
               >
                 Download PDF
+              </button>
+              <button
+                onClick={handleShare}
+                className="w-full py-4 bg-purple-600 hover:bg-purple-500 text-white font-black rounded-xl text-xs uppercase tracking-widest shadow transition-all active:scale-95"
+              >
+                Share
               </button>
               <button
                 onClick={() => { if (pdfPreviewUrl) window.open(pdfPreviewUrl, '_blank'); }}

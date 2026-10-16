@@ -8,9 +8,25 @@ import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
 import { enqueueCheckIn } from '../services/offlineQueue';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
-import { resolveDistrictShortCode, dataUrlToBlob } from '../services/utils';
+import { resolveDistrictShortCode, sharePdfBlob } from '../services/utils';
 
 const SEARCH_PAGE_SIZE = 25;
+
+// Builds the badge PDF (63×90mm) from the generated canvas data URL. Shared by
+// the PDF (download) and Share actions so both emit identical output.
+const buildBadgePdf = async (canvasUrl: string) => {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = canvasUrl;
+  });
+  const JsPDF = (window as any).jspdf?.jsPDF || (window as any).jsPDF;
+  if (!JsPDF) throw new Error('PDF library not loaded');
+  const pdf = new JsPDF('p', 'mm', [63, 90]);
+  pdf.addImage(img, 'PNG', 0, 0, 63, 90);
+  return pdf;
+};
 
 const CheckInPage = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -331,16 +347,7 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
     try {
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = reject;
-        image.src = badgeCanvasUrl;
-      });
-      const JsPDF = (window as any).jspdf?.jsPDF || (window as any).jsPDF;
-      if (!JsPDF) throw new Error('PDF library not loaded');
-      const pdf = new JsPDF('p', 'mm', [63, 90]);
-      pdf.addImage(img, 'PNG', 0, 0, 63, 90);
+      const pdf = await buildBadgePdf(badgeCanvasUrl);
       pdf.save(`FGBMFI_Badge_${nameSlug}.pdf`);
     } catch (e) {
       console.error('PDF generation failed:', e);
@@ -370,34 +377,20 @@ const handleLostBadge = useCallback(async (delegateId: string) => {
     if (!badgeCanvasUrl) return;
     const nameSlug = `${badgeDelegate?.first_name || 'delegate'}_${badgeDelegate?.last_name || ''}`.replace(/[^a-zA-Z0-9]/g, '_');
     try {
-      // Decode the data URL directly — fetch(dataUrl) is blocked by connect-src CSP.
-      const blob = dataUrlToBlob(badgeCanvasUrl);
-      const file = new File([blob], `FGBMFI_Badge_${nameSlug}.png`, { type: 'image/png' });
-
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: 'FGBMFI Badge',
-          text: [badgeDelegate?.title, badgeDelegate?.first_name, badgeDelegate?.last_name].filter(Boolean).join(' ').trim(),
-        } as any);
+      const pdf = await buildBadgePdf(badgeCanvasUrl);
+      const blob: Blob = pdf.output('blob');
+      const text = [badgeDelegate?.title, badgeDelegate?.first_name, badgeDelegate?.last_name].filter(Boolean).join(' ').trim();
+      const result = await sharePdfBlob(blob, `FGBMFI_Badge_${nameSlug}.pdf`, { title: 'FGBMFI Badge', text });
+      if (result === 'shared') {
         setFeedback({ type: 'success', msg: 'Badge shared.' });
         setTimeout(() => setFeedback(null), 2000);
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `FGBMFI_Badge_${nameSlug}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        setFeedback({ type: 'success', msg: 'Share not supported — image downloaded instead' });
+      } else if (result === 'downloaded') {
+        setFeedback({ type: 'success', msg: 'Share not supported — PDF downloaded instead' });
         setTimeout(() => setFeedback(null), 3000);
       }
     } catch (e: any) {
-      if (e?.name === 'AbortError') return;
       console.error('Share failed:', e);
-      setFeedback({ type: 'error', msg: 'Share failed. Please try again or use the Image button.' });
+      setFeedback({ type: 'error', msg: 'Share failed. Please try again or use the PDF button.' });
       setTimeout(() => setFeedback(null), 3000);
     }
   };
