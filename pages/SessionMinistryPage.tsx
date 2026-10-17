@@ -7,6 +7,7 @@ import { SessionResponseType, RESPONSE_TYPE_LABELS, Delegate, Chapter, getScopeF
 import QRScanner from '../components/QRScanner';
 import { useMinistry } from '../hooks/useMinistry';
 import { exportToPDF, exportToCSV } from '../services/utils';
+import { getQueuedSessionResponseIds } from '../services/offlineQueue';
 import OfflineRosterStatus from '../components/OfflineRosterStatus';
 
 const RESPONSE_TYPES: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
@@ -31,6 +32,7 @@ const SessionMinistryPage: React.FC = () => {
   const [searchPage, setSearchPage] = useState(1);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [offlineResults, setOfflineResults] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
   const verifiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,17 +136,20 @@ const SessionMinistryPage: React.FC = () => {
     setSearchLoading(true);
     const handle = setTimeout(() => {
       db.searchDelegatesPaged(trimmed, activeEventId, districtFilter, undefined, regionFilter, searchPage, SEARCH_PAGE_SIZE)
-        .then(({ data, total }) => {
+        .then(({ data, total, offline }) => {
           if (cancelled) return;
           setSearchTotal(total);
+          setOfflineResults(!!offline);
           const combined = new Set([...recordedIds, ...localRecordedIds.current]);
-          setResults(data.map(d => ({ ...d, recorded: combined.has(d.delegate_id) })));
+          const queuedIds = selectedSessionId ? getQueuedSessionResponseIds(activeEventId, selectedSessionId) : new Set<string>();
+          setResults(data.map(d => ({ ...d, recorded: combined.has(d.delegate_id) || queuedIds.has(d.delegate_id) })));
         })
         .catch((e) => {
           if (cancelled) return;
           console.warn('[SessionMinistryPage] search failed:', e?.message);
           setResults([]);
           setSearchTotal(0);
+          setOfflineResults(false);
         })
         .finally(() => { if (!cancelled) setSearchLoading(false); });
     }, 250);
@@ -608,6 +613,9 @@ const SessionMinistryPage: React.FC = () => {
           <div className="flex items-center justify-between gap-3 pt-2">
             <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">
               {searchLoading ? 'Searching…' : `${results.length} shown · ${searchTotal} match${searchTotal === 1 ? '' : 'es'}`}
+              {!searchLoading && offlineResults && results.length > 0 && (
+                <span className="ml-2 text-amber-600">· Offline results (device cache)</span>
+              )}
             </p>
             {searchTotal > SEARCH_PAGE_SIZE && (
               <div className="flex items-center gap-2">

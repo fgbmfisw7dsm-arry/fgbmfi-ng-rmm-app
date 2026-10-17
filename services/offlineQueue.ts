@@ -183,6 +183,26 @@ export function getSessionResponseQueueLength(): number {
   return loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).length;
 }
 
+// v1.82-fix4: ids already queued on THIS device so offline search results can be
+// marked checked-in/recorded without the network.
+export function getQueuedCheckInIds(eventId: string, sessionId?: string): Set<string> {
+  const ids = new Set<string>();
+  for (const item of loadQueue<QueuedCheckIn>(STORAGE_KEY)) {
+    if (item.eventId !== eventId) continue;
+    if ((item.sessionId || '') !== (sessionId || '')) continue;
+    ids.add(item.delegateId);
+  }
+  return ids;
+}
+
+export function getQueuedSessionResponseIds(eventId: string, sessionId: string): Set<string> {
+  const ids = new Set<string>();
+  for (const item of loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY)) {
+    if (item.eventId === eventId && item.sessionId === sessionId) ids.add(item.delegateId);
+  }
+  return ids;
+}
+
 export function getQueueStats(): QueueStats {
   const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY);
   const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);

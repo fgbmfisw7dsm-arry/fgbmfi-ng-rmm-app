@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { getScopeFilter } from '../types';
+import { normalizePhone } from './utils';
 
 // =============================================================================
 // FGBMFI-EMS — Offline Roster Snapshot + Local Resolver (v1.82)
@@ -33,6 +34,10 @@ export interface OfflineRosterEntry {
     district?: string;
     chapter?: string;
     delegate_type?: string;
+    // v1.82-fix4: contact fields for offline MANUAL lookup (search by name/phone/email).
+    phone?: string;
+    phone_normalized?: string;
+    email?: string;
     updated_at?: number;
 }
 
@@ -43,6 +48,7 @@ export interface RosterMeta {
     watermark: string | null;
     count: number;
     deltaCapable: boolean;
+    dataVersion: number;
 }
 
 export interface RosterStatus {
@@ -64,6 +70,9 @@ const DELTA_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const PAGE_SIZE = 1000;
 const WATERMARK_OVERLAP_MS = 2 * 60 * 1000;
 const JITTER_MAX_MS = 15_000;
+// v1.82-fix4: bump to force one full resync so existing caches gain phone/email
+// (required for offline manual lookup). Version 3 = contact fields present.
+const ROSTER_DATA_VERSION = 3;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 const inFlight = new Map<string, Promise<void>>();
@@ -127,6 +136,7 @@ export const getRosterMeta = (eventId: string): RosterMeta | null => {
             watermark: parsed.watermark ? String(parsed.watermark) : null,
             count: Number(parsed.count) || 0,
             deltaCapable: parsed.deltaCapable !== false,
+            dataVersion: Number(parsed.dataVersion) || 0,
         };
     } catch {
         return null;
@@ -207,12 +217,15 @@ const fetchRoster = async (
     watermark: string | null,
 ): Promise<FetchResult> => {
     const entries: OfflineRosterEntry[] = [];
-    let maxUpdatedAt: string | null = null;
-    let deltaCapable = true;
 
-    const run = async (withUpdatedAt: boolean): Promise<FetchResult> => {
-        const cols = 'delegate_id, event_id, qr_hash, external_id, title, first_name, last_name, district, chapter, delegate_type'
-            + (withUpdatedAt ? ', updated_at' : '');
+    // v1.82-fix4: `includeContact` adds phone/email (offline manual lookup).
+    // Fallback ladder: rich+updated_at → rich-without-updated_at is NOT needed;
+    // try rich+updated_at, then base+updated_at (older DB without contact cols),
+    // then base (oldest DB) — so delta sync survives wherever updated_at exists.
+    const run = async (withUpdatedAt: boolean, includeContact: boolean): Promise<FetchResult> => {
+        const baseCols = 'delegate_id, event_id, qr_hash, external_id, title, first_name, last_name, district, chapter, delegate_type';
+        const contactCols = includeContact ? ', phone, phone_normalized, email' : '';
+        const cols = baseCols + contactCols + (withUpdatedAt ? ', updated_at' : '');
         let from = 0;
         const collected: OfflineRosterEntry[] = [];
         let maxSeen: string | null = null;
@@ -245,15 +258,16 @@ const fetchRoster = async (
         return { entries: collected, complete: true, maxUpdatedAt: maxSeen, deltaCapable: withUpdatedAt };
     };
 
-    let result = await run(true);
+    let result = await run(true, true);
     if (!result.complete && result.entries.length === 0) {
-        // `updated_at` column not deployed yet — fall back to a full fetch.
-        result = await run(false);
-        deltaCapable = false;
+        // Contact columns or `updated_at` not deployed yet — degrade gracefully.
+        result = await run(true, false);
+    }
+    if (!result.complete && result.entries.length === 0) {
+        result = await run(false, false);
     }
     entries.push(...result.entries);
-    maxUpdatedAt = result.maxUpdatedAt;
-    return { entries, complete: result.complete, maxUpdatedAt, deltaCapable };
+    return { entries, complete: result.complete, maxUpdatedAt: result.maxUpdatedAt, deltaCapable: result.deltaCapable };
 };
 
 const syncRoster = async (
@@ -268,8 +282,9 @@ const syncRoster = async (
     const now = Date.now();
 
     const scopeChanged = !!meta && meta.scopeKey !== scopeKey;
+    const versionStale = !meta || (meta.dataVersion || 0) !== ROSTER_DATA_VERSION;
     const cold = !meta;
-    const fullDue = !meta || scopeChanged || meta.deltaCapable === false || (now - meta.fullSyncedAt) > FULL_SYNC_INTERVAL_MS;
+    const fullDue = !meta || versionStale || scopeChanged || meta.deltaCapable === false || (now - meta.fullSyncedAt) > FULL_SYNC_INTERVAL_MS;
     const deltaDue = !!meta && !fullDue && meta.watermark && (now - meta.deltaSyncedAt) > DELTA_MIN_INTERVAL_MS;
 
     if (!opts?.force) {
@@ -297,6 +312,7 @@ const syncRoster = async (
                 watermark,
                 count: entries.length,
                 deltaCapable,
+                dataVersion: ROSTER_DATA_VERSION,
             });
         } else if (deltaDue && meta?.watermark) {
             const { entries, complete, maxUpdatedAt } = await fetchRoster(eventId, scope, meta.watermark);
@@ -314,6 +330,7 @@ const syncRoster = async (
                 deltaSyncedAt: now,
                 watermark,
                 count,
+                dataVersion: ROSTER_DATA_VERSION,
             });
         }
 
@@ -405,6 +422,93 @@ export async function resolveCodeLocally(
         }
     } catch { /* idb unavailable */ }
     return null;
+}
+
+// v1.82-fix4: local (offline) MANUAL LOOKUP. Mirrors the shipped v1.74 search
+// semantics — tokenized word-prefix on name; selective exact identifier match on
+// phone/email/external_id/delegate_id. The roster is scope-built already, so the
+// caller passes its scopeKey purely as a shared-device safety guard.
+const normNameText = (s?: string): string =>
+    (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const safeSearchTok = (s: string): string => s.replace(/[(),%\\]/g, '');
+
+export async function searchRosterLocally(
+    eventId: string,
+    query: string,
+    opts?: { page?: number; pageSize?: number; scopeKey?: string },
+): Promise<{ entries: OfflineRosterEntry[]; total: number }> {
+    if (typeof indexedDB === 'undefined' || !eventId) return { entries: [], total: 0 };
+    const trimmed = (query || '').trim();
+    if (trimmed.length < 2) return { entries: [], total: 0 };
+
+    const meta = getRosterMeta(eventId);
+    if (meta && opts?.scopeKey && meta.scopeKey !== opts.scopeKey) return { entries: [], total: 0 };
+
+    const all = await new Promise<OfflineRosterEntry[]>((resolve, reject) => {
+        openDb().then(db => {
+            const out: OfflineRosterEntry[] = [];
+            const t = db.transaction(STORE, 'readonly');
+            const req = t.objectStore(STORE).index('event').openCursor(IDBKeyRange.only(eventId));
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (cursor) { out.push(cursor.value as OfflineRosterEntry); cursor.continue(); }
+                else resolve(out);
+            };
+            req.onerror = () => reject(req.error);
+        }).catch(reject);
+    });
+
+    const tokens = trimmed.toLowerCase().split(/\s+/).map(safeSearchTok).filter(t => t.length > 0).slice(0, 4);
+    const fullQ = tokens.join(' ');
+    const phoneQ = normalizePhone(trimmed);
+    const emailQ = trimmed.toLowerCase();
+    const idQl = safeSearchTok(trimmed).toLowerCase();
+
+    const scored: { entry: OfflineRosterEntry; score: number }[] = [];
+    for (const entry of all) {
+        const nameNorm = normNameText(`${entry.first_name || ''} ${entry.last_name || ''}`);
+        let score = 0;
+
+        // Selective identifiers (whole-query only — never tokenized).
+        if (phoneQ.length >= 7 && entry.phone_normalized && entry.phone_normalized === phoneQ) score = 100;
+        else if (emailQ.includes('@') && entry.email && entry.email.toLowerCase() === emailQ) score = 100;
+        else if (idQl && entry.external_id && entry.external_id.toLowerCase() === idQl) score = 100;
+        else if (idQl && entry.delegate_id && entry.delegate_id.toLowerCase() === idQl) score = 100;
+        else if (idQl.length >= 6 && entry.external_id && entry.external_id.toLowerCase().startsWith(idQl)) score = 95;
+
+        if (!score && nameNorm && fullQ) {
+            if (nameNorm === fullQ) score = 90;
+            else if (nameNorm.startsWith(fullQ + ' ')) score = 80;
+        }
+        if (!score && nameNorm && tokens.length > 0) {
+            const words = nameNorm.split(' ');
+            if (tokens.length === 1) {
+                if (words.some(w => w === tokens[0])) score = 55;
+                else if (words.some(w => w.startsWith(tokens[0]))) score = 50;
+            } else if (tokens.every(t => words.some(w => w.startsWith(t)))) {
+                score = 60;
+            }
+        }
+
+        if (score > 0) scored.push({ entry, score });
+    }
+
+    scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const al = (a.entry.last_name || '').toLowerCase();
+        const bl = (b.entry.last_name || '').toLowerCase();
+        if (al !== bl) return al < bl ? -1 : 1;
+        const af = (a.entry.first_name || '').toLowerCase();
+        const bf = (b.entry.first_name || '').toLowerCase();
+        return af < bf ? -1 : af > bf ? 1 : 0;
+    });
+
+    const total = scored.length;
+    const page = Math.max(1, opts?.page || 1);
+    const pageSize = Math.max(1, opts?.pageSize || 25);
+    const offset = (page - 1) * pageSize;
+    return { entries: scored.slice(offset, offset + pageSize).map(s => s.entry), total };
 }
 
 export function getPendingSyncCount(): number {

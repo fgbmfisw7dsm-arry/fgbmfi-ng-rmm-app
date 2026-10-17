@@ -3,7 +3,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
-import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
+import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
 
 /**
  * Normalizes email for transmission. 
@@ -46,6 +46,7 @@ const invalidateLiveEventCache = () => { liveEventCache = null; };
 // service also auto-disables the flush RPCs when the functions are missing).
 const USE_LIVE_EVENT_PIN = true;
 const USE_FLUSH_RPC = true;
+const USE_OFFLINE_SEARCH = true;
 
 const QUEUE_STORAGE_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue'];
 const clearStoragePreservingQueues = () => {
@@ -1154,13 +1155,45 @@ export const db = {
 
     // v1.74: tokenized, name word-prefix, server-paginated search. Returns the
     // total so callers can page ("N of M") instead of silently truncating.
-    searchDelegatesPaged: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string, page: number = 1, pageSize: number = 200): Promise<{ data: (Delegate & { checkedIn: boolean })[]; total: number }> => {
+    searchDelegatesPaged: async (query: string, eventId: string, district?: string, sessionId?: string, region?: string, page: number = 1, pageSize: number = 200): Promise<{ data: (Delegate & { checkedIn: boolean })[]; total: number; offline?: boolean }> => {
         if (!eventId) return { data: [], total: 0 };
         const trimmed = (query || '').trim();
         if (trimmed.length < 2) return { data: [], total: 0 };
         const safePage = Math.max(1, page);
         const safeSize = Math.max(1, pageSize);
         const offset = (safePage - 1) * safeSize;
+
+        // v1.82-fix4: offline MANUAL LOOKUP against the device roster (same source
+        // of truth as QR resolution). Used when the device is offline, or as a
+        // fallback when an online-but-dead uplink fails the network request.
+        const localSearch = async (): Promise<{ data: (Delegate & { checkedIn: boolean })[]; total: number; offline?: boolean }> => {
+            const { entries, total } = await searchRosterLocally(eventId, trimmed, {
+                page: safePage,
+                pageSize: safeSize,
+                scopeKey: scopeKeyOf({ district, region }),
+            });
+            const data = entries.map(e => ({
+                delegate_id: e.delegate_id,
+                event_id: e.event_id,
+                title: e.title || '',
+                first_name: e.first_name || '',
+                last_name: e.last_name || '',
+                district: e.district || '',
+                chapter: e.chapter || '',
+                delegate_type: e.delegate_type || '',
+                phone: e.phone || '',
+                email: e.email || '',
+                qr_hash: e.qr_hash || '',
+                external_id: e.external_id || '',
+                checkedIn: false,
+            })) as (Delegate & { checkedIn: boolean })[];
+            return { data, total, offline: true };
+        };
+
+        if (USE_OFFLINE_SEARCH && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            const local = await localSearch();
+            if (local.total > 0) return local;
+        }
 
         if (USE_SEARCH_RPC && searchRpcAvailable) {
             try {
@@ -1218,7 +1251,14 @@ export const db = {
         }
         if (orParts.length > 0) q = q.or(orParts.join(','));
         const { data: delegates, error, count } = await q.order('last_name', { ascending: true }).order('first_name', { ascending: true }).range(offset, offset + safeSize - 1);
-        if (error) throw error;
+        if (error) {
+            // Network failure (venue Wi-Fi down but navigator.onLine true) — fall
+            // back to the device roster instead of surfacing an error.
+            if (USE_OFFLINE_SEARCH && isNetworkErrorMessage((error as any)?.message)) {
+                return localSearch();
+            }
+            throw error;
+        }
         const rows = delegates || [];
         if (rows.length === 0) return { data: [], total: count || 0 };
 

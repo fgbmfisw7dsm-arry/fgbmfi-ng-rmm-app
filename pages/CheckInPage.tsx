@@ -8,6 +8,7 @@ import QRScanner from '../components/QRScanner';
 import { useQuery } from '@tanstack/react-query';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
 import { resolveDistrictShortCode, sharePdfBlob } from '../services/utils';
+import { getQueuedCheckInIds } from '../services/offlineQueue';
 import OfflineRosterStatus from '../components/OfflineRosterStatus';
 
 const SEARCH_PAGE_SIZE = 25;
@@ -36,6 +37,7 @@ const CheckInPage = () => {
   const [searchPage, setSearchPage] = useState(1);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [offlineResults, setOfflineResults] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [verifiedDelegate, setVerifiedDelegate] = useState<((Partial<Delegate>) & { alreadyCheckedIn: boolean }) | null>(null);
@@ -117,12 +119,15 @@ const CheckInPage = () => {
     setSearchLoading(true);
     const handle = setTimeout(() => {
       db.searchDelegatesPaged(trimmed, activeEventId, districtFilter, selectedSessionId, regionFilter, searchPage, SEARCH_PAGE_SIZE)
-        .then(({ data, total }) => {
+        .then(({ data, total, offline }) => {
           if (cancelled) return;
           setSearchTotal(total);
+          setOfflineResults(!!offline);
+          const queuedIds = getQueuedCheckInIds(activeEventId, selectedSessionId || undefined);
           setResults(data.map(d => {
             const key = `${d.delegate_id}_${selectedSessionId || 'arrival'}`;
-            const isVerifiedLocally = localVerifiedIds.current.has(key);
+            const isQueued = queuedIds.has(d.delegate_id);
+            const isVerifiedLocally = localVerifiedIds.current.has(key) || isQueued;
             return { ...d, checkedIn: d.checkedIn || isVerifiedLocally, verifiedLocally: isVerifiedLocally };
           }));
         })
@@ -131,6 +136,7 @@ const CheckInPage = () => {
           console.warn('[CheckInPage] search failed:', e?.message);
           setResults([]);
           setSearchTotal(0);
+          setOfflineResults(false);
         })
         .finally(() => { if (!cancelled) setSearchLoading(false); });
     }, 250);
@@ -714,10 +720,13 @@ d.checkedIn ? 'bg-green-50 border-green-200 scale-[0.98]' : 'hover:border-blue-5
        </div>
 
        {query.trim().length >= 2 && (searchLoading || searchTotal > 0) && (
-         <div className="flex items-center justify-between gap-3 pt-2">
-           <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-             {searchLoading ? 'Searching…' : `${results.length} shown · ${searchTotal} match${searchTotal === 1 ? '' : 'es'}`}
-           </p>
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+              {searchLoading ? 'Searching…' : `${results.length} shown · ${searchTotal} match${searchTotal === 1 ? '' : 'es'}`}
+              {!searchLoading && offlineResults && results.length > 0 && (
+                <span className="ml-2 text-amber-600">· Offline results (device cache)</span>
+              )}
+            </p>
            {searchTotal > SEARCH_PAGE_SIZE && (
              <div className="flex items-center gap-2">
                <button onClick={() => setSearchPage(p => Math.max(1, p - 1))} disabled={searchPage <= 1 || searchLoading} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Prev</button>
