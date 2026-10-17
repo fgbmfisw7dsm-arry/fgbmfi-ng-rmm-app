@@ -287,6 +287,12 @@ const syncRoster = async (
     const fullDue = !meta || versionStale || scopeChanged || meta.deltaCapable === false || (now - meta.fullSyncedAt) > FULL_SYNC_INTERVAL_MS;
     const deltaDue = !!meta && !fullDue && meta.watermark && (now - meta.deltaSyncedAt) > DELTA_MIN_INTERVAL_MS;
 
+    // v1.82-fix5: never attempt a network sync with no uplink (auto/jittered).
+    // Without this, an offline device re-tried a full fetch on every door-page
+    // mount (each blocked on the fetch timeout) while the pill showed "Preparing…".
+    const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (isOffline && !opts?.force) return;
+
     if (!opts?.force) {
         if (!fullDue && !deltaDue) return;
         if (cold && opts?.jitter !== false) await sleep(Math.random() * JITTER_MAX_MS);
@@ -509,6 +515,26 @@ export async function searchRosterLocally(
     const pageSize = Math.max(1, opts?.pageSize || 25);
     const offset = (page - 1) * pageSize;
     return { entries: scored.slice(offset, offset + pageSize).map(s => s.entry), total };
+}
+
+// v1.82-fix5: O(1) identity lookup for the offline/queued verify snapshot
+// (store keyPath IS delegate_id, so this is a direct key get — no index needed).
+export async function resolveDelegateByIdLocally(
+    eventId: string,
+    delegateId: string,
+): Promise<OfflineRosterEntry | null> {
+    if (typeof indexedDB === 'undefined' || !eventId || !delegateId) return null;
+    try {
+        const db = await openDb();
+        const entry = await new Promise<OfflineRosterEntry | null>((resolve, reject) => {
+            const t = db.transaction(STORE, 'readonly');
+            const req = t.objectStore(STORE).get(delegateId);
+            req.onsuccess = () => resolve((req.result as OfflineRosterEntry) || null);
+            req.onerror = () => reject(req.error);
+        });
+        if (entry && entry.event_id === eventId) return entry;
+    } catch { /* idb unavailable */ }
+    return null;
 }
 
 export function getPendingSyncCount(): number {

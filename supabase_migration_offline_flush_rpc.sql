@@ -34,6 +34,7 @@ DECLARE
     v_delegate_id  UUID;
     v_session_id   UUID;
     v_registrar    UUID;
+    v_checked_at   TIMESTAMPTZ;
     v_active       BOOLEAN;
     v_cached_event UUID := NULL;
     v_cached_active BOOLEAN := TRUE;
@@ -57,6 +58,7 @@ BEGIN
             v_delegate_id := NULLIF(v_item->>'delegate_id', '')::uuid;
             v_session_id  := NULLIF(v_item->>'session_id', '')::uuid;
             v_registrar   := NULLIF(v_item->>'registrar_id', '')::uuid;
+            v_checked_at  := NULLIF(v_item->>'checked_in_at', '')::timestamptz;
 
             IF v_event_id IS NULL OR v_delegate_id IS NULL THEN
                 v_results := v_results || jsonb_build_object('id', v_item_id, 'status', 'error', 'message', 'Invalid queue item');
@@ -79,7 +81,19 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            IF v_session_id IS NOT NULL THEN
+            IF v_session_id IS NULL THEN
+                -- v1.82-fix5: explicit arrival pre-check (see _fix migration).
+                SELECT EXISTS (
+                    SELECT 1 FROM checkins
+                    WHERE event_id = v_event_id
+                      AND delegate_id = v_delegate_id
+                      AND session_id IS NULL
+                ) INTO v_has_arrival;
+                IF v_has_arrival THEN
+                    v_results := v_results || jsonb_build_object('id', v_item_id, 'status', 'already', 'message', 'Already Checked-in');
+                    CONTINUE;
+                END IF;
+            ELSE
                 SELECT EXISTS (
                     SELECT 1 FROM checkins
                     WHERE event_id = v_event_id
@@ -87,14 +101,14 @@ BEGIN
                       AND session_id IS NULL
                 ) INTO v_has_arrival;
                 IF NOT v_has_arrival THEN
-                    INSERT INTO checkins (event_id, delegate_id, session_id, checked_in_by)
-                    VALUES (v_event_id, v_delegate_id, NULL, COALESCE(v_registrar, auth.uid()))
+                    INSERT INTO checkins (event_id, delegate_id, session_id, checked_in_by, checked_in_at)
+                    VALUES (v_event_id, v_delegate_id, NULL, COALESCE(v_registrar, auth.uid()), COALESCE(v_checked_at, NOW()))
                     ON CONFLICT DO NOTHING;
                 END IF;
             END IF;
 
-            INSERT INTO checkins (event_id, delegate_id, session_id, checked_in_by)
-            VALUES (v_event_id, v_delegate_id, v_session_id, COALESCE(v_registrar, auth.uid()))
+            INSERT INTO checkins (event_id, delegate_id, session_id, checked_in_by, checked_in_at)
+            VALUES (v_event_id, v_delegate_id, v_session_id, COALESCE(v_registrar, auth.uid()), COALESCE(v_checked_at, NOW()))
             ON CONFLICT DO NOTHING;
 
             GET DIAGNOSTICS v_inserted = ROW_COUNT;

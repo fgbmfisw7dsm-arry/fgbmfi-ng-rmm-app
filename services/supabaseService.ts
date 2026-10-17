@@ -3,7 +3,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
-import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
+import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
 
 /**
  * Normalizes email for transmission. 
@@ -293,6 +293,40 @@ const withRetry = async <T>(
     }
   }
   throw lastError;
+};
+
+// v1.82-fix5: door writes must not hang the UI on a "connected but dead" uplink
+// (Wi-Fi up, no internet → navigator.onLine stays true, so the offline fast-path
+// is skipped and the write would otherwise walk the full multi-request retry
+// chain, ~1.5-4 min). Race the write with a short timeout so the caller's catch
+// can queue immediately. The orphaned request may still complete later — that is
+// safe: the partial-unique index + flush RPC pre-check make replays idempotent.
+const DOOR_WRITE_TIMEOUT_MS = 8000;
+
+const raceDoorTimeout = <T>(p: Promise<T>, ms = DOOR_WRITE_TIMEOUT_MS): Promise<T> =>
+  Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('NETWORK: door write timed out')), ms)),
+  ]);
+
+// Identity snapshot from the device roster for the offline/queued verify card.
+const localDelegateSnapshot = async (eventId: string, delegateId: string): Promise<any> => {
+  try {
+    const e = await resolveDelegateByIdLocally(eventId, delegateId);
+    if (e) {
+      return {
+        delegate_id: e.delegate_id,
+        qr_hash: e.qr_hash || '',
+        title: e.title || '',
+        first_name: e.first_name || '',
+        last_name: e.last_name || '',
+        district: e.district || '',
+        chapter: e.chapter || '',
+        delegate_type: e.delegate_type || '',
+      };
+    }
+  } catch { /* best effort */ }
+  return { delegate_id: delegateId };
 };
 const ensureEventActive = async (eventId: string) => {
     const { data, error } = await supabase.from('events').select('is_active').eq('event_id', eventId).single();
@@ -1504,10 +1538,10 @@ export const db = {
         // an item that flushQueue believes it already handled.
         if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
             enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
-            return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: { delegate_id: delegateId } as any };
+            return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId) };
         }
         try {
-        return await withRetry(async () => {
+        const run = withRetry(async () => {
         if (!opts?.skipGuard) await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, title, first_name, last_name, district, chapter, delegate_type').eq('delegate_id', delegateId).maybeSingle();
@@ -1547,11 +1581,12 @@ export const db = {
 
         return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', title: del?.title || '', first_name: del?.first_name || '', last_name: del?.last_name || '', district: del?.district || '', chapter: del?.chapter || '', delegate_type: del?.delegate_type || '' } as any };
         });
+        return opts?.forceOnline ? await run : await raceDoorTimeout(run);
         } catch (e: any) {
             // v1.82: connected-but-unreachable link — queue instead of losing the scan.
             if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
                 enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
-                return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: { delegate_id: delegateId } as any };
+                return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId) };
             }
             throw e;
         }
@@ -2172,13 +2207,18 @@ export const db = {
         const { count: totalSessionAttendance } = await supabase.from('checkins').select('delegate_id', { count: 'exact', head: true }).eq('event_id', eventId).not('session_id', 'is', null);
 
         const recentActivity: CheckIn[] = [];
+        const seenDelegates = new Set<string>();
         const { data: recentRows } = await supabase.from('checkins').select('*, delegates(*)').eq('event_id', eventId).order('checked_in_at', { ascending: false }).limit(200);
         for (const c of (recentRows || [])) {
             const d = c.delegates;
             if (!d) continue;
+            // v1.82-fix5: dedupe per delegate (mirrors the RPC's DISTINCT ON) so a
+            // duplicate/session row can never re-surface an already-checked-in delegate.
+            if (seenDelegates.has(c.delegate_id)) continue;
             const dnorm = normalize(d.district).toUpperCase();
             if (regionPrefix && !dnorm.startsWith(regionPrefix.replace('%', ''))) continue;
             if (districtFilter && dnorm !== districtFilter) continue;
+            seenDelegates.add(c.delegate_id);
             recentActivity.push({
                 checkin_id: c.checkin_id, event_id: c.event_id, delegate_id: c.delegate_id, session_id: c.session_id, checked_in_at: c.checked_in_at, checked_in_by: c.checked_in_by,
                 delegate_name: `${d.first_name} ${d.last_name}`, district: d.district || 'Unknown', rank: d.rank || '-', office: d.office || '-'
@@ -3413,7 +3453,7 @@ export const db = {
             return { success: true, message: 'Recorded (Pending Sync)' };
         }
         try {
-        return await withRetry(async () => {
+        const run = withRetry(async () => {
             await ensureEventActive(eventId);
 
             const { data: arrival } = await supabase.from('checkins')
@@ -3461,6 +3501,7 @@ export const db = {
 
             return { success: true, message: 'Saved' };
         });
+        return opts?.forceOnline ? await run : await raceDoorTimeout(run);
         } catch (e: any) {
             // v1.82: connected-but-unreachable link — queue the alter-call response.
             if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {

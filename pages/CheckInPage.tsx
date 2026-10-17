@@ -206,7 +206,8 @@ const CheckInPage = () => {
             setResults(prev => prev.map(d => 
               d.delegate_id === delegateId ? { ...d, checkedIn: true, verifiedLocally: !res.alreadyCheckedIn, qr_hash: res.delegate?.qr_hash || d.qr_hash } : d
             ));
-            showVerifiedSnapshot(res.delegate || null, !!res.alreadyCheckedIn);
+            const snapshotRow = results.find(r => r.delegate_id === delegateId) || null;
+            showVerifiedSnapshot({ ...(snapshotRow || {}), ...(res.delegate || {}) }, !!res.alreadyCheckedIn);
             setFeedback({ type: res.alreadyCheckedIn ? 'error' : 'success', msg: res.message || 'Verified!' });
             setTimeout(() => setFeedback(null), res.alreadyCheckedIn ? 3000 : 2000);
         } else {

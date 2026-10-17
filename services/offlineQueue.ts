@@ -259,6 +259,8 @@ export async function flushQueue(force = false): Promise<{ flushed: number; fail
             delegate_id: item.delegateId,
             session_id: item.sessionId || null,
             registrar_id: item.registrar?.id || null,
+            // v1.82-fix5: persist the ORIGINAL scan time, not the sync time.
+            checked_in_at: item.timestamp ? new Date(item.timestamp).toISOString() : null,
           })));
           const resultById = new Map((results || []).map((r: any) => [String(r.id), r]));
           queue = queue.map(item => {

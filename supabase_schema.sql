@@ -116,6 +116,14 @@ CREATE TABLE IF NOT EXISTS checkins (
     checked_in_by UUID
 );
 
+-- Concurrent scanner safety (v1.82-fix5). A plain (event_id, delegate_id,
+-- session_id) UNIQUE index CANNOT block duplicate ARRIVAL rows because Postgres
+-- treats NULL session_id values as distinct — hence the partial arrival index.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkins_event_delegate_arrival_unique
+    ON checkins(event_id, delegate_id) WHERE session_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkins_event_delegate_session_unique
+    ON checkins(event_id, delegate_id, session_id) WHERE session_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS pledges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     event_id UUID REFERENCES events(event_id) ON DELETE CASCADE,
