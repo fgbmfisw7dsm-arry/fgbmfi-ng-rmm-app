@@ -7,20 +7,10 @@ import { SessionResponseType, RESPONSE_TYPE_LABELS, Delegate, Chapter, getScopeF
 import QRScanner from '../components/QRScanner';
 import { useMinistry } from '../hooks/useMinistry';
 import { exportToPDF, exportToCSV } from '../services/utils';
-import type { RosterStatus } from '../services/offlineRoster';
+import OfflineRosterStatus from '../components/OfflineRosterStatus';
 
 const RESPONSE_TYPES: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
 const SEARCH_PAGE_SIZE = 25;
-
-const rosterAge = (ts: number): string => {
-  if (!ts) return 'never';
-  const mins = Math.floor((Date.now() - ts) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-};
 
 const SessionMinistryPage: React.FC = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
@@ -58,8 +48,6 @@ const SessionMinistryPage: React.FC = () => {
   const [manualType, setManualType] = useState<SessionResponseType | null>(null);
   const [manualValue, setManualValue] = useState('');
   const [savingManual, setSavingManual] = useState(false);
-  const [roster, setRoster] = useState<RosterStatus | null>(null);
-  const [rosterBusy, setRosterBusy] = useState(false);
 
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
@@ -132,46 +120,6 @@ const SessionMinistryPage: React.FC = () => {
   const scope = getScopeFilter(user);
   const districtFilter = scope.district;
   const regionFilter = scope.region;
-
-  // v1.82: build/refresh the offline roster on the door page only (never at login).
-  useEffect(() => {
-    if (!activeEventId || !user?.id) return;
-    let cancelled = false;
-    const refreshStatus = async () => {
-      try {
-        const status = await db.getOfflineRosterStatus(activeEventId);
-        if (!cancelled) setRoster(status);
-      } catch { /* best effort */ }
-    };
-    void refreshStatus();
-    void db.ensureOfflineRoster(activeEventId, scope);
-    const onRoster = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (!detail?.eventId || detail.eventId === activeEventId) void refreshStatus();
-    };
-    const onOnline = () => {
-      void refreshStatus();
-      void db.ensureOfflineRoster(activeEventId, scope);
-    };
-    window.addEventListener('fgbmfi-roster-changed', onRoster);
-    window.addEventListener('online', onOnline);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('fgbmfi-roster-changed', onRoster);
-      window.removeEventListener('online', onOnline);
-    };
-  }, [activeEventId, user?.id, scope.district, scope.region]);
-
-  const prepareOffline = async () => {
-    if (!activeEventId) return;
-    setRosterBusy(true);
-    try {
-      await db.ensureOfflineRoster(activeEventId, scope, { force: true, jitter: false });
-      setRoster(await db.getOfflineRosterStatus(activeEventId));
-    } finally {
-      setRosterBusy(false);
-    }
-  };
 
   // v1.74: bounded replace-page search (constant DOM count on phones)
   useEffect(() => {
@@ -442,25 +390,7 @@ const SessionMinistryPage: React.FC = () => {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 no-print">
-          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
-            <span className={`w-2 h-2 rounded-full ${roster?.ready ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
-            {rosterBusy || roster?.syncing
-              ? 'Preparing offline roster...'
-              : roster?.ready
-                ? `Offline roster: ${roster.count.toLocaleString()} delegates · ${rosterAge(roster.lastSync)}`
-                : 'Offline roster not ready — build it before signal is lost'}
-          </div>
-          <button
-            type="button"
-            onClick={prepareOffline}
-            disabled={rosterBusy || !!roster?.syncing}
-            className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-            title="Download/refresh the offline badge roster now"
-          >
-            {rosterBusy || roster?.syncing ? 'Preparing...' : 'Prepare Offline'}
-          </button>
-        </div>
+        <OfflineRosterStatus eventId={activeEventId} scope={scope} className="mb-2" />
 
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
           <h2 className="text-[10px] font-black text-gray-400 uppercase mb-3 tracking-[0.2em]">Session Context</h2>
