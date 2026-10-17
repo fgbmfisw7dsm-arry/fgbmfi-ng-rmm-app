@@ -41,9 +41,16 @@ BEGIN
         END IF;
     END IF;
 
+    -- safeupdate (Supabase) rejects UPDATE/DELETE without a WHERE clause, so the
+    -- single settings row is targeted explicitly; insert one if the table is empty.
     UPDATE system_settings
        SET live_event_id = p_event_id,
-           updated_at = NOW();
+           updated_at = NOW()
+     WHERE id = (SELECT id FROM system_settings ORDER BY id LIMIT 1);
+
+    IF NOT FOUND THEN
+        INSERT INTO system_settings (live_event_id) VALUES (p_event_id);
+    END IF;
 
     SELECT email INTO v_email FROM app_users WHERE id = v_uid;
 
