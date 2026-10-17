@@ -51,6 +51,7 @@ export interface RosterStatus {
     syncing: boolean;
     scopeKey: string;
     lastSync: number;
+    lastFullSync: number;
     deltaCapable: boolean;
 }
 
@@ -353,12 +354,15 @@ export async function getRosterStatus(eventId: string): Promise<RosterStatus> {
     const meta = getRosterMeta(eventId);
     let count = 0;
     try { count = await countEvent(eventId); } catch { count = meta?.count || 0; }
+    const lastFullSync = meta?.fullSyncedAt || 0;
+    const lastDeltaSync = meta?.deltaSyncedAt || 0;
     return {
         count,
         ready: count > 0,
         syncing: inFlight.has(eventId),
         scopeKey: meta?.scopeKey || '',
-        lastSync: meta?.fullSyncedAt || 0,
+        lastSync: Math.max(lastFullSync, lastDeltaSync),
+        lastFullSync,
         deltaCapable: meta?.deltaCapable !== false,
     };
 }

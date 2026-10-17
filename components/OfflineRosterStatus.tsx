@@ -136,6 +136,7 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
                     <dl className="mt-3 space-y-1.5 text-[11px]">
                         <Row label="Cached" value={roster ? roster.count.toLocaleString() : '0'} />
                         <Row label="Last refresh" value={roster ? rosterAge(roster.lastSync) : 'never'} />
+                        <Row label="Full sync" value={roster ? rosterAge(roster.lastFullSync) : 'never'} />
                         <Row
                             label="Status"
                             value={syncing ? 'Preparing' : ready ? 'Ready' : critical ? 'Missing' : 'Not ready'}
