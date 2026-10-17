@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { User, Event, UserRole, getScopeFilter, LogoutReason } from './types';
+import { User, Event, UserRole, LogoutReason } from './types';
 import { AppContext } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfigurationError } from './components/ConfigurationError';
@@ -11,6 +11,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './hooks/useQueryClient';
 import { flushQueueOnConnect } from './services/offlineQueue';
 import { setOfflineWindowOpen } from './services/offlineRoster';
+import { defaultRouteForRole } from './services/roleRouting';
 import { startPresence, stopPresence, getDeviceId } from './services/presenceService';import { useIdleTimeout } from './hooks/useIdleTimeout';
 import IdleTimeoutModal from './components/IdleTimeoutModal';
 
@@ -90,6 +91,7 @@ const AppContent = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [activeEventId, setActiveEventId] = useState<string>(() => localStorage.getItem('fgbmfi_active_event_id') || '');
   const [activeEvent, setActiveEvent] = useState<Event | null>(null);
+  const [liveEventId, setLiveEventId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
   const userIdRef = useRef<string | null>(null);
@@ -132,6 +134,58 @@ const AppContent = () => {
   const refreshActiveEvent = useCallback(async () => {
     await fetchEvents();
   }, [fetchEvents]);
+
+  // v1.82: server-side live event pin. When pinned, every client is forced onto
+  // that event and the selector is locked for all roles.
+  const refreshLiveEvent = useCallback(async () => {
+    if (!user?.id) {
+      setLiveEventId(null);
+      return;
+    }
+    const id = await db.getLiveEventId();
+    setLiveEventId(id);
+    if (id) setActiveEventId(id);
+  }, [user?.id]);
+
+  const unpinLiveEvent = useCallback(async () => {
+    try {
+      await db.setLiveEvent(null);
+      setLiveEventId(null);
+    } catch (e: any) {
+      alert(e?.message || 'Unable to unpin the live event.');
+    }
+  }, []);
+
+  const handleEventChange = useCallback((id: string) => {
+    if (liveEventId) return;
+    setActiveEventId(id);
+  }, [liveEventId]);
+
+  useEffect(() => {
+    void refreshLiveEvent();
+  }, [refreshLiveEvent]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel('live_event_config')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'system_settings' },
+        () => { void refreshLiveEvent(); })
+      .subscribe();
+
+    const sync = () => { void refreshLiveEvent(); };
+    window.addEventListener('online', sync);
+    window.addEventListener('focus', sync);
+    const interval = setInterval(sync, 60_000);
+
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      window.removeEventListener('online', sync);
+      window.removeEventListener('focus', sync);
+      clearInterval(interval);
+    };
+  }, [user?.id, refreshLiveEvent]);
 
   const logout = useCallback(async () => {
     userIdRef.current = null;
@@ -269,26 +323,15 @@ const AppContent = () => {
     };
   }, []);
 
+  // v1.82: pending queues are flushed globally. The offline roster is built
+  // on-demand by the door pages (Check-In / Session Ministry), never at login.
   useEffect(() => {
-    if (user?.id && activeEventId) {
-      flushQueueOnConnect();
-      db.refreshOfflineRoster(activeEventId, getScopeFilter(user));
-    }
-  }, [user?.id, activeEventId]);
-
-  // v1.66/D4: keep the offline roster + pending queue in sync with connectivity.
-  useEffect(() => {
-    if (!user?.id || !activeEventId) return;
-    const sync = () => {
-      flushQueueOnConnect();
-      db.refreshOfflineRoster(activeEventId, getScopeFilter(user));
-    };
-    sync();
+    if (!user?.id) return;
+    flushQueueOnConnect();
+    const sync = () => flushQueueOnConnect();
     window.addEventListener('online', sync);
-    return () => {
-      window.removeEventListener('online', sync);
-    };
-  }, [user?.id, activeEventId]);
+    return () => window.removeEventListener('online', sync);
+  }, [user?.id]);
 
   useEffect(() => {
     // D5: the offline window is open while an authenticated session exists in this
@@ -323,11 +366,13 @@ const AppContent = () => {
       activeEventId, 
       activeEvent, 
       events,
+      liveEventId,
       login: setUser, 
       logout, 
-      onEventChange: setActiveEventId, 
+      onEventChange: handleEventChange, 
       refreshActiveEvent,
-      refreshEvents: fetchEvents 
+      refreshEvents: fetchEvents,
+      refreshLiveEvent
     }}>
       {user?.id && idleWarning && (
         <IdleTimeoutModal secondsLeft={idleSeconds} onStay={stayActive} onSignOut={signOutNow} />
@@ -341,7 +386,14 @@ const AppContent = () => {
             </>
           ) : (
             <Route path="*" element={
-              <Layout user={user} onLogout={logout} activeEventId={activeEventId} onEventChange={setActiveEventId}>
+              <Layout
+                user={user}
+                onLogout={logout}
+                activeEventId={activeEventId}
+                onEventChange={handleEventChange}
+                liveEventPinned={!!liveEventId}
+                onUnpinLiveEvent={unpinLiveEvent}
+              >
                  <Suspense fallback={<PageFallback />}>
                  <Routes>
                     <Route path="/admin" element={<AdminDashboard />} />
@@ -392,7 +444,7 @@ const AppContent = () => {
                        <ProtectedRoute allowedRoles={ADMIN_AND_EVENT_ADMIN}><BadgePrintingModule /></ProtectedRoute>
                      } />
                      <Route path="/help/:section?" element={<UserManualModule />} />
-                    <Route path="/" element={<Navigate to="/admin" replace />} />
+                    <Route path="/" element={<Navigate to={defaultRouteForRole(user.role)} replace />} />
                  </Routes>
                  </Suspense>
               </Layout>

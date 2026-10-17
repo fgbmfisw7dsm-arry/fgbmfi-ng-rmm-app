@@ -1,5 +1,5 @@
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { UserRole, DashboardStats, isRegistrarRole, getScopeFilter } from '../types';
@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 const AdminDashboard = () => {
   const { activeEventId, activeEvent, user, onEventChange, events } = useContext(AppContext);
   const queryClient = useQueryClient();
+  const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const eventConfig = (activeEvent?.event_config || {}) as Record<string, boolean>;
   const showRank = eventConfig.show_rank !== false;
@@ -38,21 +39,34 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     if (!activeEventId) return;
+    // v1.82: coalesce bursts of realtime events into one trailing refetch so 100+
+    // concurrent scanners cannot trigger an aggregate RPC per check-in.
+    const scheduleInvalidate = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
+      invalidateTimer.current = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] });
+      }, 3000);
+    };
+
     const channel = supabase.channel(`dashboard_${activeEventId}`)
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'checkins', filter: `event_id=eq.${activeEventId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+        scheduleInvalidate
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'session_responses', filter: `event_id=eq.${activeEventId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+        scheduleInvalidate
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'session_voice_distribution', filter: `event_id=eq.${activeEventId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['stats', activeEventId] })
+        scheduleInvalidate
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
+      supabase.removeChannel(channel);
+    };
   }, [activeEventId, queryClient]);
 
   if (isLoading && !stats) return <div className="p-8 text-center text-gray-500 font-bold animate-pulse">Loading Regional Analytics...</div>;

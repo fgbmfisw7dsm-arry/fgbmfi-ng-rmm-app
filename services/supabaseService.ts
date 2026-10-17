@@ -3,7 +3,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
 import { createClient } from '@supabase/supabase-js';
-import { buildOfflineRoster, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
+import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, getOfflineWindowOpen } from './offlineRoster';
 
 /**
  * Normalizes email for transmission. 
@@ -36,6 +36,32 @@ const CHAPTERS_CACHE_MS = 60_000;
 let settingsCache: { settings: SystemSettings; at: number } | null = null;
 const SETTINGS_CACHE_MS = 30_000;
 const invalidateSettingsCache = () => { settingsCache = null; delegateTypeDistrictCache = null; };
+
+// v1.82: server-side live event pin (system_settings.live_event_id).
+let liveEventCache: { id: string | null; at: number } | null = null;
+const LIVE_EVENT_CACHE_MS = 15_000;
+const invalidateLiveEventCache = () => { liveEventCache = null; };
+
+// Rollback switches for staged rollout (frontend-first is non-breaking; the
+// service also auto-disables the flush RPCs when the functions are missing).
+const USE_LIVE_EVENT_PIN = true;
+const USE_FLUSH_RPC = true;
+
+const QUEUE_STORAGE_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue'];
+const clearStoragePreservingQueues = () => {
+    try {
+        const saved: Record<string, string> = {};
+        QUEUE_STORAGE_KEYS.forEach((k) => {
+            const v = localStorage.getItem(k);
+            if (v != null) saved[k] = v;
+        });
+        localStorage.clear();
+        Object.entries(saved).forEach(([k, v]) => localStorage.setItem(k, v));
+    } catch { /* storage unavailable */ }
+};
+
+const isNetworkErrorMessage = (message?: string): boolean =>
+    /connection failed|network error|failed to fetch|timed out|timeout|aborted|aborterror|signal/i.test(message || '');
 
 const districtCountsCache = new Map<string, { rows: { district: string; count: number }[]; at: number }>();
 const DISTRICT_COUNTS_CACHE_MS = 20_000;
@@ -183,7 +209,8 @@ const handleSupabaseError = (res: any, customMessage?: string) => {
         }
 
         if (msg.includes('jwt expired') || msg.includes('invalid token')) {
-            localStorage.clear();
+            // v1.82: preserve pending offline queues across re-authentication.
+            clearStoragePreservingQueues();
             window.location.reload(); 
             throw new Error("SESSION_EXPIRED");
         }
@@ -758,9 +785,80 @@ export const db = {
         return settings;
     },
 
-    // v1.66/D1: refresh the offline roster snapshot in the background (best-effort).
+    // v1.82: server-side live event pin. Returns null when unpinned or when the
+    // migration has not been applied yet (frontend-first deploy is non-breaking).
+    getLiveEventId: async (): Promise<string | null> => {
+        if (!USE_LIVE_EVENT_PIN) return null;
+        if (liveEventCache && Date.now() - liveEventCache.at < LIVE_EVENT_CACHE_MS) {
+            return liveEventCache.id;
+        }
+        try {
+            const { data, error } = await supabase
+                .from('system_settings')
+                .select('live_event_id')
+                .limit(1)
+                .maybeSingle();
+            if (error) throw error;
+            const id = (data as any)?.live_event_id || null;
+            liveEventCache = { id, at: Date.now() };
+            return id;
+        } catch (e: any) {
+            const msg = (e?.message || '').toLowerCase();
+            if (msg.includes('live_event_id') || msg.includes('column') || e?.code === '42703') {
+                console.warn('[getLiveEventId] live_event_id column missing — run supabase_migration_live_event_pin.sql');
+            }
+            liveEventCache = { id: null, at: Date.now() };
+            return null;
+        }
+    },
+
+    setLiveEvent: async (eventId: string | null): Promise<string | null> => {
+        if (!USE_LIVE_EVENT_PIN) throw new Error('Live Event pin is disabled on this build.');
+        const { data, error } = await supabase.rpc('set_live_event', { p_event_id: eventId });
+        if (error) {
+            const msg = (error.message || '').toLowerCase();
+            if (msg.includes('could not find the function') || error.code === 'PGRST116') {
+                throw new Error('Live Event pin is not deployed on the server — run supabase_migration_live_event_pin.sql.');
+            }
+            throw error;
+        }
+        invalidateLiveEventCache();
+        const pinned = (data as any)?.live_event_id ?? eventId;
+        liveEventCache = { id: pinned || null, at: Date.now() };
+        return pinned || null;
+    },
+
+    // v1.82: on-demand roster sync (door pages only). Single-flight + cooldown.
+    ensureOfflineRoster: (
+        eventId: string,
+        scope?: { district?: string; region?: string },
+        opts?: { force?: boolean; jitter?: boolean }
+    ): Promise<void> => {
+        if (!eventId) return Promise.resolve();
+        return ensureOfflineRoster(eventId, scope, opts);
+    },
+
+    getOfflineRosterStatus: (eventId: string) => getRosterStatus(eventId),
+
+    // v1.66/D1: legacy background refresh (kept for compatibility).
     refreshOfflineRoster: (eventId: string, scope?: { district?: string; region?: string }): void => {
         if (eventId) buildOfflineRoster(eventId, scope).catch(() => {});
+    },
+
+    // v1.82: batch queue flush RPCs (offlineQueue.ts falls back per item if the
+    // functions are missing or error).
+    flushCheckIns: async (items: any[]): Promise<any[]> => {
+        if (!USE_FLUSH_RPC) { const e: any = new Error('flush_checkins disabled'); e.code = 'PGRST116'; throw e; }
+        const { data, error } = await supabase.rpc('flush_checkins', { p_items: items });
+        if (error) throw error;
+        return (data as any)?.results || [];
+    },
+
+    flushSessionResponses: async (items: any[]): Promise<any[]> => {
+        if (!USE_FLUSH_RPC) { const e: any = new Error('flush_session_responses disabled'); e.code = 'PGRST116'; throw e; }
+        const { data, error } = await supabase.rpc('flush_session_responses', { p_items: items });
+        if (error) throw error;
+        return (data as any)?.results || [];
     },
 
     getDelegateTypeDistrictMap: async (): Promise<Record<string, string>> => {
@@ -1368,7 +1466,8 @@ export const db = {
             enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
             return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: { delegate_id: delegateId } as any };
         }
-        return withRetry(async () => {
+        try {
+        return await withRetry(async () => {
         if (!opts?.skipGuard) await ensureEventActive(eventId);
         const safeSessionId = sessionId || null;
         const { data: del } = await supabase.from('delegates').select('qr_hash, delegate_id, title, first_name, last_name, district, chapter, delegate_type').eq('delegate_id', delegateId).maybeSingle();
@@ -1408,6 +1507,14 @@ export const db = {
 
         return { success: true, message: actuallyInserted ? 'Verified' : 'Already Checked-in', alreadyCheckedIn: !actuallyInserted, delegate: { delegate_id: delegateId, qr_hash: del?.qr_hash || '', title: del?.title || '', first_name: del?.first_name || '', last_name: del?.last_name || '', district: del?.district || '', chapter: del?.chapter || '', delegate_type: del?.delegate_type || '' } as any };
         });
+        } catch (e: any) {
+            // v1.82: connected-but-unreachable link — queue instead of losing the scan.
+            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+                enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
+                return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: { delegate_id: delegateId } as any };
+            }
+            throw e;
+        }
     },
 
     checkInByCode: async (eventId: string, code: string, registrar: User, sessionId?: string): Promise<CheckInResult> => {
@@ -1418,7 +1525,7 @@ export const db = {
         // result instead of blocking on the dead uplink. Only when the offline
         // window is open (session bounded) AND the code is a known identifier.
         if (typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen() && eventId) {
-            const local = await resolveCodeLocally(eventId, rawCode);
+            const local = await resolveCodeLocally(eventId, rawCode, registrar);
             if (local && local.delegate_id) {
                 enqueueCheckInLocal(eventId, local.delegate_id, registrar, sessionId);
                 return {
@@ -1467,8 +1574,28 @@ export const db = {
                 } else if (rpcResolved && rpcResolved.needs_parse) {
                     // RPC resolved but needs the TS fuzzy/registration path — fall through
                 } else if (isNetwork) {
-                    // Transient network RPC failure — fail fast instead of cascading into
-                    // the classic 5-8 round-trip chain (v1.66/C1). Retry from the page.
+                    // v1.82: "online but unreachable" (flaky venue Wi-Fi) — resolve
+                    // locally and queue instead of failing the scan. Replays are
+                    // idempotent (partial-unique indexes).
+                    const local = await resolveCodeLocally(eventId, rawCode, registrar);
+                    if (local && local.delegate_id) {
+                        enqueueCheckInLocal(eventId, local.delegate_id, registrar, sessionId);
+                        return {
+                            success: true,
+                            message: 'Offline Verified (Pending Sync)',
+                            alreadyCheckedIn: false,
+                            delegate: {
+                                delegate_id: local.delegate_id,
+                                qr_hash: local.qr_hash || '',
+                                title: local.title || '',
+                                first_name: local.first_name || '',
+                                last_name: local.last_name || '',
+                                district: local.district || '',
+                                chapter: local.chapter || '',
+                                delegate_type: local.delegate_type || ''
+                            } as any
+                        };
+                    }
                     throw new Error('NETWORK: Could not verify on the server. Check your connection and retry.');
                 } else {
                     // Non-network RPC error (e.g. RLS/`data` issue) — fall through to the
@@ -3245,7 +3372,8 @@ export const db = {
             enqueueSessionResponseLocal(eventId, delegateId, sessionId, responseType, registrar);
             return { success: true, message: 'Recorded (Pending Sync)' };
         }
-        return withRetry(async () => {
+        try {
+        return await withRetry(async () => {
             await ensureEventActive(eventId);
 
             const { data: arrival } = await supabase.from('checkins')
@@ -3293,6 +3421,14 @@ export const db = {
 
             return { success: true, message: 'Saved' };
         });
+        } catch (e: any) {
+            // v1.82: connected-but-unreachable link — queue the alter-call response.
+            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+                enqueueSessionResponseLocal(eventId, delegateId, sessionId, responseType, registrar);
+                return { success: true, message: 'Recorded (Pending Sync)' };
+            }
+            throw e;
+        }
     },
 
     getSessionResponses: async (sessionId: string, responseType?: SessionResponseType): Promise<SessionResponse[]> => {

@@ -11,6 +11,8 @@ interface LayoutProps {
   onLogout: () => void;
   activeEventId: string;
   onEventChange: (id: string) => void;
+  liveEventPinned?: boolean;
+  onUnpinLiveEvent?: () => void;
 }
 
 const MenuSection = ({ title, children }: { title: string, children?: React.ReactNode }) => (
@@ -20,7 +22,7 @@ const MenuSection = ({ title, children }: { title: string, children?: React.Reac
   </div>
 );
 
-const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId, onEventChange }) => {
+const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeEventId, onEventChange, liveEventPinned, onUnpinLiveEvent }) => {
   const location = useLocation();
   const { activeEvent, events } = useContext(AppContext);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -191,15 +193,35 @@ case UserRole.FINANCE: return 'Finance Admin';
               <span className="text-xs sm:text-sm font-medium text-gray-500 uppercase tracking-tighter hidden sm:inline">Event Context:</span>
               <div className="flex items-center gap-2 min-w-0">
                 <select 
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-0 w-full sm:w-auto sm:min-w-[220px] font-bold"
+                    className={`bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 min-w-0 w-full sm:w-auto sm:min-w-[220px] font-bold ${liveEventPinned ? 'opacity-70 cursor-not-allowed' : ''}`}
                     value={activeEventId}
                     onChange={e => onEventChange(e.target.value)}
+                    disabled={!!liveEventPinned}
+                    title={liveEventPinned ? 'The live event is locked by an administrator.' : 'Select event'}
                 >
                     <option value="">-- Select Event --</option>
                     {events.map(e => (
                     <option key={e.event_id} value={e.event_id}>{e.name}</option>
                     ))}
                 </select>
+                {liveEventPinned && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-amber-50 text-amber-800 border-amber-200 shadow-sm text-[10px] font-black uppercase whitespace-nowrap">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m0 0v2m0-2h2m-2 0H10m9.364-7.364A9 9 0 1112 3a9 9 0 017.364 4.636z" />
+                        </svg>
+                        Live Event
+                        {adminRole && (
+                            <button
+                                type="button"
+                                onClick={onUnpinLiveEvent}
+                                className="ml-1 underline decoration-amber-400 hover:text-amber-950 normal-case tracking-normal"
+                                title="Unpin the live event so all users can select events again"
+                            >
+                                Unpin
+                            </button>
+                        )}
+                    </div>
+                )}
                 {activeEvent && (
                     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase transition-all ${activeEvent.is_active ? 'bg-green-50 text-green-700 border-green-200 shadow-sm' : 'bg-red-50 text-red-700 border-red-200 shadow-sm'}`}>
                         <span className={`w-2 h-2 rounded-full ${activeEvent.is_active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>

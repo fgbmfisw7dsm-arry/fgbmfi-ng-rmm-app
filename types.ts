@@ -247,6 +247,8 @@ export interface SystemSettings {
   // (e.g. { "Free Guest": "Guest", "National Guest": "Guest", "International": "International" })
   delegate_type_districts?: Record<string, string>;
   audit_enabled?: boolean;
+  // v1.82 (additive exception): server-side live event pin (system_settings).
+  live_event_id?: string | null;
 }
 
 export enum SessionResponseType {

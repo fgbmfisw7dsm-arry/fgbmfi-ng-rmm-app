@@ -2,6 +2,8 @@ import React, { useState, useContext, useEffect } from 'react';
 import { auth } from '../services/supabaseService';
 import { supabase, isStripeKeyDetected } from '../services/supabaseClient';
 import { AppContext } from '../context/AppContext';
+import { defaultRouteForRole } from '../services/roleRouting';
+import { resetOfflineWindow } from '../services/offlineRoster';
 
 const LoginPage = () => {
   const { login } = useContext(AppContext);
@@ -39,7 +41,7 @@ const LoginPage = () => {
       const user = await auth.login(email, password);
       if (user) {
         login(user);
-        window.location.hash = '#/admin';
+        window.location.hash = `#${defaultRouteForRole(user.role)}`;
       } else {
         setError('Verification rejected: User profile not found.');
       }
@@ -67,6 +69,7 @@ const LoginPage = () => {
     if (window.confirm("This will clear all system connection data and refresh the login page for a clean start. Proceed?")) {
       localStorage.clear();
       sessionStorage.clear();
+      try { resetOfflineWindow(); } catch (e) {}
       try {
         supabase.auth.signOut({ scope: 'local' });
       } catch (e) {}

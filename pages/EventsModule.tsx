@@ -21,7 +21,7 @@ const toDatetimeLocal = (utcStr?: string) => {
 };
 
 const EventsModule = () => {
-    const { refreshActiveEvent, refreshEvents, user, events } = useContext(AppContext);
+    const { refreshActiveEvent, refreshEvents, user, events, liveEventId, refreshLiveEvent } = useContext(AppContext);
     const [form, setForm] = useState<Partial<Event>>({ name: '', start_date: '', end_date: '', region: 'National', is_active: true, event_config: {} });
     const [pledgeNameInput, setPledgeNameInput] = useState('');
     const [editingPledgeName, setEditingPledgeName] = useState<string | null>(null);
@@ -35,6 +35,7 @@ const EventsModule = () => {
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
     const [togglingId, setTogglingId] = useState<string | null>(null);
+    const [pinningId, setPinningId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
@@ -212,6 +213,46 @@ const EventsModule = () => {
             setStatusMsg({ type: 'error', text: "Sync Failed: " + (e.message || "Database Error") });
         } finally {
             setTogglingId(null);
+        }
+    };
+
+    const pinLiveEvent = async (ev: Event) => {
+        if (!isAdmin) {
+            alert("PERMISSION DENIED: System Admin role required.");
+            return;
+        }
+        if (liveEventId && liveEventId !== ev.event_id) {
+            const ok = window.confirm(
+                `A live event is already pinned. Replace it with "${ev.name}"?\n\nAll users will be switched to this event.`
+            );
+            if (!ok) return;
+        }
+        setPinningId(ev.event_id);
+        setStatusMsg(null);
+        try {
+            await db.setLiveEvent(ev.event_id);
+            await refreshLiveEvent();
+            setStatusMsg({ type: 'success', text: `"${ev.name}" is now the Live Event. All users are locked to it.` });
+        } catch (e: any) {
+            setStatusMsg({ type: 'error', text: e?.message || 'Unable to pin the live event.' });
+        } finally {
+            setPinningId(null);
+        }
+    };
+
+    const unpinLiveEvent = async () => {
+        if (!isAdmin) return;
+        if (!window.confirm('Unpin the live event? All users will be able to select events again.')) return;
+        setPinningId(liveEventId || 'unpin');
+        setStatusMsg(null);
+        try {
+            await db.setLiveEvent(null);
+            await refreshLiveEvent();
+            setStatusMsg({ type: 'success', text: 'Live Event unpinned. Event selection is unlocked for all users.' });
+        } catch (e: any) {
+            setStatusMsg({ type: 'error', text: e?.message || 'Unable to unpin the live event.' });
+        } finally {
+            setPinningId(null);
         }
     };
 
@@ -523,6 +564,11 @@ const EventsModule = () => {
                                         <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase shadow-sm shrink-0 ${!isLocked ? 'bg-green-500 text-white' : 'bg-red-600 text-white'}`}>
                                             {!isLocked ? 'LIVE' : 'LOCKED'}
                                         </span>
+                                        {liveEventId === ev.event_id && (
+                                            <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase shadow-sm shrink-0 bg-amber-400 text-amber-950 border border-amber-500">
+                                                Pinned Live Event
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-3 py-1.5 rounded-lg inline-block">
                                         {new Date(ev.start_date).toLocaleDateString()} — {new Date(ev.end_date).toLocaleDateString()}
@@ -538,6 +584,30 @@ const EventsModule = () => {
                                     >
                                         Sessions
                                     </button>
+                                    
+                                    {isAdmin && (
+                                        liveEventId === ev.event_id ? (
+                                            <button
+                                                type="button"
+                                                onClick={unpinLiveEvent}
+                                                disabled={!!pinningId || isDeleting || isToggling}
+                                                className="px-4 py-2.5 rounded-lg text-[10px] font-black uppercase border transition-all disabled:opacity-50 bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                                                title="Unpin the live event so all users can select events again"
+                                            >
+                                                {pinningId ? 'Syncing...' : 'Unpin Live'}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => pinLiveEvent(ev)}
+                                                disabled={!!pinningId || isDeleting || isToggling}
+                                                className="px-4 py-2.5 rounded-lg text-[10px] font-black uppercase border transition-all disabled:opacity-50 bg-amber-400 text-amber-950 border-amber-500 hover:bg-amber-300"
+                                                title="Lock every user to this event"
+                                            >
+                                                {pinningId === ev.event_id ? 'Pinning...' : 'Pin Live'}
+                                            </button>
+                                        )
+                                    )}
                                     
                                     {isAdmin && (
                                         <button 
