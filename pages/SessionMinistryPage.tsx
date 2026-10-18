@@ -264,7 +264,7 @@ const SessionMinistryPage: React.FC = () => {
     setCode(cleaned);
     if (feedback?.type === 'error') setFeedback(null);
     setPendingReg(null);
-    if (cleaned.length === 4 || cleaned.length === 24 || cleaned.length === 36) {
+    if (cleaned.length === 24 || cleaned.length === 36) {
       handleCodeSubmit(cleaned);
     }
   };

@@ -1,9 +1,9 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload } from './utils';
 import { createClient } from '@supabase/supabase-js';
-import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveCodeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
+import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
 
 /**
  * Normalizes email for transmission. 
@@ -1630,7 +1630,7 @@ export const db = {
         // result instead of blocking on the dead uplink. Only when the offline
         // window is open (session bounded) AND the code is a known identifier.
         if (typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen() && eventId) {
-            const local = await resolveCodeLocally(eventId, rawCode, registrar);
+            const local = await resolveBadgeLocally(eventId, rawCode, registrar);
             if (local && local.delegate_id) {
                 enqueueCheckInLocal(eventId, local.delegate_id, registrar, sessionId);
                 return {
@@ -1682,7 +1682,7 @@ export const db = {
                     // v1.82: "online but unreachable" (flaky venue Wi-Fi) — resolve
                     // locally and queue instead of failing the scan. Replays are
                     // idempotent (partial-unique indexes).
-                    const local = await resolveCodeLocally(eventId, rawCode, registrar);
+                    const local = await resolveBadgeLocally(eventId, rawCode, registrar);
                     if (local && local.delegate_id) {
                         enqueueCheckInLocal(eventId, local.delegate_id, registrar, sessionId);
                         return {
@@ -1711,70 +1711,7 @@ export const db = {
         await ensureEventActive(eventId);
         code = rawCode;
 
-        const parseQRData = (raw: string): Record<string, string> | null => {
-            try {
-                const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    const result: Record<string, string> = {};
-                    for (const [k, v] of Object.entries(parsed)) {
-                        if (typeof v === 'string') result[k] = v;
-                    }
-                    return Object.keys(result).length > 0 ? result : null;
-                }
-            } catch {}
-            
-            const extractFromFields = (fields: string[]): Record<string, string> | null => {
-                const result: Record<string, string> = {};
-                
-                const idField = fields.find(f => f.length >= 20 && /[A-Z0-9]{20,}/i.test(f));
-                if (idField) {
-                    const m = idField.match(/[A-Z0-9]{20,}/i);
-                    if (m) result['delegate_id'] = m[0];
-                }
-                
-                const nameField = fields.find(f => {
-                    const clean = f.replace(/^null\s*/i, '').trim();
-                    return clean.includes(' ') && !/^[A-Z0-9_]+$/.test(clean);
-                });
-                if (nameField) {
-                    let clean = nameField.replace(/^null\s*null\s*/i, '').replace(/^null\s*/i, '').trim();
-                    const parts = clean.split(/\s+/);
-                    if (parts[0].endsWith('.')) result['title'] = parts.shift()!;
-                    if (parts.length >= 2) {
-                        result['first_name'] = parts.slice(0, -1).join(' ');
-                        result['last_name'] = parts[parts.length - 1];
-                    } else if (parts.length === 1) {
-                        result['first_name'] = parts[0];
-                    }
-                }
-                
-                const nonIdNameTypeFields = fields.filter(f => f !== idField && f !== nameField && !/^[A-Z][A-Z_]{3,}$/.test(f));
-                if (nonIdNameTypeFields.length >= 1) result['district'] = nonIdNameTypeFields[0];
-                if (nonIdNameTypeFields.length >= 2) result['chapter'] = nonIdNameTypeFields[1];
-                
-                const typeField = fields.find(f => /^[A-Z][A-Z_]{3,}$/.test(f));
-                if (typeField) result['delegate_type'] = typeField;
-                
-                if (result['delegate_id'] && result['first_name'] && result['last_name']) return result;
-                return null;
-            };
-            
-            const csvFields = raw.split(',').map(f => f.trim()).filter(f => f.length > 0 && !/^null$/i.test(f));
-            if (csvFields.length >= 3) {
-                const parsed = extractFromFields(csvFields);
-                if (parsed) return parsed;
-            }
-            
-            const lines = raw.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
-            if (lines.length >= 1) {
-                const parsed = extractFromFields(lines);
-                if (parsed) return parsed;
-            }
-            
-            return null;
-        };
-        
-        const parsedData = parseQRData(code);
+        const parsedData = parseQrPayload(code);
         const lookupId = parsedData?.['delegate_id'] || parsedData?.['external_id'] || parsedData?.['reg_id'] || parsedData?.['RegId'] || code;
         
         // Pass 1-3 (parallel, priority order): UUID qr_hash → external_id → delegate_id.

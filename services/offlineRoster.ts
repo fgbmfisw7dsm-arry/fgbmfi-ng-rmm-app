@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { getScopeFilter } from '../types';
-import { normalizePhone } from './utils';
+import { normalizePhone, parseQrPayload, familyAwareNameKey, resolveDistrictShortCode, normDistrictKey } from './utils';
 
 // =============================================================================
 // FGBMFI-EMS — Offline Roster Snapshot + Local Resolver (v1.82)
@@ -430,6 +430,117 @@ export async function resolveCodeLocally(
     return null;
 }
 
+// v1.85: offline resolution of data-rich portal/3rd-party QR payloads. The
+// roster only indexed qr_hash/external_id, so a JSON/delimited badge payload
+// never matched. Parse the payload first, then match identity against the cached
+// roster with the SAME conservative ladder as the online matchDelegateByIdentity
+// (unique match only — shared phones / duplicate names resolve to null).
+export const USE_OFFLINE_PAYLOAD_RESOLVE = true;
+
+const loadEventRoster = (eventId: string): Promise<OfflineRosterEntry[]> =>
+    new Promise((resolve, reject) => {
+        openDb().then(db => {
+            const out: OfflineRosterEntry[] = [];
+            const t = db.transaction(STORE, 'readonly');
+            const req = t.objectStore(STORE).index('event').openCursor(IDBKeyRange.only(eventId));
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (cursor) { out.push(cursor.value as OfflineRosterEntry); cursor.continue(); }
+                else resolve(out);
+            };
+            req.onerror = () => reject(req.error);
+        }).catch(reject);
+    });
+
+const rosterFamilyKey = (e: OfflineRosterEntry): string =>
+    familyAwareNameKey(e.title, e.first_name, e.last_name);
+
+const pickUniqueRosterMatch = (
+    rows: OfflineRosterEntry[],
+    famKey: string,
+    districtKey: string,
+): OfflineRosterEntry | null => {
+    if (rows.length === 0) return null;
+    const famMatch = famKey ? rows.filter(r => rosterFamilyKey(r) === famKey) : [];
+    const pool = famMatch.length > 0 ? famMatch : rows;
+    if (pool.length > 1 && districtKey) {
+        const districtMatch = pool.filter(r => normDistrictKey(r.district) === districtKey);
+        if (districtMatch.length === 1) return districtMatch[0];
+    }
+    return pool.length === 1 ? pool[0] : null;
+};
+
+export async function resolvePayloadLocally(
+    eventId: string,
+    parsed: Record<string, string> | null,
+    user?: { role?: string; district?: string; region?: string } | null,
+): Promise<OfflineRosterEntry | null> {
+    if (typeof indexedDB === 'undefined' || !eventId || !parsed) return null;
+
+    const meta = getRosterMeta(eventId);
+    if (meta && user) {
+        const expected = scopeKeyOf(getScopeFilter(user));
+        if (meta.scopeKey !== expected) return null;
+    }
+
+    const ident = (parsed['external_id'] || parsed['reg_id'] || '').trim();
+    if (ident.length > 4) {
+        const m = await getByIndex('ext', ident);
+        if (m && m.event_id === eventId) return m;
+    }
+
+    const delegateId = (parsed['delegate_id'] || '').trim();
+    if (delegateId) {
+        const m = await resolveDelegateByIdLocally(eventId, delegateId);
+        if (m) return m;
+    }
+
+    const phone = normalizePhone(parsed['phone']);
+    const email = (parsed['email'] || '').trim().toLowerCase();
+    const pFirst = (parsed['first_name'] || '').trim();
+    const pLast = (parsed['last_name'] || '').trim();
+    const famKey = pFirst && pLast ? familyAwareNameKey(parsed['title'], pFirst, pLast) : '';
+    const rawDistrict = (parsed['district'] || '').trim();
+    const districtKey = rawDistrict ? normDistrictKey(resolveDistrictShortCode(rawDistrict) || rawDistrict) : '';
+
+    if (!phone && !email && !famKey) return null;
+
+    const all = await loadEventRoster(eventId);
+
+    if (phone) {
+        const rows = all.filter(e => e.phone_normalized === phone || normalizePhone(e.phone) === phone);
+        const hit = pickUniqueRosterMatch(rows, famKey, districtKey);
+        if (hit) return hit;
+    }
+
+    if (email) {
+        const rows = all.filter(e => (e.email || '').trim().toLowerCase() === email);
+        const hit = pickUniqueRosterMatch(rows, famKey, districtKey);
+        if (hit) return hit;
+    }
+
+    if (famKey) {
+        const rows = all.filter(e => rosterFamilyKey(e) === famKey);
+        const hit = pickUniqueRosterMatch(rows, famKey, districtKey);
+        if (hit) return hit;
+    }
+
+    return null;
+}
+
+// Single entry point used by checkInByCode (offline fast-path + network fallback).
+// Identifier badges keep the O(1) index path; payloads fall back to identity.
+export async function resolveBadgeLocally(
+    eventId: string,
+    code: string,
+    user?: { role?: string; district?: string; region?: string } | null,
+): Promise<OfflineRosterEntry | null> {
+    const direct = await resolveCodeLocally(eventId, code, user);
+    if (direct) return direct;
+    if (!USE_OFFLINE_PAYLOAD_RESOLVE) return null;
+    return resolvePayloadLocally(eventId, parseQrPayload(code), user);
+}
+
 // v1.82-fix4: local (offline) MANUAL LOOKUP. Mirrors the shipped v1.74 search
 // semantics — tokenized word-prefix on name; selective exact identifier match on
 // phone/email/external_id/delegate_id. The roster is scope-built already, so the
@@ -451,19 +562,7 @@ export async function searchRosterLocally(
     const meta = getRosterMeta(eventId);
     if (meta && opts?.scopeKey && meta.scopeKey !== opts.scopeKey) return { entries: [], total: 0 };
 
-    const all = await new Promise<OfflineRosterEntry[]>((resolve, reject) => {
-        openDb().then(db => {
-            const out: OfflineRosterEntry[] = [];
-            const t = db.transaction(STORE, 'readonly');
-            const req = t.objectStore(STORE).index('event').openCursor(IDBKeyRange.only(eventId));
-            req.onsuccess = () => {
-                const cursor = req.result;
-                if (cursor) { out.push(cursor.value as OfflineRosterEntry); cursor.continue(); }
-                else resolve(out);
-            };
-            req.onerror = () => reject(req.error);
-        }).catch(reject);
-    });
+    const all = await loadEventRoster(eventId);
 
     const tokens = trimmed.toLowerCase().split(/\s+/).map(safeSearchTok).filter(t => t.length > 0).slice(0, 4);
     const fullQ = tokens.join(' ');

@@ -633,3 +633,100 @@ export const exportToPDF = (
         }, 500);
     });
 };
+
+// Shared QR payload parser (online scan path + offline roster resolver).
+// JSON payloads (portal / 3rd-party badges) may use arbitrary key spellings, so
+// canonical snake_case aliases are added WITHOUT clobbering explicit keys.
+const QR_KEY_ALIASES: Record<string, string[]> = {
+    reg_id: ['regid', 'reg_id', 'registrationid', 'registration_id', 'portalregid', 'portal_reg_id', 'portal_id'],
+    delegate_id: ['delegateid', 'delegate_id'],
+    external_id: ['externalid', 'external_id'],
+    first_name: ['firstname', 'first_name', 'givenname', 'given_name'],
+    last_name: ['lastname', 'last_name', 'surname', 'familyname', 'family_name'],
+    title: ['title'],
+    phone: ['phone', 'phonenumber', 'phone_number', 'mobile', 'mobilenumber', 'mobile_number', 'whatsapp', 'whatsappnumber', 'whatsapp_number', 'tel', 'telephone'],
+    email: ['email', 'emailaddress', 'email_address'],
+    district: ['district'],
+    chapter: ['chapter'],
+    delegate_type: ['delegatetype', 'delegate_type', 'type'],
+    rank: ['rank'],
+    office: ['office'],
+};
+
+const qrKeyNorm = (k: string): string => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const canonicalQrKey = (k: string): string | null => {
+    const norm = qrKeyNorm(k);
+    for (const [canonical, aliases] of Object.entries(QR_KEY_ALIASES)) {
+        if (aliases.some(a => qrKeyNorm(a) === norm)) return canonical;
+    }
+    return null;
+};
+
+export const parseQrPayload = (raw: string): Record<string, string> | null => {
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const result: Record<string, string> = {};
+            for (const [k, v] of Object.entries(parsed)) {
+                if (typeof v === 'string') result[k] = v;
+            }
+            for (const [k, v] of Object.entries(parsed)) {
+                if (typeof v !== 'string' || !v.trim()) continue;
+                const canonical = canonicalQrKey(k);
+                if (canonical && !result[canonical]) result[canonical] = v;
+            }
+            return Object.keys(result).length > 0 ? result : null;
+        }
+    } catch {}
+
+    const extractFromFields = (fields: string[]): Record<string, string> | null => {
+        const result: Record<string, string> = {};
+
+        const idField = fields.find(f => f.length >= 20 && /[A-Z0-9]{20,}/i.test(f));
+        if (idField) {
+            const m = idField.match(/[A-Z0-9]{20,}/i);
+            if (m) result['delegate_id'] = m[0];
+        }
+
+        const nameField = fields.find(f => {
+            const clean = f.replace(/^null\s*/i, '').trim();
+            return clean.includes(' ') && !/^[A-Z0-9_]+$/.test(clean);
+        });
+        if (nameField) {
+            let clean = nameField.replace(/^null\s*null\s*/i, '').replace(/^null\s*/i, '').trim();
+            const parts = clean.split(/\s+/);
+            if (parts[0].endsWith('.')) result['title'] = parts.shift()!;
+            if (parts.length >= 2) {
+                result['first_name'] = parts.slice(0, -1).join(' ');
+                result['last_name'] = parts[parts.length - 1];
+            } else if (parts.length === 1) {
+                result['first_name'] = parts[0];
+            }
+        }
+
+        const nonIdNameTypeFields = fields.filter(f => f !== idField && f !== nameField && !/^[A-Z][A-Z_]{3,}$/.test(f));
+        if (nonIdNameTypeFields.length >= 1) result['district'] = nonIdNameTypeFields[0];
+        if (nonIdNameTypeFields.length >= 2) result['chapter'] = nonIdNameTypeFields[1];
+
+        const typeField = fields.find(f => /^[A-Z][A-Z_]{3,}$/.test(f));
+        if (typeField) result['delegate_type'] = typeField;
+
+        if (result['delegate_id'] && result['first_name'] && result['last_name']) return result;
+        return null;
+    };
+
+    const csvFields = raw.split(/[,|]/).map(f => f.trim()).filter(f => f.length > 0 && !/^null$/i.test(f));
+    if (csvFields.length >= 3) {
+        const parsed = extractFromFields(csvFields);
+        if (parsed) return parsed;
+    }
+
+    const lines = raw.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length >= 1) {
+        const parsed = extractFromFields(lines);
+        if (parsed) return parsed;
+    }
+
+    return null;
+};
