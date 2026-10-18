@@ -17,6 +17,7 @@ import type { User, SessionResponseType } from '../types';
 
 const STORAGE_KEY = 'fgbmfi_checkin_queue';
 const SESSION_RESPONSE_KEY = 'fgbmfi_session_response_queue';
+const SESSION_AGGREGATE_KEY = 'fgbmfi_session_aggregate_queue';
 const BATCH_SIZE = 50;
 
 type QueueStatus = 'pending' | 'failed';
@@ -56,8 +57,30 @@ export interface QueueStats {
   total: number;
 }
 
+// v1.84: aggregate Session Details writes (manual FT/SLV/MI/HGB summaries,
+// Voice Distribution, Manual Total Attendance). One row per (event, kind,
+// session, response_type); LAST write wins.
+export type AggregateKind = 'summary' | 'vd' | 'attendance';
+
+interface QueuedAggregate {
+  id: string;
+  eventId: string;
+  kind: AggregateKind;
+  sessionId: string;
+  responseType?: SessionResponseType;
+  total: number;
+  registrar: User;
+  timestamp: number;
+  retryCount: number;
+  status?: QueueStatus;
+  permanent?: boolean;
+  lastError?: string;
+  nextRetryAt?: number;
+}
+
 let checkInFlush: Promise<{ flushed: number; failed: number }> | null = null;
 let responseFlush: Promise<{ flushed: number; failed: number }> | null = null;
+let aggregateFlush: Promise<{ flushed: number; failed: number }> | null = null;
 let flushRpcAvailable = true;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -142,6 +165,30 @@ function dedupeResponses(queue: QueuedSessionResponse[]): QueuedSessionResponse[
   return Array.from(byKey.values()).sort((a, b) => a.timestamp - b.timestamp);
 }
 
+function dedupeAggregates(queue: QueuedAggregate[]): QueuedAggregate[] {
+  const byKey = new Map<string, QueuedAggregate>();
+  for (const item of queue) {
+    const key = `${item.eventId}|${item.kind}|${item.sessionId}|${item.responseType || ''}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+    // Aggregates are LAST-WRITE-WINS: keep the newest value, preserve failed state.
+    const keep = existing.timestamp >= item.timestamp ? existing : item;
+    const other = keep === existing ? item : existing;
+    byKey.set(key, {
+      ...keep,
+      retryCount: Math.max(existing.retryCount || 0, item.retryCount || 0),
+      status: other.status === 'failed' || keep.status === 'failed' ? 'failed' : keep.status,
+      permanent: !!(existing.permanent || item.permanent),
+      lastError: keep.lastError || other.lastError,
+      nextRetryAt: Math.max(existing.nextRetryAt || 0, item.nextRetryAt || 0) || undefined,
+    });
+  }
+  return Array.from(byKey.values()).sort((a, b) => a.timestamp - b.timestamp);
+}
+
 export function enqueueCheckIn(eventId: string, delegateId: string, registrar: User, sessionId?: string): void {
   const queue = dedupeCheckIns(loadQueue<QueuedCheckIn>(STORAGE_KEY));
   queue.push({
@@ -183,6 +230,10 @@ export function getSessionResponseQueueLength(): number {
   return loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).length;
 }
 
+export function getAggregateQueueLength(): number {
+  return dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY)).length;
+}
+
 // v1.82-fix4: ids already queued on THIS device so offline search results can be
 // marked checked-in/recorded without the network.
 export function getQueuedCheckInIds(eventId: string, sessionId?: string): Set<string> {
@@ -206,7 +257,8 @@ export function getQueuedSessionResponseIds(eventId: string, sessionId: string):
 export function getQueueStats(): QueueStats {
   const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY);
   const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);
-  const all = [...checkins, ...responses];
+  const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
+  const all = [...checkins, ...responses, ...aggregates];
   const failed = all.filter(i => i.status === 'failed').length;
   return { pending: all.length - failed, failed, total: all.length };
 }
@@ -216,8 +268,11 @@ export function retryFailed(): void {
     i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
   const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).map(i =>
     i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
+  const aggregates = loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).map(i =>
+    i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
   saveQueue(STORAGE_KEY, checkins);
   saveQueue(SESSION_RESPONSE_KEY, responses);
+  saveQueue(SESSION_AGGREGATE_KEY, aggregates);
   notifyQueueChanged();
   flushQueueOnConnect();
 }
@@ -225,12 +280,14 @@ export function retryFailed(): void {
 export function discardFailed(): void {
   saveQueue(STORAGE_KEY, loadQueue<QueuedCheckIn>(STORAGE_KEY).filter(i => i.status !== 'failed'));
   saveQueue(SESSION_RESPONSE_KEY, loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).filter(i => i.status !== 'failed'));
+  saveQueue(SESSION_AGGREGATE_KEY, loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).filter(i => i.status !== 'failed'));
   notifyQueueChanged();
 }
 
 export function clearQueue(): void {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(SESSION_RESPONSE_KEY);
+  localStorage.removeItem(SESSION_AGGREGATE_KEY);
   notifyQueueChanged();
 }
 
@@ -441,4 +498,58 @@ export function flushQueueOnConnect(): void {
   if (checkins.some(isDue)) { flushQueue().catch(() => { /* handled per item */ }); }
   const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);
   if (responses.some(isDue)) { flushSessionResponseQueue().catch(() => { /* handled per item */ }); }
+  const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
+  if (aggregates.some(isDue)) { flushAggregateQueue().catch(() => { /* handled per item */ }); }
+}
+
+// v1.84: flush aggregate Session Details writes. Replays the corresponding
+// service write (upsert — idempotent) with forceOnline so a flaky reconnect
+// never re-queues. Per-item isolation + exponential backoff, no silent drops.
+export async function flushAggregateQueue(force = false): Promise<{ flushed: number; failed: number }> {
+  if (aggregateFlush) return aggregateFlush;
+  aggregateFlush = (async () => {
+    let queue = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
+    if (queue.length === 0) return { flushed: 0, failed: 0 };
+
+    let flushed = 0;
+    let failed = 0;
+
+    const due = force ? queue : queue.filter(isDue);
+    if (due.length === 0) return { flushed: 0, failed: 0 };
+
+    for (const item of due) {
+      try {
+        if (item.kind === 'summary') {
+          if (!item.responseType) throw new Error('Invalid aggregate queue item');
+          await db.recordSessionResponseSummary(item.eventId, item.sessionId, item.responseType, item.total, item.registrar, { forceOnline: true });
+        } else if (item.kind === 'vd') {
+          await db.recordVoiceDistribution(item.eventId, item.sessionId, item.total, item.registrar, { forceOnline: true });
+        } else {
+          await db.recordAttendanceManual(item.eventId, item.sessionId, item.total, item.registrar, { forceOnline: true });
+        }
+        flushed++;
+        queue = queue.filter(q => q.id !== item.id);
+      } catch (e: any) {
+        const msg = e?.message || 'Sync failed';
+        const locked = /EVENT_LOCKED/i.test(msg);
+        failed++;
+        queue = queue.map(q => {
+          if (q.id !== item.id) return q;
+          if (locked) return { ...q, status: 'failed' as QueueStatus, permanent: true, lastError: msg };
+          return {
+            ...q,
+            retryCount: (q.retryCount || 0) + 1,
+            lastError: msg,
+            nextRetryAt: Date.now() + backoffMs((q.retryCount || 0) + 1),
+          };
+        });
+      }
+      saveQueue(SESSION_AGGREGATE_KEY, queue);
+      notifyQueueChanged();
+    }
+
+    return { flushed, failed };
+  })().finally(() => { aggregateFlush = null; });
+
+  return aggregateFlush;
 }

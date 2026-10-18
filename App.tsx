@@ -73,7 +73,7 @@ const ADMIN_EXEC_REGISTRAR_AND_EVENT_ADMIN: UserRole[] = [
 // v1.73: offline queue keys must survive a logout so pending check-ins are not
 // silently lost; everything else (active event, caches) is cleared. Auth tokens
 // are managed by Supabase under its own storage key.
-const PRESERVED_LOGOUT_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue'];
+const PRESERVED_LOGOUT_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue', 'fgbmfi_session_aggregate_queue'];
 const clearLocalStorageExceptQueues = () => {
   try {
     const saved: Record<string, string> = {};

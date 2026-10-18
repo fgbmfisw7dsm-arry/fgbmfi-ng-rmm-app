@@ -48,7 +48,7 @@ const USE_LIVE_EVENT_PIN = true;
 const USE_FLUSH_RPC = true;
 const USE_OFFLINE_SEARCH = true;
 
-const QUEUE_STORAGE_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue'];
+const QUEUE_STORAGE_KEYS = ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue', 'fgbmfi_session_aggregate_queue'];
 const clearStoragePreservingQueues = () => {
     try {
         const saved: Record<string, string> = {};
@@ -247,6 +247,36 @@ const enqueueCheckInLocal = (eventId: string, delegateId: string, registrar: Use
             retryCount: 0,
         });
         localStorage.setItem(CHECKIN_QUEUE_STORAGE_KEY, JSON.stringify(queue));
+    } catch { /* storage unavailable — ignore */ }
+};
+
+// v1.84: offline queue for the aggregate Session Details writes (manual FT/SLV/
+// MI/HGB summaries, Voice Distribution, Manual Total Attendance). Same shape as
+// offlineQueue.ts's QueuedAggregate (that module imports db, so this file cannot
+// import it back — the local enqueue helper mirrors the established pattern).
+export type AggregateKind = 'summary' | 'vd' | 'attendance';
+const SESSION_AGGREGATE_QUEUE_KEY = 'fgbmfi_session_aggregate_queue';
+const enqueueAggregateLocal = (eventId: string, kind: AggregateKind, sessionId: string, total: number, registrar: User, responseType?: SessionResponseType): void => {
+    try {
+        const raw = localStorage.getItem(SESSION_AGGREGATE_QUEUE_KEY);
+        const queue: any[] = raw ? JSON.parse(raw) : [];
+        const key = `${eventId}|${kind}|${sessionId}|${responseType || ''}`;
+        const idx = queue.findIndex((q: any) => `${q.eventId}|${q.kind}|${q.sessionId}|${q.responseType || ''}` === key);
+        const item = {
+            id: idx >= 0 ? queue[idx].id : crypto.randomUUID(),
+            eventId,
+            kind,
+            sessionId,
+            responseType,
+            total,
+            registrar,
+            timestamp: Date.now(),
+            retryCount: 0,
+            status: 'pending',
+        };
+        if (idx >= 0) queue[idx] = item; else queue.push(item);
+        localStorage.setItem(SESSION_AGGREGATE_QUEUE_KEY, JSON.stringify(queue));
+        try { window.dispatchEvent(new CustomEvent('fgbmfi-queue-changed')); } catch { /* no window */ }
     } catch { /* storage unavailable — ignore */ }
 };
 
@@ -3534,17 +3564,33 @@ export const db = {
         }));
     },
 
-    recordSessionResponseSummary: async (eventId: string, sessionId: string, responseType: SessionResponseType, totalCount: number, registrar: User): Promise<SessionResponseSummary> => {
-        await ensureEventActive(eventId);
-        const { data, error } = await supabase.from('session_response_summaries')
-            .upsert({
-                event_id: eventId, session_id: sessionId, response_type: responseType,
-                total_count: totalCount, entered_by: registrar.id
-            }, { onConflict: 'session_id,response_type' })
-            .select().single();
-        if (error) throw error;
-        recordAuditLog(eventId, `session_summary_${responseType.toLowerCase()}`, `${RESPONSE_TYPE_LABELS[responseType]} summary: ${totalCount} (${sessionId})`, registrar, 'session_response_summary', sessionId, { response_type: responseType, total_count: totalCount });
-        return data as SessionResponseSummary;
+    recordSessionResponseSummary: async (eventId: string, sessionId: string, responseType: SessionResponseType, totalCount: number, registrar: User, opts?: { forceOnline?: boolean }): Promise<SessionResponseSummary> => {
+        // v1.84: offline fast-path — queue the manual summary and report optimistically.
+        if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            enqueueAggregateLocal(eventId, 'summary', sessionId, totalCount, registrar, responseType);
+            return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, response_type: responseType, total_count: totalCount, entered_by: registrar.id, entered_at: new Date().toISOString() };
+        }
+        try {
+        const run = async () => {
+            await ensureEventActive(eventId);
+            const { data, error } = await supabase.from('session_response_summaries')
+                .upsert({
+                    event_id: eventId, session_id: sessionId, response_type: responseType,
+                    total_count: totalCount, entered_by: registrar.id
+                }, { onConflict: 'session_id,response_type' })
+                .select().single();
+            if (error) throw error;
+            recordAuditLog(eventId, `session_summary_${responseType.toLowerCase()}`, `${RESPONSE_TYPE_LABELS[responseType]} summary: ${totalCount} (${sessionId})`, registrar, 'session_response_summary', sessionId, { response_type: responseType, total_count: totalCount });
+            return data as SessionResponseSummary;
+        };
+        return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
+        } catch (e: any) {
+            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+                enqueueAggregateLocal(eventId, 'summary', sessionId, totalCount, registrar, responseType);
+                return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, response_type: responseType, total_count: totalCount, entered_by: registrar.id, entered_at: new Date().toISOString() };
+            }
+            throw e;
+        }
     },
 
     getSessionResponseSummaries: async (sessionId: string): Promise<SessionResponseSummary[]> => {
@@ -3554,17 +3600,33 @@ export const db = {
         return (data || []) as SessionResponseSummary[];
     },
 
-    recordVoiceDistribution: async (eventId: string, sessionId: string, total: number, registrar: User): Promise<VoiceDistribution> => {
-        await ensureEventActive(eventId);
-        const { data, error } = await supabase.from('session_voice_distribution')
-            .upsert({
-                event_id: eventId, session_id: sessionId, total_distributed: total, updated_by: registrar.id
-            }, { onConflict: 'session_id' })
-            .select().single();
-        if (error) throw error;
-        const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
-        recordAuditLog(eventId, 'voice_distribution', `Voice Distribution: ${total} distributed (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
-        return data as VoiceDistribution;
+    recordVoiceDistribution: async (eventId: string, sessionId: string, total: number, registrar: User, opts?: { forceOnline?: boolean }): Promise<VoiceDistribution> => {
+        // v1.84: offline fast-path — queue and report optimistically.
+        if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            enqueueAggregateLocal(eventId, 'vd', sessionId, total, registrar);
+            return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_distributed: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
+        }
+        try {
+        const run = async () => {
+            await ensureEventActive(eventId);
+            const { data, error } = await supabase.from('session_voice_distribution')
+                .upsert({
+                    event_id: eventId, session_id: sessionId, total_distributed: total, updated_by: registrar.id
+                }, { onConflict: 'session_id' })
+                .select().single();
+            if (error) throw error;
+            const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
+            recordAuditLog(eventId, 'voice_distribution', `Voice Distribution: ${total} distributed (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
+            return data as VoiceDistribution;
+        };
+        return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
+        } catch (e: any) {
+            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+                enqueueAggregateLocal(eventId, 'vd', sessionId, total, registrar);
+                return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_distributed: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
+            }
+            throw e;
+        }
     },
 
     getVoiceDistribution: async (sessionId: string): Promise<VoiceDistribution | null> => {
@@ -3574,17 +3636,33 @@ export const db = {
         return (data || null) as VoiceDistribution | null;
     },
 
-    recordAttendanceManual: async (eventId: string, sessionId: string, total: number, registrar: User): Promise<SessionAttendanceManual> => {
-        await ensureEventActive(eventId);
-        const { data, error } = await supabase.from('session_attendance_manual')
-            .upsert({
-                event_id: eventId, session_id: sessionId, total_count: total, updated_by: registrar.id
-            }, { onConflict: 'session_id' })
-            .select().single();
-        if (error) throw error;
-        const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
-        recordAuditLog(eventId, 'session_attendance_manual', `Manual Total Attendance: ${total} (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
-        return data as SessionAttendanceManual;
+    recordAttendanceManual: async (eventId: string, sessionId: string, total: number, registrar: User, opts?: { forceOnline?: boolean }): Promise<SessionAttendanceManual> => {
+        // v1.84: offline fast-path — queue and report optimistically.
+        if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
+            enqueueAggregateLocal(eventId, 'attendance', sessionId, total, registrar);
+            return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_count: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
+        }
+        try {
+        const run = async () => {
+            await ensureEventActive(eventId);
+            const { data, error } = await supabase.from('session_attendance_manual')
+                .upsert({
+                    event_id: eventId, session_id: sessionId, total_count: total, updated_by: registrar.id
+                }, { onConflict: 'session_id' })
+                .select().single();
+            if (error) throw error;
+            const { data: audSess } = await supabase.from('sessions').select('title').eq('session_id', sessionId).maybeSingle();
+            recordAuditLog(eventId, 'session_attendance_manual', `Manual Total Attendance: ${total} (${audSess?.title || sessionId})`, registrar, 'session', sessionId, { total });
+            return data as SessionAttendanceManual;
+        };
+        return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
+        } catch (e: any) {
+            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+                enqueueAggregateLocal(eventId, 'attendance', sessionId, total, registrar);
+                return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_count: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
+            }
+            throw e;
+        }
     },
 
     getAttendanceManual: async (sessionId: string): Promise<SessionAttendanceManual | null> => {

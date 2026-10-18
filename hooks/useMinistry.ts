@@ -1,9 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { db } from "../services/supabaseService";
 import { SessionResponseType } from "../types";
-import type { User } from "../types";
 
-export function useMinistry(eventId: string, user: User | null) {
+// v1.83: Session Details writes are no longer TanStack mutations. React Query's
+// default `networkMode: 'online'` PAUSES a mutation when navigator.onLine is
+// false, so the mutationFn never runs — the offline queue fast-path inside
+// db.recordSessionResponse never executes and the caller's await never settles
+// (perpetual "Recording…" / "WAIT…"). Door write paths call db.* directly.
+export function useMinistry(eventId: string) {
   const queryClient = useQueryClient();
 
   const dashboard = useQuery({
@@ -19,33 +23,7 @@ export function useMinistry(eventId: string, user: User | null) {
     queryClient.invalidateQueries({ queryKey: ["ministry-export", eventId] });
   };
 
-  const recordResponse = useMutation({
-    mutationFn: (params: { delegateId: string; sessionId: string; responseType: SessionResponseType }) =>
-      db.recordSessionResponse(eventId, params.delegateId, params.sessionId, params.responseType, user!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ministry-dashboard", eventId] });
-    },
-  });
-
-  const recordSummary = useMutation({
-    mutationFn: (params: { sessionId: string; responseType: SessionResponseType; totalCount: number }) =>
-      db.recordSessionResponseSummary(eventId, params.sessionId, params.responseType, params.totalCount, user!),
-    onSuccess: () => invalidateDashboard(),
-  });
-
-  const recordVD = useMutation({
-    mutationFn: (params: { sessionId: string; total: number }) =>
-      db.recordVoiceDistribution(eventId, params.sessionId, params.total, user!),
-    onSuccess: () => invalidateDashboard(),
-  });
-
-  const recordAttendance = useMutation({
-    mutationFn: (params: { sessionId: string; total: number }) =>
-      db.recordAttendanceManual(eventId, params.sessionId, params.total, user!),
-    onSuccess: () => invalidateDashboard(),
-  });
-
-  return { dashboard, recordResponse, recordSummary, recordVD, recordAttendance, invalidateDashboard };
+  return { dashboard, invalidateDashboard };
 }
 
 export function useMinistryExport(eventId: string) {

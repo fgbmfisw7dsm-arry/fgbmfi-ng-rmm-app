@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { AppContext } from '../context/AppContext';
 import { supabase } from '../services/supabaseClient';
 import { db } from '../services/supabaseService';
@@ -12,10 +12,13 @@ import OfflineRosterStatus from '../components/OfflineRosterStatus';
 
 const RESPONSE_TYPES: SessionResponseType[] = [SessionResponseType.FT, SessionResponseType.SLV, SessionResponseType.MI, SessionResponseType.HGB];
 const SEARCH_PAGE_SIZE = 25;
+// v1.83: last-resort guard so a stuck door write can never lock `processingId`
+// forever. The service layer already settles fast (offline queue fast-path, or
+// the 8s raceDoorTimeout), so this should never fire in practice.
+const RECORD_DEADLINE_MS = 12000;
 
 const SessionMinistryPage: React.FC = () => {
   const { activeEventId, activeEvent, user } = useContext(AppContext);
-  const queryClient = useQueryClient();
   const isLocked = activeEvent?.is_active === false;
   const isAdmin = isAdminRole(user?.role || '');
   const isRegistrar = isRegistrarRole(user?.role || '');
@@ -50,6 +53,8 @@ const SessionMinistryPage: React.FC = () => {
   const [manualType, setManualType] = useState<SessionResponseType | null>(null);
   const [manualValue, setManualValue] = useState('');
   const [savingManual, setSavingManual] = useState(false);
+  const [savingVD, setSavingVD] = useState(false);
+  const [savingAtt, setSavingAtt] = useState(false);
 
   const processingRef = useRef(false);
   const scannedRef = useRef(false);
@@ -83,7 +88,7 @@ const SessionMinistryPage: React.FC = () => {
     }
   }, [sessions, selectedSessionId]);
 
-  const { dashboard, recordResponse, recordVD, recordSummary, recordAttendance } = useMinistry(activeEventId, user);
+  const { dashboard, invalidateDashboard } = useMinistry(activeEventId);
 
   const currentDashboard = dashboard.data?.find(d => d.session_id === selectedSessionId);
 
@@ -172,9 +177,14 @@ const SessionMinistryPage: React.FC = () => {
     setFeedback({ type: 'success', msg: 'Recording...' });
 
     try {
-      const res = await recordResponse.mutateAsync({
-        delegateId, sessionId: selectedSessionId, responseType: activeResponseType,
-      });
+      const res = await Promise.race([
+        db.recordSessionResponse(activeEventId, delegateId, selectedSessionId, activeResponseType, user),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), RECORD_DEADLINE_MS)),
+      ]);
+      if (res === null) {
+        setFeedback({ type: 'error', msg: 'Timed out — check the Pending Sync badge; the record may still complete.' });
+        return;
+      }
       if (res.success) {
         localRecordedIds.current.add(delegateId);
         setResults(prev => prev.map(d =>
@@ -182,6 +192,7 @@ const SessionMinistryPage: React.FC = () => {
         ));
         const row = results.find(r => r.delegate_id === delegateId);
         if (row) showVerifiedSnapshot(row, false);
+        invalidateDashboard();
         setFeedback({ type: 'success', msg: 'Recorded!' });
         setTimeout(() => setFeedback(null), 2000);
       } else {
@@ -302,12 +313,13 @@ const SessionMinistryPage: React.FC = () => {
   };
 
   const handleManualSave = async () => {
-    if (!manualType || !selectedSessionId) return;
+    if (!manualType || !selectedSessionId || !activeEventId || !user) return;
     const count = parseInt(manualValue, 10);
     if (isNaN(count) || count < 0) return;
     setSavingManual(true);
     try {
-      await recordSummary.mutateAsync({ sessionId: selectedSessionId, responseType: manualType, totalCount: count });
+      await db.recordSessionResponseSummary(activeEventId, selectedSessionId, manualType, count, user);
+      invalidateDashboard();
       setManualType(null);
       setManualValue('');
     } catch {}
@@ -315,21 +327,29 @@ const SessionMinistryPage: React.FC = () => {
   };
 
   const handleVDSave = async (sessionId: string) => {
+    if (!activeEventId || !user || savingVD) return;
     const val = parseInt(vdValue[sessionId] || '', 10);
     if (isNaN(val) || val < 0) return;
+    setSavingVD(true);
     try {
-      await recordVD.mutateAsync({ sessionId, total: val });
+      await db.recordVoiceDistribution(activeEventId, sessionId, val, user);
+      invalidateDashboard();
       setVdValue(prev => ({ ...prev, [sessionId]: '' }));
     } catch {}
+    setSavingVD(false);
   };
 
   const handleAttManualSave = async (sessionId: string) => {
+    if (!activeEventId || !user || savingAtt) return;
     const val = parseInt(attManualValue[sessionId] || '', 10);
     if (isNaN(val) || val < 0) return;
+    setSavingAtt(true);
     try {
-      await recordAttendance.mutateAsync({ sessionId, total: val });
+      await db.recordAttendanceManual(activeEventId, sessionId, val, user);
+      invalidateDashboard();
       setAttManualValue(prev => ({ ...prev, [sessionId]: '' }));
     } catch {}
+    setSavingAtt(false);
   };
 
   const total = (type: SessionResponseType): number => {
@@ -742,10 +762,10 @@ const SessionMinistryPage: React.FC = () => {
                 />
                 <button
                   onClick={() => handleAttManualSave(selectedSessionId)}
-                  disabled={isLocked || recordAttendance.isPending}
+                  disabled={isLocked || savingAtt}
                   className="px-6 py-3 bg-blue-700 text-white rounded-xl font-black uppercase text-sm hover:bg-blue-800 disabled:opacity-40"
                 >
-                  {recordAttendance.isPending ? 'Saving...' : 'Save'}
+                  {savingAtt ? 'Saving...' : 'Save'}
                 </button>
               </div>
               {(currentDashboard?.attendance_manual ?? 0) > 0 && (
@@ -766,10 +786,10 @@ const SessionMinistryPage: React.FC = () => {
                 />
                 <button
                   onClick={() => handleVDSave(selectedSessionId)}
-                  disabled={isLocked || recordVD.isPending}
+                  disabled={isLocked || savingVD}
                   className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black uppercase text-sm hover:bg-slate-800 disabled:opacity-40"
                 >
-                  {recordVD.isPending ? 'Saving...' : 'Save'}
+                  {savingVD ? 'Saving...' : 'Save'}
                 </button>
               </div>
               {(currentDashboard?.voice_distribution ?? 0) > 0 && (
@@ -801,8 +821,8 @@ const SessionMinistryPage: React.FC = () => {
             />
             <div className="flex gap-3 mt-4">
               <button onClick={() => setManualType(null)} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-black uppercase text-sm">Cancel</button>
-              <button onClick={handleManualSave} disabled={savingManual || recordSummary.isPending} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black uppercase text-sm hover:bg-blue-700 disabled:opacity-50">
-                {savingManual || recordSummary.isPending ? 'Saving...' : 'Save'}
+              <button onClick={handleManualSave} disabled={savingManual} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black uppercase text-sm hover:bg-blue-700 disabled:opacity-50">
+                {savingManual ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>
