@@ -70,6 +70,7 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
     const ready = !!roster?.ready;
     const syncing = busy || !!roster?.syncing;
     const stale = ready && !!roster && (Date.now() - roster.lastSync) > STALE_MS;
+    const windowClosed = ready && !!roster && !roster.windowOpen;
     const critical = !ready && connection === 'disconnected';
 
     useEffect(() => {
@@ -92,7 +93,7 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
         ? 'bg-amber-500 animate-pulse'
         : critical
             ? 'bg-red-500 animate-pulse'
-            : (!ready || stale)
+            : (!ready || stale || windowClosed)
                 ? 'bg-amber-500'
                 : 'bg-green-500';
 
@@ -102,9 +103,11 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
             ? 'Offline: missing'
             : !ready
                 ? 'Offline: not ready'
-                : stale
-                    ? `Offline: ${roster!.count.toLocaleString()} · stale`
-                    : `Offline: ${roster!.count.toLocaleString()} · ${rosterAge(roster!.lastSync)}`;
+                : windowClosed
+                    ? `Offline: ${roster!.count.toLocaleString()} · re-auth`
+                    : stale
+                        ? `Offline: ${roster!.count.toLocaleString()} · stale`
+                        : `Offline: ${roster!.count.toLocaleString()} · ${rosterAge(roster!.lastSync)}`;
 
     return (
         <div className={`relative inline-block no-print ${className || ''}`}>
@@ -150,6 +153,11 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
                     {ready && stale && (
                         <p className="mt-3 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
                             Roster is older than 12h — refresh it before the session.
+                        </p>
+                    )}
+                    {ready && windowClosed && (
+                        <p className="mt-3 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
+                            Offline writes paused after 24h offline — reconnect or sign in again to resume check-in.
                         </p>
                     )}
                     <button

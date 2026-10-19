@@ -65,13 +65,13 @@ const LoginPage = () => {
     }
   };
 
-  const handleDeepReset = () => {
-    if (window.confirm("This will clear all system connection data and refresh the login page for a clean start. Proceed?")) {
+  const handleDeepReset = async () => {
+    if (window.confirm("This will clear all system connection data, the encrypted offline roster, and pending queues, then refresh the login page for a clean start. Proceed?")) {
       localStorage.clear();
       sessionStorage.clear();
-      try { resetOfflineWindow(); } catch (e) {}
+      try { await resetOfflineWindow(); } catch (e) {}
       try {
-        supabase.auth.signOut({ scope: 'local' });
+        await supabase.auth.signOut({ scope: 'local' });
       } catch (e) {}
       window.location.href = window.location.origin + window.location.pathname;
     }

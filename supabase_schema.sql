@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS checkins (
     delegate_id UUID REFERENCES delegates(delegate_id) ON DELETE CASCADE,
     session_id UUID REFERENCES sessions(session_id) ON DELETE CASCADE,
     checked_in_at TIMESTAMPTZ DEFAULT NOW(),
-    checked_in_by UUID
+    checked_in_by TEXT
 );
 
 -- Concurrent scanner safety (v1.82-fix5). A plain (event_id, delegate_id,
@@ -1847,11 +1847,24 @@ CREATE POLICY "checkins_select_scoped" ON checkins FOR SELECT TO authenticated U
              OR (current_user_region() IS NOT NULL AND delegates.district ILIKE current_user_region() || '%') )
     ));
 CREATE POLICY "checkins_admin_registrar_insert" ON checkins FOR INSERT TO authenticated WITH CHECK (
-    is_admin_user() OR EXISTS (
-      SELECT 1 FROM app_users
-      WHERE id = auth.uid()
-        AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
-        AND (is_active IS NULL OR is_active = true)));
+    (is_admin_user() OR is_event_admin_user() OR is_registrar_user() OR is_national_role_user())
+    AND checked_in_by::text = auth.uid()::text
+    AND EXISTS (
+      SELECT 1 FROM delegates d
+      WHERE d.delegate_id = checkins.delegate_id
+        AND d.event_id = checkins.event_id
+        AND (
+          is_admin_user()
+          OR is_event_admin_user()
+          OR is_national_role_user()
+          OR (current_user_district() IS NOT NULL AND d.district ILIKE current_user_district())
+          OR (current_user_region() IS NOT NULL AND d.district ILIKE current_user_region() || '%')
+        )
+    )
+    AND (
+      checkins.session_id IS NULL
+      OR EXISTS (SELECT 1 FROM sessions s WHERE s.session_id = checkins.session_id AND s.event_id = checkins.event_id)
+    ));
 CREATE POLICY "checkins_admin_update" ON checkins FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "checkins_admin_delete" ON checkins FOR DELETE TO authenticated USING (is_admin_user());
 
@@ -2101,10 +2114,25 @@ CREATE POLICY "sr_select_scoped" ON session_responses FOR SELECT TO authenticate
   )
 );
 CREATE POLICY "sr_insert" ON session_responses FOR INSERT TO authenticated WITH CHECK (
-  is_admin_user() OR is_event_admin_user()
-  OR EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid()
-             AND role IN ('national_registrar','regional_registrar','district_registrar','registrar','executive_admin')
-             AND (is_active IS NULL OR is_active = true)));
+  (is_admin_user() OR is_event_admin_user() OR is_registrar_user() OR is_national_role_user())
+  AND recorded_by::text = auth.uid()::text
+  AND EXISTS (
+    SELECT 1 FROM delegates d
+    WHERE d.delegate_id = session_responses.delegate_id
+      AND d.event_id = session_responses.event_id
+      AND (
+        is_admin_user()
+        OR is_event_admin_user()
+        OR is_national_role_user()
+        OR (current_user_district() IS NOT NULL AND d.district ILIKE current_user_district())
+        OR (current_user_region() IS NOT NULL AND d.district ILIKE current_user_region() || '%')
+      )
+  )
+  AND EXISTS (
+    SELECT 1 FROM sessions s
+    WHERE s.session_id = session_responses.session_id
+      AND s.event_id = session_responses.event_id
+  ));
 CREATE POLICY "sr_delete" ON session_responses FOR DELETE TO authenticated USING (is_admin_user());
 
 -- 12g. delegates: SELECT scoped by role + district (hardening pass 3);

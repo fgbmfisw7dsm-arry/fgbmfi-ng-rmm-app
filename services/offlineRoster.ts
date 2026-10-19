@@ -3,24 +3,24 @@ import { getScopeFilter } from '../types';
 import { normalizePhone, parseQrPayload, familyAwareNameKey, resolveDistrictShortCode, normDistrictKey } from './utils';
 
 // =============================================================================
-// FGBMFI-EMS — Offline Roster Snapshot + Local Resolver (v1.82)
+// FGBMFI-EMS — Encrypted, owner-bound Offline Roster (v1.86)
 // -----------------------------------------------------------------------------
 // Door-only offline support (QR/manual check-in, session attendance, session
-// responses). Stores a SLIM per-delegate roster in IndexedDB so Passes 1-2
-// (qr_hash / external_id) can resolve a badge code WITHOUT touching the network.
+// responses).
 //
-// v1.82 changes:
-//   • Built on demand from the door pages (Check-In / Session Ministry), not at
-//     login — dashboard-only users never download a roster.
-//   • Persisted cooldown + delta sync (`delegates.updated_at` watermark) and a
-//     24h full reconcile (evicts deleted delegates).
-//   • Atomic replacement (single IndexedDB transaction) — a failed/partial
-//     refresh can never truncate a good snapshot.
-//   • Scope key guard: a roster cached by a national user is not resolvable by a
-//     district/regional user on the same browser.
-//   • Single-flight + jittered cold start to avoid reconnect/login herds.
-//
-// Writes are still queued/flushed via offlineQueue.ts.
+// Security model:
+//   • Roster records are AES-GCM encrypted. The non-extractable AES/HMAC keys
+//     live in the same IndexedDB database (best available in a pure web app;
+//     this protects raw disk / backups / forensic copies, not same-origin JS).
+//   • Every read requires a usable meta record with matching ownerUserId,
+//     scopeKey, schema version and a non-expired expiresAt. Missing metadata
+//     fails CLOSED (no data), never open.
+//   • Meta lives in the same database as the data, so deleting one never leaves
+//     the other behind.
+//   • The cache expires (72h) and is evicted for a different account or scope.
+//   • Offline writes are bounded to a 24h offline window; the window refreshes
+//     on every successful sync/reconnect.
+//   • The legacy plaintext `roster` store is dropped on the version upgrade.
 // =============================================================================
 
 export interface OfflineRosterEntry {
@@ -34,21 +34,27 @@ export interface OfflineRosterEntry {
     district?: string;
     chapter?: string;
     delegate_type?: string;
-    // v1.82-fix4: contact fields for offline MANUAL lookup (search by name/phone/email).
+    // Contact fields for offline MANUAL lookup. Email is intentionally NOT
+    // cached — phone (and name) are the required search fields.
     phone?: string;
     phone_normalized?: string;
+    // Legacy field retained for type compatibility only — email is NOT cached.
     email?: string;
     updated_at?: number;
 }
 
 export interface RosterMeta {
-    scopeKey: string;
-    fullSyncedAt: number;
-    deltaSyncedAt: number;
+    event_id: string;
+    owner_user_id: string;
+    scope_key: string;
+    full_synced_at: number;
+    delta_synced_at: number;
     watermark: string | null;
     count: number;
-    deltaCapable: boolean;
-    dataVersion: number;
+    delta_capable: boolean;
+    data_version: number;
+    created_at: number;
+    expires_at: number;
 }
 
 export interface RosterStatus {
@@ -59,29 +65,141 @@ export interface RosterStatus {
     lastSync: number;
     lastFullSync: number;
     deltaCapable: boolean;
+    expired: boolean;
+    windowOpen: boolean;
+}
+
+interface EncryptedRosterRecord {
+    delegate_id: string;
+    event_id: string;
+    qr_tag?: string;
+    ext_tag?: string;
+    updated_ms: number;
+    iv: Uint8Array;
+    ct: ArrayBuffer;
+    v: number;
+}
+
+interface RosterIdentity {
+    userId: string;
+    scopeKey: string;
+}
+
+interface CryptoKeys {
+    aes: CryptoKey;
+    hmac: CryptoKey;
 }
 
 const DB_NAME = 'fgbmfi-ems';
-const DB_VERSION = 2;
-const STORE = 'roster';
-const META_PREFIX = 'fgbmfi_roster_meta:';
+const DB_VERSION = 3;
+const STORE = 'roster_v2';
+const LEGACY_STORE = 'roster';
+const META_STORE = 'roster_meta';
+const CRYPTO_STORE = 'roster_crypto';
+const LEGACY_META_PREFIX = 'fgbmfi_roster_meta:';
 const FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DELTA_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const PAGE_SIZE = 1000;
 const WATERMARK_OVERLAP_MS = 2 * 60 * 1000;
 const JITTER_MAX_MS = 15_000;
-// v1.82-fix4: bump to force one full resync so existing caches gain phone/email
-// (required for offline manual lookup). Version 3 = contact fields present.
-const ROSTER_DATA_VERSION = 3;
+const ROSTER_DATA_VERSION = 4;
+const ROSTER_TTL_MS = 72 * 60 * 60 * 1000;
+const OFFLINE_WINDOW_MAX_MS = 24 * 60 * 60 * 1000;
+const DECRYPTED_CACHE_MS = 30_000;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let keysPromise: Promise<CryptoKeys> | null = null;
+let ownershipPromise: Promise<void> | null = null;
+let ownershipKey = '';
 const inFlight = new Map<string, Promise<void>>();
+const decryptedCache = new Map<string, { at: number; entries: OfflineRosterEntry[] }>();
 
+let currentUserId: string | null = null;
+let currentScopeKey = '';
 let offlineWindow = false;
-export const getOfflineWindowOpen = (): boolean => offlineWindow;
-export const setOfflineWindowOpen = (v: boolean): void => { offlineWindow = v; };
+let offlineOpenedAt = 0;
+let offlineBlocked = false;
+
+const OFFLINE_CHANNEL = 'fgbmfi-offline-cache';
+let offlineChannel: BroadcastChannel | null = null;
+try {
+    if (typeof BroadcastChannel !== 'undefined') {
+        offlineChannel = new BroadcastChannel(OFFLINE_CHANNEL);
+        offlineChannel.onmessage = (event) => {
+            if (event?.data?.type !== 'offline-reset') return;
+            offlineBlocked = true;
+            offlineWindow = false;
+            offlineOpenedAt = 0;
+            currentUserId = null;
+            currentScopeKey = '';
+            void closeDb();
+        };
+    }
+} catch { /* BroadcastChannel unavailable */ }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export const getOfflineOwnerId = (): string | null => currentUserId;
+export const getOfflineScopeKey = (): string => currentScopeKey;
+
+export const getOfflineWindowOpen = (): boolean =>
+    !offlineBlocked && offlineWindow && !!currentUserId && (Date.now() - offlineOpenedAt) < OFFLINE_WINDOW_MAX_MS;
+
+export const refreshOfflineWindow = (): void => {
+    if (currentUserId && !offlineBlocked) {
+        offlineWindow = true;
+        offlineOpenedAt = Date.now();
+    }
+};
+
+export const setOfflineSession = (user: { id: string; role?: string; district?: string; region?: string } | null): void => {
+    if (offlineBlocked) return;
+    if (!user?.id) {
+        offlineWindow = false;
+        offlineOpenedAt = 0;
+        currentUserId = null;
+        currentScopeKey = '';
+        void closeDb();
+        return;
+    }
+    const nextScope = scopeKeyOf(getScopeFilter(user));
+    const changed = currentUserId !== user.id || currentScopeKey !== nextScope;
+    currentUserId = user.id;
+    currentScopeKey = nextScope;
+    offlineWindow = true;
+    offlineOpenedAt = Date.now();
+    if (changed) void enforceRosterOwnership(user.id, nextScope);
+};
+
+export const scopeKeyOf = (scope?: { district?: string; region?: string }): string => {
+    if (scope?.district) return `district:${scope.district.trim().toLowerCase()}`;
+    if (scope?.region) return `region:${scope.region.trim().toLowerCase()}`;
+    return 'ALL';
+};
+
+export const scopeOfUser = (user: { role?: string; district?: string; region?: string } | null | undefined) =>
+    getScopeFilter(user || null);
+
+const reqToPromise = <T,>(req: IDBRequest<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+const txDone = (tx: IDBTransaction): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+    });
+
+const removeLegacyMetaKeys = (): void => {
+    try {
+        Object.keys(localStorage)
+            .filter(k => k.startsWith(LEGACY_META_PREFIX))
+            .forEach(k => localStorage.removeItem(k));
+    } catch { /* storage unavailable */ }
+};
 
 const openDb = (): Promise<IDBDatabase> => {
     if (dbPromise) return dbPromise;
@@ -93,116 +211,482 @@ const openDb = (): Promise<IDBDatabase> => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = () => {
             const db = req.result;
+            // Remove the pre-v1.86 plaintext roster store on upgrade.
+            if (db.objectStoreNames.contains(LEGACY_STORE)) db.deleteObjectStore(LEGACY_STORE);
+
             let store: IDBObjectStore;
             if (!db.objectStoreNames.contains(STORE)) {
                 store = db.createObjectStore(STORE, { keyPath: 'delegate_id' });
-                store.createIndex('qr', 'qr_hash', { unique: false });
-                store.createIndex('ext', 'external_id', { unique: false });
                 store.createIndex('event', 'event_id', { unique: false });
+                store.createIndex('qr', ['event_id', 'qr_tag'], { unique: false });
+                store.createIndex('ext', ['event_id', 'ext_tag'], { unique: false });
             } else {
                 store = req.transaction!.objectStore(STORE);
-                if (!store.indexNames.contains('qr')) store.createIndex('qr', 'qr_hash', { unique: false });
-                if (!store.indexNames.contains('ext')) store.createIndex('ext', 'external_id', { unique: false });
                 if (!store.indexNames.contains('event')) store.createIndex('event', 'event_id', { unique: false });
+                if (store.indexNames.contains('qr')) store.deleteIndex('qr');
+                if (store.indexNames.contains('ext')) store.deleteIndex('ext');
+                store.createIndex('qr', ['event_id', 'qr_tag'], { unique: false });
+                store.createIndex('ext', ['event_id', 'ext_tag'], { unique: false });
+            }
+            if (!db.objectStoreNames.contains(META_STORE)) {
+                db.createObjectStore(META_STORE, { keyPath: 'event_id' });
+            }
+            if (!db.objectStoreNames.contains(CRYPTO_STORE)) {
+                db.createObjectStore(CRYPTO_STORE);
             }
         };
-        req.onsuccess = () => resolve(req.result as IDBDatabase);
-        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+            const db = req.result;
+            db.onversionchange = () => { try { db.close(); } catch { /* ignore */ } dbPromise = null; };
+            removeLegacyMetaKeys();
+            resolve(db);
+        };
+        req.onerror = () => {
+            dbPromise = null;
+            reject(req.error);
+        };
+        req.onblocked = () => {
+            console.warn('[offlineRoster] IndexedDB upgrade blocked by another tab.');
+        };
     });
     return dbPromise;
 };
 
-const keyFor = (eventId: string) => `${META_PREFIX}${eventId}`;
-
-export const scopeKeyOf = (scope?: { district?: string; region?: string }): string => {
-    if (scope?.district) return `district:${scope.district.trim().toLowerCase()}`;
-    if (scope?.region) return `region:${scope.region.trim().toLowerCase()}`;
-    return 'ALL';
+const closeDb = async (): Promise<void> => {
+    const pending = dbPromise;
+    dbPromise = null;
+    keysPromise = null;
+    try {
+        if (pending) (await pending).close();
+    } catch { /* ignore */ }
 };
 
-export const scopeOfUser = (user: { role?: string; district?: string; region?: string } | null | undefined) =>
-    getScopeFilter(user || null);
-
-export const getRosterMeta = (eventId: string): RosterMeta | null => {
-    try {
-        const raw = localStorage.getItem(keyFor(eventId));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') return null;
-        return {
-            scopeKey: String(parsed.scopeKey || 'ALL'),
-            fullSyncedAt: Number(parsed.fullSyncedAt) || 0,
-            deltaSyncedAt: Number(parsed.deltaSyncedAt) || 0,
-            watermark: parsed.watermark ? String(parsed.watermark) : null,
-            count: Number(parsed.count) || 0,
-            deltaCapable: parsed.deltaCapable !== false,
-            dataVersion: Number(parsed.dataVersion) || 0,
+const deleteDb = (): Promise<boolean> =>
+    new Promise(resolve => {
+        if (typeof indexedDB === 'undefined') { resolve(true); return; }
+        let settled = false;
+        const finish = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            resolve(ok);
         };
+        const req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = () => finish(true);
+        req.onerror = () => finish(false);
+        req.onblocked = () => {
+            console.warn('[offlineRoster] deleteDatabase blocked — waiting for open connections to close.');
+        };
+        setTimeout(() => finish(false), 8000);
+    });
+
+export async function purgeOfflineRoster(): Promise<boolean> {
+    offlineBlocked = true;
+    offlineWindow = false;
+    offlineOpenedAt = 0;
+    currentUserId = null;
+    currentScopeKey = '';
+    decryptedCache.clear();
+    removeLegacyMetaKeys();
+    // The write queues share this Web Crypto key; clear them together so a
+    // deleted DB can never leave undecryptable queue payloads behind.
+    try {
+        ['fgbmfi_checkin_queue', 'fgbmfi_session_response_queue', 'fgbmfi_session_aggregate_queue']
+            .forEach(key => localStorage.removeItem(key));
+    } catch { /* storage unavailable */ }
+    try { offlineChannel?.postMessage({ type: 'offline-reset' }); } catch { /* ignore */ }
+    await sleep(250);
+    await closeDb();
+    return deleteDb();
+}
+
+// Kept as the explicit "Reset Connection" entry point.
+export async function resetOfflineWindow(): Promise<boolean> {
+    return purgeOfflineRoster();
+}
+
+// ---------------------------------------------------------------------------
+// Web Crypto (AES-GCM + HMAC)
+// ---------------------------------------------------------------------------
+
+const isCryptoKey = (value: any): value is CryptoKey =>
+    !!value && typeof value === 'object' && 'algorithm' in value && 'type' in value && Array.isArray(value.usages);
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+};
+
+const base64ToBytes = (value: string): Uint8Array => {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+};
+
+const readCryptoValue = async (key: string): Promise<any> => {
+    const db = await openDb();
+    const tx = db.transaction(CRYPTO_STORE, 'readonly');
+    return reqToPromise(tx.objectStore(CRYPTO_STORE).get(key));
+};
+
+const writeCryptoValue = async (key: string, value: any): Promise<void> => {
+    const db = await openDb();
+    const tx = db.transaction(CRYPTO_STORE, 'readwrite');
+    tx.objectStore(CRYPTO_STORE).put(value, key);
+    await txDone(tx);
+};
+
+const importAes = (raw: string): Promise<CryptoKey> =>
+    crypto.subtle.importKey('raw', base64ToBytes(raw), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+
+const importHmac = (raw: string): Promise<CryptoKey> =>
+    crypto.subtle.importKey('raw', base64ToBytes(raw), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+
+const generateAndStoreKeys = async (): Promise<CryptoKeys> => {
+    const subtle = crypto.subtle;
+    const aes = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
+    const hmac = await subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign']) as CryptoKey;
+    try {
+        await writeCryptoValue('aes', aes);
+        await writeCryptoValue('hmac', hmac);
+        return { aes, hmac };
+    } catch {
+        // Some WebKit/private-mode builds cannot structured-clone CryptoKey.
+        // Fall back to raw key material so offline mode still works. This is
+        // weaker than a non-extractable key, but still encrypts the roster at
+        // rest against raw disk/backup extraction.
+        const aesEx = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']) as CryptoKey;
+        const hmacEx = await subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, true, ['sign']) as CryptoKey;
+        const aesRaw = bytesToBase64(new Uint8Array(await subtle.exportKey('raw', aesEx)));
+        const hmacRaw = bytesToBase64(new Uint8Array(await subtle.exportKey('raw', hmacEx)));
+        await writeCryptoValue('aes', aesRaw);
+        await writeCryptoValue('hmac', hmacRaw);
+        return { aes: await importAes(aesRaw), hmac: await importHmac(hmacRaw) };
+    }
+};
+
+const getCryptoKeys = (): Promise<CryptoKeys> => {
+    if (keysPromise) return keysPromise;
+    keysPromise = (async () => {
+        if (!crypto?.subtle) throw new Error('Web Crypto unavailable');
+        const [aesStored, hmacStored] = await Promise.all([
+            readCryptoValue('aes'),
+            readCryptoValue('hmac'),
+        ]);
+        const aes = isCryptoKey(aesStored) ? aesStored
+            : typeof aesStored === 'string' ? await importAes(aesStored) : null;
+        const hmac = isCryptoKey(hmacStored) ? hmacStored
+            : typeof hmacStored === 'string' ? await importHmac(hmacStored) : null;
+        if (aes && hmac) return { aes, hmac };
+        return generateAndStoreKeys();
+    })().catch((e) => {
+        keysPromise = null;
+        throw e;
+    });
+    return keysPromise;
+};
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+const bytesToHex = (bytes: Uint8Array): string => {
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0');
+    return out;
+};
+
+const hmacTag = async (value: string, keys: CryptoKeys): Promise<string> => {
+    const sig = new Uint8Array(await crypto.subtle.sign('HMAC', keys.hmac, enc.encode(value.trim())));
+    return bytesToHex(sig);
+};
+
+const encryptEntry = async (entry: OfflineRosterEntry, keys: CryptoKeys): Promise<{ iv: Uint8Array; ct: ArrayBuffer }> => {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        keys.aes,
+        enc.encode(JSON.stringify(entry)),
+    );
+    return { iv, ct };
+};
+
+const decryptEntry = async (record: EncryptedRosterRecord, keys: CryptoKeys): Promise<OfflineRosterEntry | null> => {
+    try {
+        const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: record.iv }, keys.aes, record.ct);
+        const entry = JSON.parse(dec.decode(plain)) as OfflineRosterEntry;
+        if (!entry || typeof entry !== 'object') return null;
+        entry.delegate_id = entry.delegate_id || record.delegate_id;
+        entry.event_id = entry.event_id || record.event_id;
+        return entry;
     } catch {
         return null;
     }
 };
 
-const saveRosterMeta = (eventId: string, meta: RosterMeta): void => {
-    try { localStorage.setItem(keyFor(eventId), JSON.stringify(meta)); } catch { /* storage unavailable */ }
+const makeRecord = async (entry: OfflineRosterEntry, keys: CryptoKeys): Promise<EncryptedRosterRecord> => {
+    const { iv, ct } = await encryptEntry(entry, keys);
+    return {
+        delegate_id: entry.delegate_id,
+        event_id: entry.event_id,
+        qr_tag: entry.qr_hash ? await hmacTag(entry.qr_hash, keys) : undefined,
+        ext_tag: entry.external_id ? await hmacTag(entry.external_id, keys) : undefined,
+        updated_ms: Number(entry.updated_at) || Date.now(),
+        iv,
+        ct,
+        v: 1,
+    };
 };
 
-const notifyRosterChanged = (eventId: string): void => {
+// v1.87: shared text sealing for the localStorage write queues. Uses the same
+// AES-GCM key as the roster so encrypted queues travel with the roster lifecycle.
+const SEAL_PREFIX = 'v1';
+
+export const encryptText = async (plain: string): Promise<string> => {
+    const keys = await getCryptoKeys();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, keys.aes, enc.encode(plain));
+    return `${SEAL_PREFIX}:${bytesToBase64(iv)}:${bytesToBase64(new Uint8Array(ct))}`;
+};
+
+export const decryptText = async (payload: string): Promise<string | null> => {
     try {
-        window.dispatchEvent(new CustomEvent('fgbmfi-roster-changed', { detail: { eventId } }));
-    } catch { /* no window */ }
+        const parts = (payload || '').split(':');
+        if (parts.length !== 3 || parts[0] !== SEAL_PREFIX) return null;
+        const keys = await getCryptoKeys();
+        const plain = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: base64ToBytes(parts[1]) },
+            keys.aes,
+            base64ToBytes(parts[2]),
+        );
+        return dec.decode(plain);
+    } catch {
+        return null;
+    }
 };
 
-const getByIndex = async (index: string, value: string): Promise<OfflineRosterEntry | null> => {
+// ---------------------------------------------------------------------------
+// Identity / meta
+// ---------------------------------------------------------------------------
+
+const normalizeMeta = (raw: any): RosterMeta | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+        event_id: String(raw.event_id || ''),
+        owner_user_id: String(raw.owner_user_id || ''),
+        scope_key: String(raw.scope_key || ''),
+        full_synced_at: Number(raw.full_synced_at) || 0,
+        delta_synced_at: Number(raw.delta_synced_at) || 0,
+        watermark: raw.watermark ? String(raw.watermark) : null,
+        count: Number(raw.count) || 0,
+        delta_capable: raw.delta_capable !== false,
+        data_version: Number(raw.data_version) || 0,
+        created_at: Number(raw.created_at) || 0,
+        expires_at: Number(raw.expires_at) || 0,
+    };
+};
+
+export async function getRosterMeta(eventId: string): Promise<RosterMeta | null> {
+    if (!eventId) return null;
+    try {
+        const db = await openDb();
+        const tx = db.transaction(META_STORE, 'readonly');
+        const raw = await reqToPromise(tx.objectStore(META_STORE).get(eventId));
+        return normalizeMeta(raw);
+    } catch {
+        return null;
+    }
+}
+
+const saveRosterMeta = async (meta: RosterMeta): Promise<void> => {
     const db = await openDb();
-    return new Promise<OfflineRosterEntry | null>((resolve, reject) => {
-        const t = db.transaction(STORE, 'readonly');
-        const req = t.objectStore(STORE).index(index).get(value);
-        req.onsuccess = () => resolve((req.result as OfflineRosterEntry) || null);
-        req.onerror = () => reject(req.error);
+    const tx = db.transaction(META_STORE, 'readwrite');
+    tx.objectStore(META_STORE).put(meta);
+    await txDone(tx);
+};
+
+const getAllMeta = async (): Promise<RosterMeta[]> => {
+    const db = await openDb();
+    const tx = db.transaction(META_STORE, 'readonly');
+    const rows = await reqToPromise(tx.objectStore(META_STORE).getAll());
+    return (rows || []).map(normalizeMeta).filter((m): m is RosterMeta => !!m);
+};
+
+const isMetaUsable = (meta: RosterMeta | null, identity: RosterIdentity): meta is RosterMeta =>
+    !!meta
+    && meta.owner_user_id === identity.userId
+    && meta.scope_key === identity.scopeKey
+    && meta.data_version === ROSTER_DATA_VERSION
+    && meta.expires_at > Date.now();
+
+const resolveIdentity = async (
+    user?: { id?: string; role?: string; district?: string; region?: string } | null,
+    scopeKey?: string,
+): Promise<RosterIdentity | null> => {
+    if (offlineBlocked) return null;
+    const providedId = user?.id || '';
+    if (currentUserId && providedId && currentUserId !== providedId) return null;
+
+    let userId: string | null = currentUserId || providedId || null;
+    if (!userId) {
+        try {
+            const { data } = await supabase.auth.getSession();
+            userId = data.session?.user?.id || null;
+        } catch { /* offline/no session */ }
+        if (userId) currentUserId = userId;
+    }
+
+    const providedScope = scopeKey || (user ? scopeKeyOf(getScopeFilter(user)) : '');
+    if (currentScopeKey && providedScope && currentScopeKey !== providedScope) return null;
+
+    const resolvedScope = currentScopeKey || providedScope;
+    if (!userId || !resolvedScope) return null;
+    if (!currentScopeKey) currentScopeKey = resolvedScope;
+    return { userId, scopeKey: resolvedScope };
+};
+
+const deleteEventRoster = async (eventId: string): Promise<void> => {
+    if (!eventId) return;
+    try {
+        const db = await openDb();
+        const tx = db.transaction([STORE, META_STORE], 'readwrite');
+        const store = tx.objectStore(STORE);
+        const metaStore = tx.objectStore(META_STORE);
+        const keys: IDBValidKey[] = [];
+        const cursorReq = store.index('event').openKeyCursor(IDBKeyRange.only(eventId));
+        cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (cursor) {
+                keys.push(cursor.primaryKey);
+                cursor.continue();
+                return;
+            }
+            keys.forEach(key => store.delete(key));
+            metaStore.delete(eventId);
+        };
+        await txDone(tx);
+        decryptedCache.delete(eventId);
+    } catch { /* best effort */ }
+};
+
+const enforceRosterOwnership = (ownerUserId: string, scopeKey: string): Promise<void> => {
+    const key = `${ownerUserId}\u0000${scopeKey}`;
+    if (ownershipPromise && ownershipKey === key) return ownershipPromise;
+    const previous = ownershipPromise || Promise.resolve();
+    const next = previous.then(async () => {
+        try {
+            const metas = await getAllMeta();
+            const now = Date.now();
+            for (const meta of metas) {
+                if (
+                    meta.owner_user_id !== ownerUserId
+                    || meta.scope_key !== scopeKey
+                    || meta.data_version !== ROSTER_DATA_VERSION
+                    || meta.expires_at <= now
+                ) {
+                    await deleteEventRoster(meta.event_id);
+                }
+            }
+        } catch { /* best effort */ }
+    }).finally(() => {
+        if (ownershipPromise === next) {
+            ownershipPromise = null;
+            ownershipKey = '';
+        }
     });
+    ownershipPromise = next;
+    ownershipKey = key;
+    return next;
+};
+
+// ---------------------------------------------------------------------------
+// IndexedDB read helpers
+// ---------------------------------------------------------------------------
+
+const clearRosterCache = (eventId?: string): void => {
+    if (eventId) decryptedCache.delete(eventId);
+    else decryptedCache.clear();
 };
 
 const countEvent = async (eventId: string): Promise<number> => {
     const db = await openDb();
-    return new Promise<number>((resolve, reject) => {
-        const t = db.transaction(STORE, 'readonly');
-        const req = t.objectStore(STORE).index('event').count(IDBKeyRange.only(eventId));
-        req.onsuccess = () => resolve(req.result as number);
+    const tx = db.transaction(STORE, 'readonly');
+    return reqToPromise(tx.objectStore(STORE).index('event').count(IDBKeyRange.only(eventId)));
+};
+
+const getByTag = async (eventId: string, index: 'qr' | 'ext', value: string): Promise<OfflineRosterEntry | null> => {
+    const keys = await getCryptoKeys();
+    const tag = await hmacTag(value, keys);
+    const db = await openDb();
+    const tx = db.transaction(STORE, 'readonly');
+    const raw = await reqToPromise(tx.objectStore(STORE).index(index).get(IDBKeyRange.only([eventId, tag])));
+    if (!raw) return null;
+    return decryptEntry(raw as EncryptedRosterRecord, keys);
+};
+
+const loadEventRoster = async (eventId: string): Promise<OfflineRosterEntry[]> => {
+    const cached = decryptedCache.get(eventId);
+    if (cached && (Date.now() - cached.at) < DECRYPTED_CACHE_MS) return cached.entries;
+
+    const keys = await getCryptoKeys();
+    const db = await openDb();
+    const tx = db.transaction(STORE, 'readonly');
+    const rows = await new Promise<EncryptedRosterRecord[]>((resolve, reject) => {
+        const out: EncryptedRosterRecord[] = [];
+        const req = tx.objectStore(STORE).index('event').openCursor(IDBKeyRange.only(eventId));
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (cursor) { out.push(cursor.value as EncryptedRosterRecord); cursor.continue(); }
+            else resolve(out);
+        };
         req.onerror = () => reject(req.error);
     });
+
+    const entries: OfflineRosterEntry[] = [];
+    for (const row of rows) {
+        const entry = await decryptEntry(row, keys);
+        if (entry) entries.push(entry);
+    }
+    decryptedCache.set(eventId, { at: Date.now(), entries });
+    return entries;
 };
 
 // Atomic: collect keys → delete event rows → put new entries in ONE transaction.
-// If anything fails the transaction aborts and the previous snapshot survives.
 const applyRoster = async (eventId: string, entries: OfflineRosterEntry[], full: boolean): Promise<void> => {
+    const keys = await getCryptoKeys();
+    const records: EncryptedRosterRecord[] = [];
+    for (let i = 0; i < entries.length; i += 500) {
+        const chunk = entries.slice(i, i + 500);
+        records.push(...await Promise.all(chunk.map(entry => makeRecord(entry, keys))));
+    }
     const db = await openDb();
-    return new Promise<void>((resolve, reject) => {
-        const t = db.transaction(STORE, 'readwrite');
-        const store = t.objectStore(STORE);
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
 
-        if (full) {
-            const keys: IDBValidKey[] = [];
-            const cursorReq = store.index('event').openKeyCursor(IDBKeyRange.only(eventId));
-            cursorReq.onsuccess = () => {
-                const cursor = cursorReq.result;
-                if (cursor) {
-                    keys.push(cursor.primaryKey);
-                    cursor.continue();
-                    return;
-                }
-                for (const key of keys) store.delete(key);
-                for (const entry of entries) store.put(entry);
-            };
-        } else {
-            for (const entry of entries) store.put(entry);
-        }
+    if (full) {
+        const keysToDelete: IDBValidKey[] = [];
+        const cursorReq = store.index('event').openKeyCursor(IDBKeyRange.only(eventId));
+        cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (cursor) {
+                keysToDelete.push(cursor.primaryKey);
+                cursor.continue();
+                return;
+            }
+            keysToDelete.forEach(key => store.delete(key));
+            records.forEach(record => store.put(record));
+        };
+    } else {
+        records.forEach(record => store.put(record));
+    }
 
-        t.oncomplete = () => resolve();
-        t.onerror = () => reject(t.error);
-        t.onabort = () => reject(t.error);
-    });
+    await txDone(tx);
+    clearRosterCache(eventId);
 };
+
+// ---------------------------------------------------------------------------
+// Sync
+// ---------------------------------------------------------------------------
 
 interface FetchResult {
     entries: OfflineRosterEntry[];
@@ -216,15 +700,9 @@ const fetchRoster = async (
     scope: { district?: string; region?: string },
     watermark: string | null,
 ): Promise<FetchResult> => {
-    const entries: OfflineRosterEntry[] = [];
-
-    // v1.82-fix4: `includeContact` adds phone/email (offline manual lookup).
-    // Fallback ladder: rich+updated_at → rich-without-updated_at is NOT needed;
-    // try rich+updated_at, then base+updated_at (older DB without contact cols),
-    // then base (oldest DB) — so delta sync survives wherever updated_at exists.
     const run = async (withUpdatedAt: boolean, includeContact: boolean): Promise<FetchResult> => {
         const baseCols = 'delegate_id, event_id, qr_hash, external_id, title, first_name, last_name, district, chapter, delegate_type';
-        const contactCols = includeContact ? ', phone, phone_normalized, email' : '';
+        const contactCols = includeContact ? ', phone, phone_normalized' : '';
         const cols = baseCols + contactCols + (withUpdatedAt ? ', updated_at' : '');
         let from = 0;
         const collected: OfflineRosterEntry[] = [];
@@ -236,7 +714,7 @@ const fetchRoster = async (
                 .eq('event_id', eventId)
                 .order('delegate_id')
                 .range(from, from + PAGE_SIZE - 1);
-            if (scope.district) q = q.ilike('district', `%${scope.district}%`);
+            if (scope.district) q = q.ilike('district', scope.district);
             else if (scope.region) q = q.ilike('district', `${scope.region}%`);
             if (withUpdatedAt && watermark) q = q.gt('updated_at', watermark);
 
@@ -259,37 +737,34 @@ const fetchRoster = async (
     };
 
     let result = await run(true, true);
-    if (!result.complete && result.entries.length === 0) {
-        // Contact columns or `updated_at` not deployed yet — degrade gracefully.
-        result = await run(true, false);
-    }
-    if (!result.complete && result.entries.length === 0) {
-        result = await run(false, false);
-    }
-    entries.push(...result.entries);
-    return { entries, complete: result.complete, maxUpdatedAt: result.maxUpdatedAt, deltaCapable: result.deltaCapable };
+    if (!result.complete && result.entries.length === 0) result = await run(true, false);
+    if (!result.complete && result.entries.length === 0) result = await run(false, false);
+    return result;
 };
 
 const syncRoster = async (
     eventId: string,
     scope: { district?: string; region?: string },
     opts?: { force?: boolean; jitter?: boolean },
+    identityArg?: RosterIdentity | null,
 ): Promise<void> => {
     if (typeof indexedDB === 'undefined' || !eventId) return;
 
     const scopeKey = scopeKeyOf(scope);
-    const meta = getRosterMeta(eventId);
+    const identity = identityArg || await resolveIdentity(undefined, scopeKey);
+    if (!identity) return;
+    if (currentUserId !== identity.userId || currentScopeKey !== identity.scopeKey || offlineBlocked) return;
+
+    const meta = await getRosterMeta(eventId);
     const now = Date.now();
+    const ownerChanged = !!meta && meta.owner_user_id !== identity.userId;
+    const scopeChanged = !!meta && meta.scope_key !== identity.scopeKey;
+    const expired = !!meta && meta.expires_at <= now;
+    const versionStale = !meta || meta.data_version !== ROSTER_DATA_VERSION;
+    const cold = !meta || ownerChanged || scopeChanged || expired;
+    const fullDue = cold || versionStale || meta.delta_capable === false || (now - meta.full_synced_at) > FULL_SYNC_INTERVAL_MS;
+    const deltaDue = !!meta && !fullDue && meta.watermark && (now - meta.delta_synced_at) > DELTA_MIN_INTERVAL_MS;
 
-    const scopeChanged = !!meta && meta.scopeKey !== scopeKey;
-    const versionStale = !meta || (meta.dataVersion || 0) !== ROSTER_DATA_VERSION;
-    const cold = !meta;
-    const fullDue = !meta || versionStale || scopeChanged || meta.deltaCapable === false || (now - meta.fullSyncedAt) > FULL_SYNC_INTERVAL_MS;
-    const deltaDue = !!meta && !fullDue && meta.watermark && (now - meta.deltaSyncedAt) > DELTA_MIN_INTERVAL_MS;
-
-    // v1.82-fix5: never attempt a network sync with no uplink (auto/jittered).
-    // Without this, an offline device re-tried a full fetch on every door-page
-    // mount (each blocked on the fetch timeout) while the pill showed "Preparing…".
     const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
     if (isOffline && !opts?.force) return;
 
@@ -301,24 +776,33 @@ const syncRoster = async (
     notifyRosterChanged(eventId);
 
     try {
+        // Never mix another account/scope's rows with this one if the sync fails.
+        if (cold) await deleteEventRoster(eventId);
+
         if (fullDue) {
             const { entries, complete, maxUpdatedAt, deltaCapable } = await fetchRoster(eventId, scope, null);
             if (!complete) {
                 console.warn('[offlineRoster] full sync failed — keeping previous snapshot');
                 return;
             }
+            if (currentUserId !== identity.userId || currentScopeKey !== identity.scopeKey || offlineBlocked) return;
             await applyRoster(eventId, entries, true);
             const watermark = deltaCapable && maxUpdatedAt
                 ? new Date(new Date(maxUpdatedAt).getTime() - WATERMARK_OVERLAP_MS).toISOString()
                 : null;
-            saveRosterMeta(eventId, {
-                scopeKey,
-                fullSyncedAt: now,
-                deltaSyncedAt: now,
+            if (currentUserId !== identity.userId || currentScopeKey !== identity.scopeKey || offlineBlocked) return;
+            await saveRosterMeta({
+                event_id: eventId,
+                owner_user_id: identity.userId,
+                scope_key: identity.scopeKey,
+                full_synced_at: now,
+                delta_synced_at: now,
                 watermark,
                 count: entries.length,
-                deltaCapable,
-                dataVersion: ROSTER_DATA_VERSION,
+                delta_capable: deltaCapable,
+                data_version: ROSTER_DATA_VERSION,
+                created_at: now,
+                expires_at: now + ROSTER_TTL_MS,
             });
         } else if (deltaDue && meta?.watermark) {
             const { entries, complete, maxUpdatedAt } = await fetchRoster(eventId, scope, meta.watermark);
@@ -326,24 +810,25 @@ const syncRoster = async (
                 console.warn('[offlineRoster] delta sync failed — keeping previous snapshot');
                 return;
             }
+            if (currentUserId !== identity.userId || currentScopeKey !== identity.scopeKey || offlineBlocked) return;
             if (entries.length > 0) await applyRoster(eventId, entries, false);
             const watermark = maxUpdatedAt
                 ? new Date(new Date(maxUpdatedAt).getTime() - WATERMARK_OVERLAP_MS).toISOString()
                 : meta.watermark;
             const count = await countEvent(eventId);
-            saveRosterMeta(eventId, {
+            if (currentUserId !== identity.userId || currentScopeKey !== identity.scopeKey || offlineBlocked) return;
+            await saveRosterMeta({
                 ...meta,
-                deltaSyncedAt: now,
+                owner_user_id: identity.userId,
+                scope_key: identity.scopeKey,
+                delta_synced_at: now,
                 watermark,
                 count,
-                dataVersion: ROSTER_DATA_VERSION,
+                data_version: ROSTER_DATA_VERSION,
+                expires_at: now + ROSTER_TTL_MS,
             });
         }
-
-        try {
-            const storage = navigator.storage;
-            if (storage?.persist) await storage.persist();
-        } catch { /* best effort */ }
+        refreshOfflineWindow();
     } catch (e) {
         console.warn('[offlineRoster] sync failed (offline cache is best-effort):', e);
     } finally {
@@ -351,21 +836,32 @@ const syncRoster = async (
     }
 };
 
-// Single-flight per event. `force` skips jitter/cooldown (Refresh / Prepare offline).
 export async function ensureOfflineRoster(
     eventId: string,
     scope?: { district?: string; region?: string },
     opts?: { force?: boolean; jitter?: boolean },
 ): Promise<void> {
     if (!eventId) return;
+    const scopeKey = scopeKeyOf(scope);
+    const identity = await resolveIdentity(undefined, scopeKey);
+    if (!identity) return;
+    if (ownershipPromise) await ownershipPromise;
+
+    // Opening the door page is an authenticated activity: refresh the rolling
+    // offline-write window (it still expires 24h after the last activity/sync).
+    refreshOfflineWindow();
+
+    // Let the door pages refresh their status pill even when no network sync is
+    // due (the first status read can happen before the identity effect runs).
+    notifyRosterChanged(eventId);
+
     const existing = inFlight.get(eventId);
     if (existing) return existing;
-    const p = syncRoster(eventId, scope || {}, opts).finally(() => inFlight.delete(eventId));
+    const p = syncRoster(eventId, scope || {}, opts, identity).finally(() => inFlight.delete(eventId));
     inFlight.set(eventId, p);
     return p;
 }
 
-// Backwards-compatible entry point (used by db.refreshOfflineRoster).
 export async function buildOfflineRoster(
     eventId: string,
     scope?: { district?: string; region?: string },
@@ -374,83 +870,71 @@ export async function buildOfflineRoster(
 }
 
 export async function getRosterStatus(eventId: string): Promise<RosterStatus> {
-    const meta = getRosterMeta(eventId);
+    const meta = await getRosterMeta(eventId);
+    const identity = await resolveIdentity();
+    const usable = !!identity && isMetaUsable(meta, identity);
     let count = 0;
-    try { count = await countEvent(eventId); } catch { count = meta?.count || 0; }
-    const lastFullSync = meta?.fullSyncedAt || 0;
-    const lastDeltaSync = meta?.deltaSyncedAt || 0;
+    if (usable) {
+        try { count = await countEvent(eventId); } catch { count = meta?.count || 0; }
+    }
+    const lastFullSync = usable ? (meta?.full_synced_at || 0) : 0;
+    const lastDeltaSync = usable ? (meta?.delta_synced_at || 0) : 0;
     return {
         count,
-        ready: count > 0,
+        ready: usable && count > 0,
         syncing: inFlight.has(eventId),
-        scopeKey: meta?.scopeKey || '',
+        scopeKey: usable ? (meta?.scope_key || '') : '',
         lastSync: Math.max(lastFullSync, lastDeltaSync),
         lastFullSync,
-        deltaCapable: meta?.deltaCapable !== false,
+        deltaCapable: usable ? meta?.delta_capable !== false : true,
+        expired: !!meta && meta.expires_at <= Date.now(),
+        windowOpen: getOfflineWindowOpen(),
     };
 }
 
 export async function getRosterCount(): Promise<number> {
-    const db = await openDb();
-    return new Promise<number>((resolve, reject) => {
-        const t = db.transaction(STORE, 'readonly');
-        const req = t.objectStore(STORE).count();
-        req.onsuccess = () => resolve(req.result as number);
-        req.onerror = () => reject(req.error);
-    });
+    const identity = await resolveIdentity();
+    if (!identity) return 0;
+    try {
+        const metas = await getAllMeta();
+        return metas
+            .filter(meta => isMetaUsable(meta, identity))
+            .reduce((sum, meta) => sum + (Number(meta.count) || 0), 0);
+    } catch {
+        return 0;
+    }
 }
 
-// Resolve a badge code (qr_hash / external_id) locally. Refuses when the cached
-// roster's scope does not match the caller's scope (shared-device safety).
+// Resolve a badge code (qr_hash / external_id) locally. Fails closed unless the
+// cache belongs to the current account + scope and has not expired.
 export async function resolveCodeLocally(
     eventId: string,
     code: string,
-    user?: { role?: string; district?: string; region?: string } | null,
+    user?: { id?: string; role?: string; district?: string; region?: string } | null,
 ): Promise<OfflineRosterEntry | null> {
     if (typeof indexedDB === 'undefined' || !eventId) return null;
     const raw = (code || '').trim();
     if (!raw) return null;
 
-    const meta = getRosterMeta(eventId);
-    if (meta && user) {
-        const expected = scopeKeyOf(getScopeFilter(user));
-        if (meta.scopeKey !== expected) return null;
-    }
+    const identity = await resolveIdentity(user);
+    if (!identity) return null;
+    const meta = await getRosterMeta(eventId);
+    if (!isMetaUsable(meta, identity)) return null;
 
     try {
         if (raw.length > 10) {
-            const m = await getByIndex('qr', raw);
+            const m = await getByTag(eventId, 'qr', raw);
             if (m && m.event_id === eventId) return m;
         }
         if (raw.length > 4) {
-            const m = await getByIndex('ext', raw);
+            const m = await getByTag(eventId, 'ext', raw);
             if (m && m.event_id === eventId) return m;
         }
-    } catch { /* idb unavailable */ }
+    } catch { /* idb/crypto unavailable */ }
     return null;
 }
 
-// v1.85: offline resolution of data-rich portal/3rd-party QR payloads. The
-// roster only indexed qr_hash/external_id, so a JSON/delimited badge payload
-// never matched. Parse the payload first, then match identity against the cached
-// roster with the SAME conservative ladder as the online matchDelegateByIdentity
-// (unique match only — shared phones / duplicate names resolve to null).
 export const USE_OFFLINE_PAYLOAD_RESOLVE = true;
-
-const loadEventRoster = (eventId: string): Promise<OfflineRosterEntry[]> =>
-    new Promise((resolve, reject) => {
-        openDb().then(db => {
-            const out: OfflineRosterEntry[] = [];
-            const t = db.transaction(STORE, 'readonly');
-            const req = t.objectStore(STORE).index('event').openCursor(IDBKeyRange.only(eventId));
-            req.onsuccess = () => {
-                const cursor = req.result;
-                if (cursor) { out.push(cursor.value as OfflineRosterEntry); cursor.continue(); }
-                else resolve(out);
-            };
-            req.onerror = () => reject(req.error);
-        }).catch(reject);
-    });
 
 const rosterFamilyKey = (e: OfflineRosterEntry): string =>
     familyAwareNameKey(e.title, e.first_name, e.last_name);
@@ -473,48 +957,40 @@ const pickUniqueRosterMatch = (
 export async function resolvePayloadLocally(
     eventId: string,
     parsed: Record<string, string> | null,
-    user?: { role?: string; district?: string; region?: string } | null,
+    user?: { id?: string; role?: string; district?: string; region?: string } | null,
 ): Promise<OfflineRosterEntry | null> {
     if (typeof indexedDB === 'undefined' || !eventId || !parsed) return null;
 
-    const meta = getRosterMeta(eventId);
-    if (meta && user) {
-        const expected = scopeKeyOf(getScopeFilter(user));
-        if (meta.scopeKey !== expected) return null;
-    }
+    const identity = await resolveIdentity(user);
+    if (!identity) return null;
+    const meta = await getRosterMeta(eventId);
+    if (!isMetaUsable(meta, identity)) return null;
 
     const ident = (parsed['external_id'] || parsed['reg_id'] || '').trim();
     if (ident.length > 4) {
-        const m = await getByIndex('ext', ident);
+        const m = await getByTag(eventId, 'ext', ident);
         if (m && m.event_id === eventId) return m;
     }
 
     const delegateId = (parsed['delegate_id'] || '').trim();
     if (delegateId) {
-        const m = await resolveDelegateByIdLocally(eventId, delegateId);
+        const m = await resolveDelegateByIdLocally(eventId, delegateId, user);
         if (m) return m;
     }
 
     const phone = normalizePhone(parsed['phone']);
-    const email = (parsed['email'] || '').trim().toLowerCase();
     const pFirst = (parsed['first_name'] || '').trim();
     const pLast = (parsed['last_name'] || '').trim();
     const famKey = pFirst && pLast ? familyAwareNameKey(parsed['title'], pFirst, pLast) : '';
     const rawDistrict = (parsed['district'] || '').trim();
     const districtKey = rawDistrict ? normDistrictKey(resolveDistrictShortCode(rawDistrict) || rawDistrict) : '';
 
-    if (!phone && !email && !famKey) return null;
+    if (!phone && !famKey) return null;
 
     const all = await loadEventRoster(eventId);
 
     if (phone) {
         const rows = all.filter(e => e.phone_normalized === phone || normalizePhone(e.phone) === phone);
-        const hit = pickUniqueRosterMatch(rows, famKey, districtKey);
-        if (hit) return hit;
-    }
-
-    if (email) {
-        const rows = all.filter(e => (e.email || '').trim().toLowerCase() === email);
         const hit = pickUniqueRosterMatch(rows, famKey, districtKey);
         if (hit) return hit;
     }
@@ -528,12 +1004,10 @@ export async function resolvePayloadLocally(
     return null;
 }
 
-// Single entry point used by checkInByCode (offline fast-path + network fallback).
-// Identifier badges keep the O(1) index path; payloads fall back to identity.
 export async function resolveBadgeLocally(
     eventId: string,
     code: string,
-    user?: { role?: string; district?: string; region?: string } | null,
+    user?: { id?: string; role?: string; district?: string; region?: string } | null,
 ): Promise<OfflineRosterEntry | null> {
     const direct = await resolveCodeLocally(eventId, code, user);
     if (direct) return direct;
@@ -541,10 +1015,6 @@ export async function resolveBadgeLocally(
     return resolvePayloadLocally(eventId, parseQrPayload(code), user);
 }
 
-// v1.82-fix4: local (offline) MANUAL LOOKUP. Mirrors the shipped v1.74 search
-// semantics — tokenized word-prefix on name; selective exact identifier match on
-// phone/email/external_id/delegate_id. The roster is scope-built already, so the
-// caller passes its scopeKey purely as a shared-device safety guard.
 const normNameText = (s?: string): string =>
     (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -553,21 +1023,22 @@ const safeSearchTok = (s: string): string => s.replace(/[(),%\\]/g, '');
 export async function searchRosterLocally(
     eventId: string,
     query: string,
-    opts?: { page?: number; pageSize?: number; scopeKey?: string },
+    opts?: { page?: number; pageSize?: number; scopeKey?: string; userId?: string },
 ): Promise<{ entries: OfflineRosterEntry[]; total: number }> {
     if (typeof indexedDB === 'undefined' || !eventId) return { entries: [], total: 0 };
     const trimmed = (query || '').trim();
     if (trimmed.length < 2) return { entries: [], total: 0 };
 
-    const meta = getRosterMeta(eventId);
-    if (meta && opts?.scopeKey && meta.scopeKey !== opts.scopeKey) return { entries: [], total: 0 };
+    const identity = await resolveIdentity(opts?.userId ? { id: opts.userId } : null, opts?.scopeKey);
+    if (!identity) return { entries: [], total: 0 };
+    const meta = await getRosterMeta(eventId);
+    if (!isMetaUsable(meta, identity)) return { entries: [], total: 0 };
 
     const all = await loadEventRoster(eventId);
 
     const tokens = trimmed.toLowerCase().split(/\s+/).map(safeSearchTok).filter(t => t.length > 0).slice(0, 4);
     const fullQ = tokens.join(' ');
     const phoneQ = normalizePhone(trimmed);
-    const emailQ = trimmed.toLowerCase();
     const idQl = safeSearchTok(trimmed).toLowerCase();
 
     const scored: { entry: OfflineRosterEntry; score: number }[] = [];
@@ -575,9 +1046,7 @@ export async function searchRosterLocally(
         const nameNorm = normNameText(`${entry.first_name || ''} ${entry.last_name || ''}`);
         let score = 0;
 
-        // Selective identifiers (whole-query only — never tokenized).
         if (phoneQ.length >= 7 && entry.phone_normalized && entry.phone_normalized === phoneQ) score = 100;
-        else if (emailQ.includes('@') && entry.email && entry.email.toLowerCase() === emailQ) score = 100;
         else if (idQl && entry.external_id && entry.external_id.toLowerCase() === idQl) score = 100;
         else if (idQl && entry.delegate_id && entry.delegate_id.toLowerCase() === idQl) score = 100;
         else if (idQl.length >= 6 && entry.external_id && entry.external_id.toLowerCase().startsWith(idQl)) score = 95;
@@ -616,44 +1085,35 @@ export async function searchRosterLocally(
     return { entries: scored.slice(offset, offset + pageSize).map(s => s.entry), total };
 }
 
-// v1.82-fix5: O(1) identity lookup for the offline/queued verify snapshot
-// (store keyPath IS delegate_id, so this is a direct key get — no index needed).
 export async function resolveDelegateByIdLocally(
     eventId: string,
     delegateId: string,
+    user?: { id?: string; role?: string; district?: string; region?: string } | null,
 ): Promise<OfflineRosterEntry | null> {
     if (typeof indexedDB === 'undefined' || !eventId || !delegateId) return null;
+    const identity = await resolveIdentity(user);
+    if (!identity) return null;
+    const meta = await getRosterMeta(eventId);
+    if (!isMetaUsable(meta, identity)) return null;
+
     try {
+        const keys = await getCryptoKeys();
         const db = await openDb();
-        const entry = await new Promise<OfflineRosterEntry | null>((resolve, reject) => {
-            const t = db.transaction(STORE, 'readonly');
-            const req = t.objectStore(STORE).get(delegateId);
-            req.onsuccess = () => resolve((req.result as OfflineRosterEntry) || null);
-            req.onerror = () => reject(req.error);
-        });
+        const tx = db.transaction(STORE, 'readonly');
+        const raw = await reqToPromise(tx.objectStore(STORE).get(delegateId));
+        if (!raw) return null;
+        const entry = await decryptEntry(raw as EncryptedRosterRecord, keys);
         if (entry && entry.event_id === eventId) return entry;
-    } catch { /* idb unavailable */ }
+    } catch { /* idb/crypto unavailable */ }
     return null;
 }
 
 export function getPendingSyncCount(): number {
-    try {
-        const raw = localStorage.getItem('fgbmfi_checkin_queue');
-        if (!raw) return 0;
-        const q = JSON.parse(raw);
-        return Array.isArray(q) ? q.length : 0;
-    } catch { return 0; }
+    return 0;
 }
 
-export function resetOfflineWindow(): void {
-    offlineWindow = false;
+const notifyRosterChanged = (eventId: string): void => {
     try {
-        if (typeof indexedDB !== 'undefined') {
-            indexedDB.deleteDatabase(DB_NAME);
-            dbPromise = null;
-        }
-        Object.keys(localStorage)
-            .filter(k => k.startsWith(META_PREFIX))
-            .forEach(k => localStorage.removeItem(k));
-    } catch { /* noop */ }
-}
+        window.dispatchEvent(new CustomEvent('fgbmfi-roster-changed', { detail: { eventId } }));
+    } catch { /* no window */ }
+};

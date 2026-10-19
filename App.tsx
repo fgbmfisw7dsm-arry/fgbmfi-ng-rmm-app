@@ -10,7 +10,7 @@ import { auth, db } from './services/supabaseService';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './hooks/useQueryClient';
 import { flushQueueOnConnect } from './services/offlineQueue';
-import { setOfflineWindowOpen } from './services/offlineRoster';
+import { setOfflineSession, refreshOfflineWindow } from './services/offlineRoster';
 import { defaultRouteForRole } from './services/roleRouting';
 import { startPresence, stopPresence, getDeviceId } from './services/presenceService';import { useIdleTimeout } from './hooks/useIdleTimeout';
 import IdleTimeoutModal from './components/IdleTimeoutModal';
@@ -190,6 +190,7 @@ const AppContent = () => {
   const logout = useCallback(async () => {
     userIdRef.current = null;
     try { stopPresence(); } catch { /* ignore */ }
+    setOfflineSession(null);
     setUser(null);
     try {
       // v1.73: local scope — on a shared login, this device only. Global scope
@@ -305,6 +306,7 @@ const AppContent = () => {
         if (event === 'SIGNED_OUT') {
           userIdRef.current = null;
           try { stopPresence(); } catch { /* ignore */ }
+          setOfflineSession(null);
           if (mounted) setUser(null);
         } else if (event === 'SIGNED_IN' && session?.user) {
           if (userIdRef.current !== session.user.id) {
@@ -323,20 +325,31 @@ const AppContent = () => {
     };
   }, []);
 
-  // v1.82: pending queues are flushed globally. The offline roster is built
-  // on-demand by the door pages (Check-In / Session Ministry), never at login.
+  // v1.86: bind the encrypted offline cache and write queues to this account +
+  // scope. The offline window is time-bounded (24h) and refreshed by successful
+  // syncs/reconnects. This effect must run before the queue flusher below so the
+  // owner id is available when pending writes are replayed.
+  useEffect(() => {
+    setOfflineSession(user ? {
+      id: user.id,
+      role: user.role,
+      district: user.district,
+      region: user.region,
+    } : null);
+    if (!user?.id) return;
+    const refresh = () => refreshOfflineWindow();
+    window.addEventListener('online', refresh);
+    return () => window.removeEventListener('online', refresh);
+  }, [user?.id, user?.role, user?.district, user?.region]);
+
+  // v1.82: pending queues are flushed globally, but only for items owned by the
+  // currently authenticated account (offlineQueue enforces the owner check).
   useEffect(() => {
     if (!user?.id) return;
     flushQueueOnConnect();
-    const sync = () => flushQueueOnConnect();
+    const sync = () => { refreshOfflineWindow(); flushQueueOnConnect(); };
     window.addEventListener('online', sync);
     return () => window.removeEventListener('online', sync);
-  }, [user?.id]);
-
-  useEffect(() => {
-    // D5: the offline window is open while an authenticated session exists in this
-    // browser (roster present). Close on sign-out / empty session.
-    setOfflineWindowOpen(!!user?.id);
   }, [user?.id]);
 
   if (!isSupabaseConfigured) return <ConfigurationError />;

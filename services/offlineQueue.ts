@@ -1,5 +1,7 @@
 import { db } from './supabaseService';
 import type { User, SessionResponseType } from '../types';
+import { getOfflineOwnerId } from './offlineRoster';
+import { hydrateQueueStore, getQueue, setQueue, clearQueueStore, type QueueKind } from './queueStore';
 
 // =============================================================================
 // FGBMFI-EMS — Offline Write Queue (v1.82)
@@ -20,6 +22,15 @@ const SESSION_RESPONSE_KEY = 'fgbmfi_session_response_queue';
 const SESSION_AGGREGATE_KEY = 'fgbmfi_session_aggregate_queue';
 const BATCH_SIZE = 50;
 
+// v1.87: the queue payloads are persisted AES-GCM-sealed by queueStore; these
+// helpers keep the existing synchronous call sites while reading/writing the
+// decrypted in-memory copy.
+const KIND_BY_KEY: Record<string, QueueKind> = {
+  [STORAGE_KEY]: 'checkins',
+  [SESSION_RESPONSE_KEY]: 'responses',
+  [SESSION_AGGREGATE_KEY]: 'aggregates',
+};
+
 type QueueStatus = 'pending' | 'failed';
 
 interface QueuedCheckIn {
@@ -27,6 +38,7 @@ interface QueuedCheckIn {
   eventId: string;
   delegateId: string;
   registrar: User;
+  ownerUserId?: string;
   sessionId?: string;
   timestamp: number;
   retryCount: number;
@@ -43,6 +55,7 @@ interface QueuedSessionResponse {
   sessionId: string;
   responseType: SessionResponseType;
   registrar: User;
+  ownerUserId?: string;
   timestamp: number;
   retryCount: number;
   status?: QueueStatus;
@@ -70,6 +83,7 @@ interface QueuedAggregate {
   responseType?: SessionResponseType;
   total: number;
   registrar: User;
+  ownerUserId?: string;
   timestamp: number;
   retryCount: number;
   status?: QueueStatus;
@@ -86,15 +100,13 @@ let flushRpcAvailable = true;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function loadQueue<T>(key: string): T[] {
-  try {
-    const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+  const kind = KIND_BY_KEY[key];
+  return kind ? getQueue<T>(kind) : [];
 }
 
 function saveQueue<T>(key: string, queue: T[]): void {
-  try { localStorage.setItem(key, JSON.stringify(queue)); } catch { /* storage unavailable */ }
+  const kind = KIND_BY_KEY[key];
+  if (kind) setQueue(kind, queue);
 }
 
 function notifyQueueChanged(): void {
@@ -108,6 +120,17 @@ function backoffMs(retryCount: number): number {
 function isDue(item: { nextRetryAt?: number; status?: QueueStatus }): boolean {
   if (item.status === 'failed') return false;
   return !item.nextRetryAt || item.nextRetryAt <= Date.now();
+}
+
+function isOwnedByCurrent(item: { ownerUserId?: string; registrar?: User }): boolean {
+  const current = getOfflineOwnerId();
+  if (!current) return false;
+  const owner = item.ownerUserId || item.registrar?.id || '';
+  return owner === current;
+}
+
+function isOwnedAndDue(item: { ownerUserId?: string; registrar?: User; nextRetryAt?: number; status?: QueueStatus }): boolean {
+  return isOwnedByCurrent(item) && isDue(item);
 }
 
 function isFunctionMissing(error: any): boolean {
@@ -196,6 +219,7 @@ export function enqueueCheckIn(eventId: string, delegateId: string, registrar: U
     eventId,
     delegateId,
     registrar,
+    ownerUserId: registrar.id,
     sessionId,
     timestamp: Date.now(),
     retryCount: 0,
@@ -214,6 +238,7 @@ export function enqueueSessionResponse(eventId: string, delegateId: string, sess
     sessionId,
     responseType,
     registrar,
+    ownerUserId: registrar.id,
     timestamp: Date.now(),
     retryCount: 0,
     status: 'pending',
@@ -239,6 +264,7 @@ export function getAggregateQueueLength(): number {
 export function getQueuedCheckInIds(eventId: string, sessionId?: string): Set<string> {
   const ids = new Set<string>();
   for (const item of loadQueue<QueuedCheckIn>(STORAGE_KEY)) {
+    if (!isOwnedByCurrent(item)) continue;
     if (item.eventId !== eventId) continue;
     if ((item.sessionId || '') !== (sessionId || '')) continue;
     ids.add(item.delegateId);
@@ -249,61 +275,71 @@ export function getQueuedCheckInIds(eventId: string, sessionId?: string): Set<st
 export function getQueuedSessionResponseIds(eventId: string, sessionId: string): Set<string> {
   const ids = new Set<string>();
   for (const item of loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY)) {
+    if (!isOwnedByCurrent(item)) continue;
     if (item.eventId === eventId && item.sessionId === sessionId) ids.add(item.delegateId);
   }
   return ids;
 }
 
 export function getQueueStats(): QueueStats {
-  const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY);
-  const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);
-  const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
+  const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY).filter(isOwnedByCurrent);
+  const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).filter(isOwnedByCurrent);
+  const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY)).filter(isOwnedByCurrent);
   const all = [...checkins, ...responses, ...aggregates];
   const failed = all.filter(i => i.status === 'failed').length;
   return { pending: all.length - failed, failed, total: all.length };
 }
 
 export function retryFailed(): void {
-  const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY).map(i =>
-    i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
-  const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).map(i =>
-    i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
-  const aggregates = loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).map(i =>
-    i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
-  saveQueue(STORAGE_KEY, checkins);
-  saveQueue(SESSION_RESPONSE_KEY, responses);
-  saveQueue(SESSION_AGGREGATE_KEY, aggregates);
-  notifyQueueChanged();
-  flushQueueOnConnect();
+  const current = getOfflineOwnerId();
+  if (!current) return;
+  void hydrateQueueStore().then(() => {
+    const mine = (i: { ownerUserId?: string; registrar?: User }) => (i.ownerUserId || i.registrar?.id || '') === current;
+    const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY).map(i =>
+      mine(i) && i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
+    const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).map(i =>
+      mine(i) && i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
+    const aggregates = loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).map(i =>
+      mine(i) && i.status === 'failed' ? { ...i, status: 'pending' as QueueStatus, retryCount: 0, permanent: false, nextRetryAt: 0 } : i);
+    saveQueue(STORAGE_KEY, checkins);
+    saveQueue(SESSION_RESPONSE_KEY, responses);
+    saveQueue(SESSION_AGGREGATE_KEY, aggregates);
+    notifyQueueChanged();
+    flushQueueOnConnect();
+  });
 }
 
 export function discardFailed(): void {
-  saveQueue(STORAGE_KEY, loadQueue<QueuedCheckIn>(STORAGE_KEY).filter(i => i.status !== 'failed'));
-  saveQueue(SESSION_RESPONSE_KEY, loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).filter(i => i.status !== 'failed'));
-  saveQueue(SESSION_AGGREGATE_KEY, loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).filter(i => i.status !== 'failed'));
-  notifyQueueChanged();
+  void hydrateQueueStore().then(() => {
+    saveQueue(STORAGE_KEY, loadQueue<QueuedCheckIn>(STORAGE_KEY).filter(i => !(isOwnedByCurrent(i) && i.status === 'failed')));
+    saveQueue(SESSION_RESPONSE_KEY, loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY).filter(i => !(isOwnedByCurrent(i) && i.status === 'failed')));
+    saveQueue(SESSION_AGGREGATE_KEY, loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY).filter(i => !(isOwnedByCurrent(i) && i.status === 'failed')));
+    notifyQueueChanged();
+  });
 }
 
 export function clearQueue(): void {
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(SESSION_RESPONSE_KEY);
-  localStorage.removeItem(SESSION_AGGREGATE_KEY);
+  clearQueueStore();
   notifyQueueChanged();
 }
 
 export async function flushQueue(force = false): Promise<{ flushed: number; failed: number }> {
   if (checkInFlush) return checkInFlush;
   checkInFlush = (async () => {
+    const owner = getOfflineOwnerId();
+    if (!owner) return { flushed: 0, failed: 0 };
+    await hydrateQueueStore();
     let queue = dedupeCheckIns(loadQueue<QueuedCheckIn>(STORAGE_KEY));
     if (queue.length === 0) return { flushed: 0, failed: 0 };
 
     let flushed = 0;
     let failed = 0;
 
-    const due = force ? queue : queue.filter(isDue);
+    const due = (force ? queue.filter(isOwnedByCurrent) : queue.filter(isOwnedAndDue));
     if (due.length === 0) return { flushed: 0, failed: 0 };
 
     for (let offset = 0; offset < due.length; offset += BATCH_SIZE) {
+      if (getOfflineOwnerId() !== owner) break;
       const batch = due.slice(offset, offset + BATCH_SIZE);
       const dueIds = new Set(batch.map(i => i.id));
 
@@ -348,6 +384,7 @@ export async function flushQueue(force = false): Promise<{ flushed: number; fail
       if (!handled) {
         // Classic per-item fallback (also used when the batch RPC is unavailable).
         for (const item of batch) {
+          if (getOfflineOwnerId() !== owner) break;
           try {
             const res = await db.checkInDelegate(item.eventId, item.delegateId, item.registrar, item.sessionId, { forceOnline: true });
             if (res?.success) {
@@ -394,16 +431,20 @@ export async function flushQueue(force = false): Promise<{ flushed: number; fail
 export async function flushSessionResponseQueue(force = false): Promise<{ flushed: number; failed: number }> {
   if (responseFlush) return responseFlush;
   responseFlush = (async () => {
+    const owner = getOfflineOwnerId();
+    if (!owner) return { flushed: 0, failed: 0 };
+    await hydrateQueueStore();
     let queue = dedupeResponses(loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY));
     if (queue.length === 0) return { flushed: 0, failed: 0 };
 
     let flushed = 0;
     let failed = 0;
 
-    const due = force ? queue : queue.filter(isDue);
+    const due = (force ? queue.filter(isOwnedByCurrent) : queue.filter(isOwnedAndDue));
     if (due.length === 0) return { flushed: 0, failed: 0 };
 
     for (let offset = 0; offset < due.length; offset += BATCH_SIZE) {
+      if (getOfflineOwnerId() !== owner) break;
       const batch = due.slice(offset, offset + BATCH_SIZE);
       const dueIds = new Set(batch.map(i => i.id));
 
@@ -446,6 +487,7 @@ export async function flushSessionResponseQueue(force = false): Promise<{ flushe
 
       if (!handled) {
         for (const item of batch) {
+          if (getOfflineOwnerId() !== owner) break;
           try {
             const res = await db.recordSessionResponse(item.eventId, item.delegateId, item.sessionId, item.responseType, item.registrar, { forceOnline: true });
             if (res?.success) {
@@ -494,12 +536,15 @@ export async function flushSessionResponseQueue(force = false): Promise<{ flushe
 
 export function flushQueueOnConnect(): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY);
-  if (checkins.some(isDue)) { flushQueue().catch(() => { /* handled per item */ }); }
-  const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);
-  if (responses.some(isDue)) { flushSessionResponseQueue().catch(() => { /* handled per item */ }); }
-  const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
-  if (aggregates.some(isDue)) { flushAggregateQueue().catch(() => { /* handled per item */ }); }
+  if (!getOfflineOwnerId()) return;
+  void hydrateQueueStore().then(() => {
+    const checkins = loadQueue<QueuedCheckIn>(STORAGE_KEY);
+    if (checkins.some(isOwnedAndDue)) { flushQueue().catch(() => { /* handled per item */ }); }
+    const responses = loadQueue<QueuedSessionResponse>(SESSION_RESPONSE_KEY);
+    if (responses.some(isOwnedAndDue)) { flushSessionResponseQueue().catch(() => { /* handled per item */ }); }
+    const aggregates = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
+    if (aggregates.some(isOwnedAndDue)) { flushAggregateQueue().catch(() => { /* handled per item */ }); }
+  });
 }
 
 // v1.84: flush aggregate Session Details writes. Replays the corresponding
@@ -508,16 +553,20 @@ export function flushQueueOnConnect(): void {
 export async function flushAggregateQueue(force = false): Promise<{ flushed: number; failed: number }> {
   if (aggregateFlush) return aggregateFlush;
   aggregateFlush = (async () => {
+    const owner = getOfflineOwnerId();
+    if (!owner) return { flushed: 0, failed: 0 };
+    await hydrateQueueStore();
     let queue = dedupeAggregates(loadQueue<QueuedAggregate>(SESSION_AGGREGATE_KEY));
     if (queue.length === 0) return { flushed: 0, failed: 0 };
 
     let flushed = 0;
     let failed = 0;
 
-    const due = force ? queue : queue.filter(isDue);
+    const due = (force ? queue.filter(isOwnedByCurrent) : queue.filter(isOwnedAndDue));
     if (due.length === 0) return { flushed: 0, failed: 0 };
 
     for (const item of due) {
+      if (getOfflineOwnerId() !== owner) break;
       try {
         if (item.kind === 'summary') {
           if (!item.responseType) throw new Error('Invalid aggregate queue item');

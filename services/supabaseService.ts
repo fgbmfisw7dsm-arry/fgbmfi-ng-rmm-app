@@ -3,7 +3,8 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload } from './utils';
 import { createClient } from '@supabase/supabase-js';
-import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf } from './offlineRoster';
+import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
+import { getQueue, setQueue } from './queueStore';
 
 /**
  * Normalizes email for transmission. 
@@ -232,21 +233,20 @@ const handleRpcResponse = (res: any, operationName: string) => {
 
 // Lifecycle Guard: Checks if an event is active before allowing writes
 
-const CHECKIN_QUEUE_STORAGE_KEY = 'fgbmfi_checkin_queue';
 const enqueueCheckInLocal = (eventId: string, delegateId: string, registrar: User, sessionId?: string): void => {
     try {
-        const raw = localStorage.getItem(CHECKIN_QUEUE_STORAGE_KEY);
-        const queue: any[] = raw ? JSON.parse(raw) : [];
+        const queue: any[] = getQueue<any>('checkins');
         queue.push({
             id: crypto.randomUUID(),
             eventId,
             delegateId,
             registrar,
+            ownerUserId: registrar.id,
             sessionId,
             timestamp: Date.now(),
             retryCount: 0,
         });
-        localStorage.setItem(CHECKIN_QUEUE_STORAGE_KEY, JSON.stringify(queue));
+        setQueue('checkins', queue);
     } catch { /* storage unavailable — ignore */ }
 };
 
@@ -255,11 +255,9 @@ const enqueueCheckInLocal = (eventId: string, delegateId: string, registrar: Use
 // offlineQueue.ts's QueuedAggregate (that module imports db, so this file cannot
 // import it back — the local enqueue helper mirrors the established pattern).
 export type AggregateKind = 'summary' | 'vd' | 'attendance';
-const SESSION_AGGREGATE_QUEUE_KEY = 'fgbmfi_session_aggregate_queue';
 const enqueueAggregateLocal = (eventId: string, kind: AggregateKind, sessionId: string, total: number, registrar: User, responseType?: SessionResponseType): void => {
     try {
-        const raw = localStorage.getItem(SESSION_AGGREGATE_QUEUE_KEY);
-        const queue: any[] = raw ? JSON.parse(raw) : [];
+        const queue: any[] = getQueue<any>('aggregates');
         const key = `${eventId}|${kind}|${sessionId}|${responseType || ''}`;
         const idx = queue.findIndex((q: any) => `${q.eventId}|${q.kind}|${q.sessionId}|${q.responseType || ''}` === key);
         const item = {
@@ -270,21 +268,20 @@ const enqueueAggregateLocal = (eventId: string, kind: AggregateKind, sessionId: 
             responseType,
             total,
             registrar,
+            ownerUserId: registrar.id,
             timestamp: Date.now(),
             retryCount: 0,
             status: 'pending',
         };
         if (idx >= 0) queue[idx] = item; else queue.push(item);
-        localStorage.setItem(SESSION_AGGREGATE_QUEUE_KEY, JSON.stringify(queue));
+        setQueue('aggregates', queue);
         try { window.dispatchEvent(new CustomEvent('fgbmfi-queue-changed')); } catch { /* no window */ }
     } catch { /* storage unavailable — ignore */ }
 };
 
-const SESSION_RESPONSE_QUEUE_KEY = 'fgbmfi_session_response_queue';
 const enqueueSessionResponseLocal = (eventId: string, delegateId: string, sessionId: string, responseType: SessionResponseType, registrar: User): void => {
     try {
-        const raw = localStorage.getItem(SESSION_RESPONSE_QUEUE_KEY);
-        const queue: any[] = raw ? JSON.parse(raw) : [];
+        const queue: any[] = getQueue<any>('responses');
         queue.push({
             id: crypto.randomUUID(),
             eventId,
@@ -292,10 +289,11 @@ const enqueueSessionResponseLocal = (eventId: string, delegateId: string, sessio
             sessionId,
             responseType,
             registrar,
+            ownerUserId: registrar.id,
             timestamp: Date.now(),
             retryCount: 0,
         });
-        localStorage.setItem(SESSION_RESPONSE_QUEUE_KEY, JSON.stringify(queue));
+        setQueue('responses', queue);
     } catch { /* storage unavailable — ignore */ }
 };
 
@@ -340,9 +338,9 @@ const raceDoorTimeout = <T>(p: Promise<T>, ms = DOOR_WRITE_TIMEOUT_MS): Promise<
   ]);
 
 // Identity snapshot from the device roster for the offline/queued verify card.
-const localDelegateSnapshot = async (eventId: string, delegateId: string): Promise<any> => {
+const localDelegateSnapshot = async (eventId: string, delegateId: string, user?: User): Promise<any> => {
   try {
-    const e = await resolveDelegateByIdLocally(eventId, delegateId);
+    const e = await resolveDelegateByIdLocally(eventId, delegateId, user || null);
     if (e) {
       return {
         delegate_id: e.delegate_id,
@@ -1235,6 +1233,7 @@ export const db = {
                 page: safePage,
                 pageSize: safeSize,
                 scopeKey: scopeKeyOf({ district, region }),
+                userId: getOfflineOwnerId() || undefined,
             });
             const data = entries.map(e => ({
                 delegate_id: e.delegate_id,
@@ -1568,7 +1567,7 @@ export const db = {
         // an item that flushQueue believes it already handled.
         if (!opts?.forceOnline && typeof navigator !== 'undefined' && navigator.onLine === false && getOfflineWindowOpen()) {
             enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
-            return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId) };
+            return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId, registrar) };
         }
         try {
         const run = withRetry(async () => {
@@ -1614,9 +1613,9 @@ export const db = {
         return opts?.forceOnline ? await run : await raceDoorTimeout(run);
         } catch (e: any) {
             // v1.82: connected-but-unreachable link — queue instead of losing the scan.
-            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+            if (!opts?.forceOnline && getOfflineWindowOpen() && isNetworkErrorMessage(e?.message)) {
                 enqueueCheckInLocal(eventId, delegateId, registrar, sessionId);
-                return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId) };
+                return { success: true, message: 'Verified (Pending Sync)', alreadyCheckedIn: false, delegate: await localDelegateSnapshot(eventId, delegateId, registrar) };
             }
             throw e;
         }
@@ -1678,7 +1677,7 @@ export const db = {
                     checkinRpcAvailable = false;
                 } else if (rpcResolved && rpcResolved.needs_parse) {
                     // RPC resolved but needs the TS fuzzy/registration path — fall through
-                } else if (isNetwork) {
+                } else if (isNetwork && getOfflineWindowOpen()) {
                     // v1.82: "online but unreachable" (flaky venue Wi-Fi) — resolve
                     // locally and queue instead of failing the scan. Replays are
                     // idempotent (partial-unique indexes).
@@ -3471,7 +3470,7 @@ export const db = {
         return opts?.forceOnline ? await run : await raceDoorTimeout(run);
         } catch (e: any) {
             // v1.82: connected-but-unreachable link — queue the alter-call response.
-            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+            if (!opts?.forceOnline && getOfflineWindowOpen() && isNetworkErrorMessage(e?.message)) {
                 enqueueSessionResponseLocal(eventId, delegateId, sessionId, responseType, registrar);
                 return { success: true, message: 'Recorded (Pending Sync)' };
             }
@@ -3522,7 +3521,7 @@ export const db = {
         };
         return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
         } catch (e: any) {
-            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+            if (!opts?.forceOnline && getOfflineWindowOpen() && isNetworkErrorMessage(e?.message)) {
                 enqueueAggregateLocal(eventId, 'summary', sessionId, totalCount, registrar, responseType);
                 return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, response_type: responseType, total_count: totalCount, entered_by: registrar.id, entered_at: new Date().toISOString() };
             }
@@ -3558,7 +3557,7 @@ export const db = {
         };
         return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
         } catch (e: any) {
-            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+            if (!opts?.forceOnline && getOfflineWindowOpen() && isNetworkErrorMessage(e?.message)) {
                 enqueueAggregateLocal(eventId, 'vd', sessionId, total, registrar);
                 return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_distributed: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
             }
@@ -3594,7 +3593,7 @@ export const db = {
         };
         return opts?.forceOnline ? await run() : await raceDoorTimeout(run());
         } catch (e: any) {
-            if (!opts?.forceOnline && isNetworkErrorMessage(e?.message)) {
+            if (!opts?.forceOnline && getOfflineWindowOpen() && isNetworkErrorMessage(e?.message)) {
                 enqueueAggregateLocal(eventId, 'attendance', sessionId, total, registrar);
                 return { id: `pending-${crypto.randomUUID()}`, event_id: eventId, session_id: sessionId, total_count: total, updated_at: new Date().toISOString(), updated_by: registrar.id };
             }
