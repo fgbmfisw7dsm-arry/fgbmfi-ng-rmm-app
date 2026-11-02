@@ -526,8 +526,14 @@ export const exportToPDF = (
 
     let captureWidth = viewportWidth;
     if (isReport) {
-        const tables = Array.from(nodeToPrint.querySelectorAll('table'));
-        const widest = tables.reduce((m, t) => Math.max(m, t.scrollWidth || 0), 0);
+        // Measure the widest laid-out table so the raster capture can never crop
+        // the right-most columns. scrollWidth alone under-reports when the table
+        // is width:100% inside a fixed-width container but overflows it, so take
+        // the max of every width signal (only ever widens the capture).
+        const widest = Array.from(nodeToPrint.querySelectorAll('table')).reduce((m, t) => {
+            const rect = t.getBoundingClientRect();
+            return Math.max(m, t.scrollWidth || 0, t.offsetWidth || 0, Math.ceil(rect.width) || 0);
+        }, 0);
         captureWidth = Math.max(viewportWidth, Math.min(widest, 2600));
         printContainer.style.width = `${captureWidth}px`;
     }

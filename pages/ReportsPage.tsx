@@ -10,6 +10,19 @@ const sessionFinancialTotal = (financials: FinancialEntry[], sid: string): numbe
         .filter((f: any) => f.session_id === sid && [FinancialType.OFFERING, FinancialType.PLEDGE_REDEMPTION].includes(f.type))
         .reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
 
+const TAB_LABELS: Record<string, string> = {
+    attendanceList: 'Attendance List',
+    attendanceMatrix: 'Attendance Matrix',
+    sessionsSummary: 'Sessions Summary',
+    financialMatrix: 'Financial Matrix',
+    pledgeSummary: 'Pledge Summary',
+    pledgeList: 'Pledge List',
+    ministryReport: 'Sessions Report',
+};
+
+const formatCount = (n: number | string | null | undefined): string =>
+    (Number(n) || 0).toLocaleString('en-US');
+
 const ReportsPage = () => {
     const { activeEventId, activeEvent, user } = useContext(AppContext);
     const isLocked = activeEvent?.is_active === false;
@@ -677,9 +690,8 @@ const ReportsPage = () => {
                     </div>
                     <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
                         {['attendanceList', 'attendanceMatrix', 'sessionsSummary', 'financialMatrix', 'pledgeSummary', 'pledgeList', 'ministryReport'].map(tab => {
-                             const labels: Record<string, string> = { attendanceList: 'Attendance List', attendanceMatrix: 'Attendance Matrix', sessionsSummary: 'Sessions Summary', financialMatrix: 'Financial Matrix', pledgeSummary: 'Pledge Summary', pledgeList: 'Pledge List', ministryReport: 'Sessions Report' };
                             return (
-                            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{labels[tab] || tab}</button>
+                            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{TAB_LABELS[tab] || tab}</button>
                             );
                         })}
                     </div>
@@ -714,7 +726,7 @@ const ReportsPage = () => {
                     <h1 className="text-2xl font-black uppercase text-blue-900">{events.find(e => e.event_id === activeEventId)?.name}</h1>
                     <div className="flex justify-center items-center gap-3 mt-2">
                         <h3 className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
-                            {activeTab === 'ministryReport' ? 'Sessions Report' : activeTab.replace(/([A-Z])/g, ' $1')}
+                            {TAB_LABELS[activeTab] || activeTab}
                         </h3>
                         {isLocked && (
                             <span className="text-[8px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">Locked / Final Copy</span>
@@ -740,30 +752,23 @@ const ReportsPage = () => {
                     {activeTab === 'sessionsSummary' && (
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-sm border min-w-max">
-                                <thead className="uppercase font-black text-[10px]">
-                                    <tr className="bg-slate-200 text-slate-700">
-                                        <th rowSpan={2} className="p-3 border text-left align-bottom">Session</th>
-                                        <th colSpan={2} className="p-2 border text-center">Attendance</th>
-                                        <th colSpan={2} className="p-2 border text-center">FT</th>
-                                        <th colSpan={2} className="p-2 border text-center">SLV</th>
-                                        <th colSpan={2} className="p-2 border text-center">MI</th>
-                                        <th colSpan={2} className="p-2 border text-center">HGB</th>
-                                        <th rowSpan={2} className="p-3 border text-center align-bottom">VD</th>
-                                        <th rowSpan={2} className="p-3 border text-right align-bottom">Offering</th>
-                                        <th rowSpan={2} className="p-3 border text-right align-bottom">Pledge Redemption</th>
-                                        <th rowSpan={2} className="p-3 border text-right align-bottom bg-blue-50">Financial Total</th>
-                                    </tr>
-                                    <tr className="bg-slate-100 text-slate-500">
-                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
-                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
-                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
-                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
-                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
-                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
-                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
-                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
-                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
-                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                <thead className="bg-slate-100 uppercase font-black text-[10px]">
+                                    <tr>
+                                        <th className="p-2 border text-left">Session</th>
+                                        <th className="p-2 border text-center leading-tight">Attendance<span className="block text-[9px] opacity-70">SCND</span></th>
+                                        <th className="p-2 border text-center leading-tight bg-blue-50 text-blue-900">Attendance<span className="block text-[9px] opacity-70">MAN</span></th>
+                                        <th className="p-2 border text-center leading-tight">FT<span className="block text-[9px] opacity-70">SCND</span></th>
+                                        <th className="p-2 border text-center leading-tight bg-blue-50 text-blue-900">FT<span className="block text-[9px] opacity-70">MAN</span></th>
+                                        <th className="p-2 border text-center leading-tight">SLV<span className="block text-[9px] opacity-70">SCND</span></th>
+                                        <th className="p-2 border text-center leading-tight bg-blue-50 text-blue-900">SLV<span className="block text-[9px] opacity-70">MAN</span></th>
+                                        <th className="p-2 border text-center leading-tight">MI<span className="block text-[9px] opacity-70">SCND</span></th>
+                                        <th className="p-2 border text-center leading-tight bg-blue-50 text-blue-900">MI<span className="block text-[9px] opacity-70">MAN</span></th>
+                                        <th className="p-2 border text-center leading-tight">HGB<span className="block text-[9px] opacity-70">SCND</span></th>
+                                        <th className="p-2 border text-center leading-tight bg-blue-50 text-blue-900">HGB<span className="block text-[9px] opacity-70">MAN</span></th>
+                                        <th className="p-2 border text-center leading-tight">VD</th>
+                                        <th className="p-2 border text-right leading-tight">Offering</th>
+                                        <th className="p-2 border text-right leading-tight">Pledge<span className="block text-[9px] opacity-70">Redemption</span></th>
+                                        <th className="p-2 border text-right leading-tight bg-blue-50">Financial<span className="block text-[9px] opacity-70">Total</span></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y">
@@ -785,17 +790,17 @@ const ReportsPage = () => {
                                         return (
                                             <tr key={s.session_id} className="hover:bg-gray-50 border-b">
                                                 <td className="p-3 border font-black uppercase text-xs">{s.title}</td>
-                                                <td className="p-3 border text-center font-bold">{attScnd}</td>
-                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{attMan}</td>
-                                                <td className="p-3 border text-center font-bold">{ftScnd}</td>
-                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{ftMan}</td>
-                                                <td className="p-3 border text-center font-bold">{slvScnd}</td>
-                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{slvMan}</td>
-                                                <td className="p-3 border text-center font-bold">{miScnd}</td>
-                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{miMan}</td>
-                                                <td className="p-3 border text-center font-bold">{hgbScnd}</td>
-                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{hgbMan}</td>
-                                                <td className="p-3 border text-center font-bold">{vd}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(attScnd)}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{formatCount(attMan)}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(ftScnd)}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{formatCount(ftMan)}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(slvScnd)}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{formatCount(slvMan)}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(miScnd)}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{formatCount(miMan)}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(hgbScnd)}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{formatCount(hgbMan)}</td>
+                                                <td className="p-3 border text-center font-bold">{formatCount(vd)}</td>
                                                 <td className="p-3 border text-right font-bold">{formatCurrency(offering)}</td>
                                                 <td className="p-3 border text-right font-bold">{formatCurrency(redemption)}</td>
                                                 <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(financialTotal)}</td>
@@ -806,7 +811,15 @@ const ReportsPage = () => {
                                         <td className="p-3 border font-black uppercase text-xs">Full Event (Master)</td>
                                         <td className="p-3 border text-center">-</td>
                                         <td className="p-3 border text-center">-</td>
-                                        <td colSpan={9} className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
+                                        <td className="p-3 border"></td>
                                         <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
@@ -815,17 +828,17 @@ const ReportsPage = () => {
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedAttendanceOf(s.session_id), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualAttendanceOf(s.session_id), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.FT), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.FT), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.SLV), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.SLV), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.MI), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.MI), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.HGB), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.HGB), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryScannedAttendanceOf(s.session_id), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryManualAttendanceOf(s.session_id), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.FT), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.FT), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.SLV), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.SLV), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.MI), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.MI), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.HGB), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.HGB), 0))}</td>
+                                        <td className="p-3 border text-center">{formatCount(summarySessionsList.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0))}</td>
                                         <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right bg-yellow-400 text-blue-900 print-gold">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
