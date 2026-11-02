@@ -58,7 +58,11 @@ const ReportsPage = () => {
     const { data: ministryData } = useQuery({
         queryKey: ['ministry-export', activeEventId],
         queryFn: () => db.getMinistryDataForExport(activeEventId),
-        enabled: !!activeEventId,
+        // v1.89: this is the heaviest payload in the app (every session response
+        // plus manual totals). Only the two tabs that render it should trigger
+        // the fetch — sparse tabs (Attendance List, matrices, pledges) no longer
+        // pull it on open.
+        enabled: !!activeEventId && (activeTab === 'sessionsSummary' || activeTab === 'ministryReport'),
     });
 
     const reportData = useMemo(() => {

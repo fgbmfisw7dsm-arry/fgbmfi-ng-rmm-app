@@ -1315,53 +1315,112 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_page_size INTEGER DEFAULT 50,
   p_search TEXT DEFAULT NULL,
   p_district TEXT DEFAULT NULL,
-  p_event_id UUID DEFAULT NULL
+  p_region TEXT DEFAULT NULL,
+  p_event_id UUID DEFAULT NULL,
+  p_registration_source TEXT DEFAULT NULL,
+  p_reg_type TEXT DEFAULT NULL
 ) RETURNS JSON
-LANGUAGE plpgsql SECURITY DEFINER
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, extensions
 AS $func$
 DECLARE
   total_count BIGINT;
   results JSON;
   offset_val INTEGER;
+  v_q TEXT;
+  v_tokens TEXT[];
 BEGIN
   offset_val := (p_page - 1) * p_page_size;
+  v_q := lower(btrim(coalesce(p_search, '')));
+  v_tokens := array_remove(regexp_split_to_array(v_q, '\s+'), '');
 
   SELECT COUNT(*) INTO total_count FROM delegates
   WHERE (
-    p_search IS NULL OR
-    first_name ILIKE '%' || p_search || '%' OR
-    last_name ILIKE '%' || p_search || '%' OR
-    phone ILIKE '%' || p_search || '%' OR
-    email ILIKE '%' || p_search || '%' OR
-    chapter ILIKE '%' || p_search || '%'
+    p_search IS NULL OR btrim(p_search) = '' OR
+    NOT EXISTS (
+      SELECT 1 FROM unnest(v_tokens) AS tok
+      WHERE (' ' || coalesce(name_search, '') || ' ') NOT LIKE '% ' || search_escape(tok) || '%'
+    ) OR
+    lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) LIKE search_escape(v_q) || '%' OR
+    lower(coalesce(last_name, '') || ' ' || coalesce(first_name, '')) LIKE search_escape(v_q) || '%' OR
+    (length(v_q) >= 3 AND normalize_phone_sql(p_search) = phone_normalized) OR
+    (position('@' in v_q) > 0 AND lower(coalesce(email, '')) = v_q) OR
+    lower(coalesce(external_id, '')) = v_q OR
+    lower(delegate_id::text) = v_q OR
+    (length(v_q) >= 6 AND lower(coalesce(external_id, '')) LIKE '%' || search_escape(v_q) || '%') OR
+    (v_q ~ '^[0-9]+$' AND length(v_q) >= 4 AND (coalesce(phone_normalized, '') LIKE '%' || search_escape(v_q) || '%' OR coalesce(phone, '') LIKE '%' || search_escape(v_q) || '%'))
   )
   AND (
     p_district IS NULL OR
     UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = UPPER(regexp_replace(TRIM(p_district), '\s+', ' ', 'g'))
   )
   AND (
+    p_region IS NULL OR
+    UPPER(TRIM(district)) LIKE UPPER(regexp_replace(TRIM(p_region), '\s+', ' ', 'g')) || '%'
+  )
+  AND (
     p_event_id IS NULL OR
     event_id = p_event_id
+  )
+  AND (
+    p_registration_source IS NULL
+    OR p_registration_source NOT IN ('portal', 'manual')
+    OR (p_registration_source = 'portal'  AND registration_source = 'portal')
+    OR (p_registration_source = 'manual'  AND COALESCE(registration_source, 'import') <> 'portal')
+  )
+  AND (
+    p_reg_type IS NULL
+    OR NOT (p_reg_type IN ('manual', 'portal', 'web', 'ems'))
+    OR (p_reg_type = 'portal' AND reg_type = 'portal')
+    OR (p_reg_type = 'web'    AND reg_type = 'web')
+    OR (p_reg_type = 'ems'    AND reg_type = 'ems')
+    OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
   );
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
   FROM (
     SELECT * FROM delegates
     WHERE (
-      p_search IS NULL OR
-      first_name ILIKE '%' || p_search || '%' OR
-      last_name ILIKE '%' || p_search || '%' OR
-      phone ILIKE '%' || p_search || '%' OR
-      email ILIKE '%' || p_search || '%' OR
-      chapter ILIKE '%' || p_search || '%'
+      p_search IS NULL OR btrim(p_search) = '' OR
+      NOT EXISTS (
+        SELECT 1 FROM unnest(v_tokens) AS tok
+        WHERE (' ' || coalesce(name_search, '') || ' ') NOT LIKE '% ' || search_escape(tok) || '%'
+      ) OR
+      lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) LIKE search_escape(v_q) || '%' OR
+      lower(coalesce(last_name, '') || ' ' || coalesce(first_name, '')) LIKE search_escape(v_q) || '%' OR
+      (length(v_q) >= 3 AND normalize_phone_sql(p_search) = phone_normalized) OR
+      (position('@' in v_q) > 0 AND lower(coalesce(email, '')) = v_q) OR
+      lower(coalesce(external_id, '')) = v_q OR
+      lower(delegate_id::text) = v_q OR
+      (length(v_q) >= 6 AND lower(coalesce(external_id, '')) LIKE '%' || search_escape(v_q) || '%') OR
+      (v_q ~ '^[0-9]+$' AND length(v_q) >= 4 AND (coalesce(phone_normalized, '') LIKE '%' || search_escape(v_q) || '%' OR coalesce(phone, '') LIKE '%' || search_escape(v_q) || '%'))
     )
     AND (
       p_district IS NULL OR
       UPPER(regexp_replace(TRIM(district), '\s+', ' ', 'g')) = UPPER(regexp_replace(TRIM(p_district), '\s+', ' ', 'g'))
     )
     AND (
+      p_region IS NULL OR
+      UPPER(TRIM(district)) LIKE UPPER(regexp_replace(TRIM(p_region), '\s+', ' ', 'g')) || '%'
+    )
+    AND (
       p_event_id IS NULL OR
       event_id = p_event_id
+    )
+    AND (
+      p_registration_source IS NULL
+      OR p_registration_source NOT IN ('portal', 'manual')
+      OR (p_registration_source = 'portal'  AND registration_source = 'portal')
+      OR (p_registration_source = 'manual'  AND COALESCE(registration_source, 'import') <> 'portal')
+    )
+    AND (
+      p_reg_type IS NULL
+      OR NOT (p_reg_type IN ('manual', 'portal', 'web', 'ems'))
+      OR (p_reg_type = 'portal' AND reg_type = 'portal')
+      OR (p_reg_type = 'web'    AND reg_type = 'web')
+      OR (p_reg_type = 'ems'    AND reg_type = 'ems')
+      OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
     )
     ORDER BY chapter, last_name, first_name
     LIMIT p_page_size
@@ -1379,54 +1438,12 @@ END;
 $func$;
 
 -- Export data RPC (replaces client-side getAllDataForExport)
-CREATE OR REPLACE FUNCTION get_event_export_data(p_event_id UUID)
-RETURNS JSON
-LANGUAGE plpgsql SECURITY DEFINER
-AS $func$
-DECLARE
-  delegates_json JSON;
-  checkins_json JSON;
-  financials_json JSON;
-  pledges_json JSON;
-BEGIN
-  SELECT COALESCE(json_agg(d), '[]'::JSON) INTO delegates_json
-  FROM (
-    SELECT delegate_id, title, first_name, last_name, district, chapter, phone, email, rank, office, room_number, created_at
-    FROM delegates
-    ORDER BY chapter, last_name, first_name
-  ) d;
-
-  SELECT COALESCE(json_agg(c), '[]'::JSON) INTO checkins_json
-  FROM (
-    SELECT c.*, d.first_name || ' ' || d.last_name AS delegate_name, d.district, d.rank, d.office
-    FROM checkins c
-    JOIN delegates d ON c.delegate_id = d.delegate_id
-    WHERE c.event_id = p_event_id
-    ORDER BY c.checked_in_at
-  ) c;
-
-  SELECT COALESCE(json_agg(f), '[]'::JSON) INTO financials_json
-  FROM (
-    SELECT * FROM financial_entries
-    WHERE event_id = p_event_id
-    ORDER BY created_at
-  ) f;
-
-  SELECT COALESCE(json_agg(p), '[]'::JSON) INTO pledges_json
-  FROM (
-    SELECT * FROM pledges
-    WHERE event_id = p_event_id
-    ORDER BY created_at
-  ) p;
-
-  RETURN json_build_object(
-    'delegates', delegates_json,
-    'checkins', checkins_json,
-    'financials', financials_json,
-    'pledges', pledges_json
-  );
-END;
-$func$;
+-- v1.89b: get_event_export_data(uuid) is REMOVED.
+-- It was SECURITY DEFINER with no caller scope AND no event_id filter on its
+-- delegates sub-select, so it returned every delegate across every event.
+-- The client (getAllDataForExport) falls back to a paginated, strictly
+-- event-scoped fetch, which is the path actually running in production.
+-- Do not re-introduce this function.
 
 -- Bulk import delegates with per-event dedup merge (insert + gap-fill update)
 -- Sprint 21: matches on canonical identity (event, title_key, name_first_key,
@@ -1925,7 +1942,10 @@ DROP POLICY IF EXISTS "authenticated_all" ON chapters;
 DROP POLICY IF EXISTS "chapters_insert" ON chapters;
 DROP POLICY IF EXISTS "chapters_update" ON chapters;
 DROP POLICY IF EXISTS "chapters_delete" ON chapters;
-CREATE POLICY "chapters_select" ON chapters FOR SELECT TO public USING (true);
+DROP POLICY IF EXISTS "chapters_select" ON chapters;
+-- v1.89f: narrowed from `public` to `authenticated` (anon could read the
+-- district/chapter inventory with no login).
+CREATE POLICY "chapters_select" ON chapters FOR SELECT TO authenticated USING (true);
 CREATE POLICY "chapters_admin_insert" ON chapters FOR INSERT TO authenticated WITH CHECK (is_admin_user());
 CREATE POLICY "chapters_admin_update" ON chapters FOR UPDATE TO authenticated USING (is_admin_user()) WITH CHECK (is_admin_user());
 CREATE POLICY "chapters_admin_delete" ON chapters FOR DELETE TO authenticated USING (is_admin_user());
@@ -2186,6 +2206,49 @@ USING (is_admin_user() OR is_event_admin_user()
 WITH CHECK (is_admin_user() OR is_event_admin_user()
   OR ((district ~~* COALESCE(current_user_district(), ''::text)) AND (current_user_district() IS NOT NULL)));
 CREATE POLICY "delegates_admin_delete" ON delegates FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12g.2 delegates protected-column guard (v1.89e / S5)
+--      delegates_update_scoped scopes UPDATE by district only, never by column,
+--      so a district-scoped account could rewrite qr_hash / payment_amount /
+--      district / reg_type / delegate_type. This BEFORE UPDATE trigger rejects
+--      those changes unless the caller is admin or event_admin. auth.uid() IS
+--      NULL (service_role / SQL editor / scheduled jobs) is treated as trusted.
+CREATE OR REPLACE FUNCTION public.delegates_guard_critical_columns()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $guard$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF is_admin_user() OR is_event_admin_user() THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.qr_hash             IS DISTINCT FROM OLD.qr_hash
+  OR NEW.external_id         IS DISTINCT FROM OLD.external_id
+  OR NEW.payment_amount      IS DISTINCT FROM OLD.payment_amount
+  OR NEW.payment_reference   IS DISTINCT FROM OLD.payment_reference
+  OR NEW.delegate_type       IS DISTINCT FROM OLD.delegate_type
+  OR NEW.reg_type            IS DISTINCT FROM OLD.reg_type
+  OR NEW.registration_source IS DISTINCT FROM OLD.registration_source
+  OR NEW.event_id            IS DISTINCT FROM OLD.event_id
+  OR NEW.district            IS DISTINCT FROM OLD.district
+  THEN
+    RAISE EXCEPTION
+      'PROTECTED_FIELDS: identity, routing, payment or delegate-type fields can only be changed by an administrator.'
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$guard$;
+
+DROP TRIGGER IF EXISTS trg_delegates_guard_critical ON public.delegates;
+CREATE TRIGGER trg_delegates_guard_critical
+BEFORE UPDATE ON public.delegates
+FOR EACH ROW
+EXECUTE FUNCTION public.delegates_guard_critical_columns();
 
 -- 12h. deleted_users: RLS enabled; select own + admin all (hardening H4)
 ALTER TABLE deleted_users ENABLE ROW LEVEL SECURITY;

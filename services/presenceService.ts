@@ -12,7 +12,13 @@ import type { User, PresenceSession } from '../types';
 const DEVICE_ID_KEY = 'fgbmfi_device_id';
 const DEVICE_LABEL_KEY = 'fgbmfi_device_label';
 const CHANNEL_NAME = 'online-users';
-const HEARTBEAT_MS = 45_000;
+// v1.89: 5 min (was 45 s). Presence syncs are broadcast to every subscriber, so
+// re-tracking costs O(N) messages per client — at 100 devices a 45 s heartbeat
+// is roughly N^2/45s and exhausts the monthly Realtime message quota. A 5 min
+// cadence keeps the monitor useful while cutting the fan-out ~7x. A track also
+// fires immediately when the tab regains visibility, so the list never looks
+// stale for longer than that in practice.
+const HEARTBEAT_MS = 5 * 60_000;
 
 function randomId(): string {
   try {
@@ -84,6 +90,7 @@ const EMPTY: PresenceSession[] = [];
 
 let channel: ReturnType<typeof supabase.channel> | null = null;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
+let visibilityHandler: (() => void) | null = null;
 let sessions: PresenceSession[] = EMPTY;
 let currentUserId: string | null = null;
 let currentPayloadBase: Omit<Payload, 'joined_at' | 'last_seen'> | null = null;
@@ -151,8 +158,9 @@ export function startPresence(user: User, activeEventId?: string): void {
   // Presence is a monitoring nicety — it must NEVER be able to crash app boot
   // (e.g. a Realtime/session_kicks hiccup on the very first load after deploy).
   try {
-    if (channel && currentUserId === user.id) {
-      // Same user — just refresh event context + heartbeat payload.
+    const deviceId = getDeviceId();
+    if (channel && currentUserId === user.id && currentPayloadBase?.device_id === deviceId) {
+      // Same user + same device — just refresh event context + heartbeat payload.
       currentPayloadBase = { ...(currentPayloadBase as Omit<Payload, 'joined_at' | 'last_seen'>), active_event_id: activeEventId || undefined };
       channel.track(trackMeta());
       return;
@@ -168,12 +176,16 @@ export function startPresence(user: User, activeEventId?: string): void {
       district: user.district,
       region: user.region,
       active_event_id: activeEventId || undefined,
-      device_id: getDeviceId(),
+      device_id: deviceId,
       device_label: getDeviceLabel(),
     };
 
+    // v1.89 — presence key MUST be per device, not per account. The app
+    // deliberately supports one login across many devices; keying on user.id
+    // collapsed every device into a single presence entry (the monitor showed
+    // "1 device / N tabs" and per-device Disconnect was unusable).
     channel = supabase.channel(CHANNEL_NAME, {
-      config: { presence: { key: user.id } },
+      config: { presence: { key: `${user.id}::${deviceId}` } },
     });
 
     channel.on('presence', { event: 'sync' }, () => {
@@ -193,11 +205,24 @@ export function startPresence(user: User, activeEventId?: string): void {
       }
     });
 
-    heartbeat = setInterval(() => {
+    const beat = () => {
       try {
-        if (channel && navigator.onLine !== false) channel.track(trackMeta());
+        if (!channel || navigator.onLine === false) return;
+        // Skip while backgrounded: an idle tab does not need to keep its
+        // presence fresh, and each track fans out to every subscriber.
+        if (typeof document !== 'undefined' && document.hidden) return;
+        channel.track(trackMeta());
       } catch { /* ignore */ }
-    }, HEARTBEAT_MS);
+    };
+
+    heartbeat = setInterval(beat, HEARTBEAT_MS);
+
+    // Re-track the moment the tab becomes visible again so the monitor does not
+    // wait a full heartbeat interval to reflect the device.
+    if (typeof document !== 'undefined') {
+      visibilityHandler = () => { if (!document.hidden) beat(); };
+      document.addEventListener('visibilitychange', visibilityHandler);
+    }
   } catch (e) {
     console.warn('[presence] start failed (non-fatal):', e);
   }
@@ -206,6 +231,10 @@ export function startPresence(user: User, activeEventId?: string): void {
 export function stopPresence(): void {
   try {
     if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+    if (visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      visibilityHandler = null;
+    }
     if (channel) {
       try { channel.untrack(); } catch { /* ignore */ }
       try { supabase.removeChannel(channel); } catch { /* ignore */ }
