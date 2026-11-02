@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.89 (Pre-event concurrency + security remediation: RPC scope hardening, storage policy gating, search_path, delegate column guard, presence/roster/Reports load fixes — see §85)
+- **Current Version:** 1.91 (Sessions Report Individual-Records "Type" column fix — `get_ministry_export_data` now projects `d.delegate_type`; see §87)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1512,3 +1512,16 @@ Check-in hot path is single-RTT (`check_in_by_code`, `record_delegate_and_checki
 - **`--self-test` (`npm run loadtest:selftest`)** validates the harness with no network: feeds synthetic samples through the same aggregation/report/gate code, asserts percentile ordering, asserts the gates actually reject a deliberately bad sample, and asserts the duplicate detector catches a violation.
 - **Tooling:** `tsx` added as a devDependency; `npm run loadtest` / `npm run loadtest:selftest`; `.env.example` documents every `LOAD_*` variable.
 - **Note on `npm audit`:** 3 advisories are now reported (`vite`, `source-map-js`, `postcss-selector-parser`). All three are **build/dev-time only** and none are reachable in the deployed static bundle - they were surfaced by newly published advisories, not introduced by `tsx`. Do NOT `npm audit fix --force` (major bumps would break the Vite build); schedule a dev-dependency bump after the event.
+
+## 87. Sessions Report — Individual Records "Type" column was blank (v1.91)
+
+- **Symptom:** in Report Center → Sessions Report, the per-alter-call "Individual Records" tables showed `-` in the **Type** column for every row (and the CSV export wrote `-` too).
+- **Root cause:** the cell reads `r.delegate_type`, but `get_ministry_export_data`'s `responses` projection never selected it - it projected `d.first_name, d.last_name, d.district, d.chapter, d.phone, d.email, d.rank, d.office` only. `delegate_type` was therefore `undefined` on every row. `(r as any).delegate_type` had been masking the missing field from the type checker. **Not a v1.88 regression** - v1.88 only added `email` to the same projection; `type` has never been projected.
+- **Why only this report:** the Attendance List / Attendance Matrix read `attendedDelegates` from `get_report_aggregates`, which *does* select `d.delegate_type`. Only the ministry export payload was missing it.
+- **Fix (mirrors the v1.88 email fix):**
+  - `supabase_migration_v1.91_ministry_export_delegate_type.sql` — `CREATE OR REPLACE get_ministry_export_data` with `d.delegate_type` added to the `responses` projection. v1.88's `d.email` retained, pass-4 caller scope + `__NONE__` fail-closed + all five JSON keys unchanged, grants re-asserted, `NOTIFY pgrst`.
+  - `services/supabaseService.ts` — the pre-migration fallback now selects/maps `delegates(... delegate_type)` too.
+  - `pages/ReportsPage.tsx` — `delegateEmailMap` generalised to `delegateMetaMap` (email + delegate_type keyed by `delegate_id`) feeding `emailOf()` and the new `delegateTypeOf()`. Both the Individual Records cell and the CSV `Type` field now use `delegateTypeOf(r)`, so values render even before the migration is applied (for delegates with an arrival record).
+  - `types.ts` additive exception: `SessionResponse` += `email?` and `delegate_type?` (both are returned by the RPC; `email` had been missing since v1.88).
+  - `supabase_schema.sql` reconciled to the same projection.
+- **Deploy:** run `v1.91` first, then the frontend (frontend-first is safe via the fallback map). No RLS, table or data changes. `npm run typecheck` -> 0 errors; `npm run build` passes.

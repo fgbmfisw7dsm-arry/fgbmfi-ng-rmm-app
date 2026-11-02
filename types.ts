@@ -278,8 +278,10 @@ export interface SessionResponse {
   district?: string;
   chapter?: string;
   phone?: string;
+  email?: string;
   rank?: string;
   office?: string;
+  delegate_type?: string;
   delegate_name?: string;
   session_title?: string;
 }

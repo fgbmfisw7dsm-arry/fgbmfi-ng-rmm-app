@@ -128,15 +128,16 @@ const ReportsPage = () => {
         reportData?.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0;
     const summaryManualAttendanceOf = (sid: string): number =>
         attManualMap.get(sid) || 0;
-    const delegateEmailMap = useMemo(
-        () => new Map<string, string>(
-            (reportData?.attendedDelegates || [])
-                .filter((d: any) => d.delegate_id && d.email)
-                .map((d: any) => [d.delegate_id as string, d.email as string])
-        ),
-        [reportData]
-    );
-    const emailOf = (r: any): string => r.email || delegateEmailMap.get(r.delegate_id) || '-';
+    const delegateMetaMap = useMemo(() => {
+        const map = new Map<string, { email?: string; delegate_type?: string }>();
+        (reportData?.attendedDelegates || []).forEach((d: any) => {
+            if (!d.delegate_id) return;
+            map.set(d.delegate_id as string, { email: d.email, delegate_type: d.delegate_type });
+        });
+        return map;
+    }, [reportData]);
+    const emailOf = (r: any): string => r.email || delegateMetaMap.get(r.delegate_id)?.email || '-';
+    const delegateTypeOf = (r: any): string => r.delegate_type || delegateMetaMap.get(r.delegate_id)?.delegate_type || '-';
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
@@ -353,7 +354,7 @@ const ReportsPage = () => {
                             Email: emailOf(r),
                             Rank: r.rank || '-',
                             Office: r.office || '-',
-                            Type: r.delegate_type || '-',
+                            Type: delegateTypeOf(r),
                         });
                     });
                 });
@@ -500,7 +501,7 @@ const ReportsPage = () => {
                                                         <td className="border p-1.5 font-mono text-[8px] break-all max-w-[140px]">{emailOf(r)}</td>
                                                         {showRank && <td className="border p-1.5 uppercase">{r.rank || '-'}</td>}
                                                         {showOffice && <td className="border p-1.5 uppercase">{r.office || '-'}</td>}
-                                                        {showDelegateType && <td className="border p-1.5 uppercase">{(r as any).delegate_type || '-'}</td>}
+                                                        {showDelegateType && <td className="border p-1.5 uppercase">{delegateTypeOf(r)}</td>}
                                                     </tr>
                                                 ))}
                                             </tbody>
