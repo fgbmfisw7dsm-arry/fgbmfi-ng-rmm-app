@@ -1245,7 +1245,7 @@ BEGIN
       SELECT COALESCE(json_agg(r), '[]'::JSON) INTO responses_json
       FROM (
           SELECT sr.*,
-              d.first_name, d.last_name, d.district, d.chapter, d.phone, d.rank, d.office,
+              d.first_name, d.last_name, d.district, d.chapter, d.phone, d.email, d.rank, d.office,
               (d.first_name || ' ' || d.last_name) AS delegate_name,
               s.title AS session_title
           FROM session_responses sr

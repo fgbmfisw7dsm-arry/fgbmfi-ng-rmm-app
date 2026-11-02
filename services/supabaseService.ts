@@ -3704,7 +3704,7 @@ export const db = {
 
         if (!rpcResponses.length) {
             const { data: responses } = await supabase.from('session_responses')
-                .select('*, delegates(first_name, last_name, district, chapter, phone, rank, office)')
+                .select('*, delegates(first_name, last_name, district, chapter, phone, email, rank, office)')
                 .eq('event_id', eventId).in('session_id', sessionIds).order('recorded_at', { ascending: false });
             const sessionMap = new Map((sessions || []).map(s => [s.session_id, s.title]));
             rpcResponses = (responses || []).map((r: any) => ({
@@ -3714,6 +3714,7 @@ export const db = {
                 district: r.delegates?.district,
                 chapter: r.delegates?.chapter,
                 phone: r.delegates?.phone,
+                email: r.delegates?.email,
                 rank: r.delegates?.rank,
                 office: r.delegates?.office,
                 delegate_name: r.delegates ? `${r.delegates.first_name} ${r.delegates.last_name}` : '',

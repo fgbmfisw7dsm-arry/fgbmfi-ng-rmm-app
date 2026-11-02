@@ -20,7 +20,6 @@ const ReportsPage = () => {
     const [activeTab, setActiveTab] = useState<'attendanceList' | 'attendanceMatrix' | 'sessionsSummary' | 'financialMatrix' | 'pledgeSummary' | 'pledgeList' | 'ministryReport'>('attendanceList');
     const [selectedSessionId, setSelectedSessionId] = useState<string>('');
     const [alterCallFilter, setAlterCallFilter] = useState<'' | SessionResponseType>('');
-    const [summaryBasis, setSummaryBasis] = useState<'scanned' | 'manual'>('scanned');
     const reportRef = useRef<HTMLDivElement>(null);
 
     const norm = (v?: string) => (v || '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -108,12 +107,19 @@ const ReportsPage = () => {
     const summaryScannedOf = (sid: string, type: SessionResponseType): number =>
         (ministryData?.responses || [])
             .filter((r: any) => r.session_id === sid && r.response_type === type).length;
-    const summaryAttendanceOf = (sid: string): number =>
-        summaryBasis === 'manual'
-            ? (attManualMap.get(sid) || 0)
-            : (reportData?.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0);
-    const summaryCountOf = (sid: string, type: SessionResponseType): number =>
-        summaryBasis === 'manual' ? summaryManualOf(sid, type) : summaryScannedOf(sid, type);
+    const summaryScannedAttendanceOf = (sid: string): number =>
+        reportData?.sessionAttendance.find((a: any) => a.session_id === sid)?.attendance || 0;
+    const summaryManualAttendanceOf = (sid: string): number =>
+        attManualMap.get(sid) || 0;
+    const delegateEmailMap = useMemo(
+        () => new Map<string, string>(
+            (reportData?.attendedDelegates || [])
+                .filter((d: any) => d.delegate_id && d.email)
+                .map((d: any) => [d.delegate_id as string, d.email as string])
+        ),
+        [reportData]
+    );
+    const emailOf = (r: any): string => r.email || delegateEmailMap.get(r.delegate_id) || '-';
 
     const handleExportPDF = () => { if (reportRef.current) exportToPDF(reportRef.current, `FGBMFI_Report_${activeTab}.pdf`, 'landscape', 1600); };
 
@@ -126,7 +132,7 @@ const ReportsPage = () => {
             if (showOffice) cols.push('Office');
             if (showRank) cols.push('Rank');
             if (showDelegateType) cols.push('Type');
-            cols.push('Phone', 'Date', 'Time');
+            cols.push('Phone', 'Email', 'Date', 'Time');
             const unrecognizedDists: string[] = [];
             attendedDelegates.forEach((d: any) => {
                 const dn = norm(d.district);
@@ -146,6 +152,7 @@ const ReportsPage = () => {
                         Rank: d.rank || '-',
                         Type: d.delegate_type || 'Member',
                         Phone: d.phone || '-',
+                        Email: d.email || '-',
                         Date: dt ? dt.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : '-',
                         Time: dt ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
                     });
@@ -192,7 +199,7 @@ const ReportsPage = () => {
         }
 
         if (activeTab === 'sessionsSummary') {
-            const cols = ['Session', 'Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD', 'Offering', 'Pledge Redemption', 'Financial Total'];
+            const cols = ['Session', 'ATT_SCND', 'ATT_MAN', 'FT_SCND', 'FT_MAN', 'SLV_SCND', 'SLV_MAN', 'MI_SCND', 'MI_MAN', 'HGB_SCND', 'HGB_MAN', 'VD', 'Offering', 'Pledge Redemption', 'Financial Total'];
             const vdOf = (sid: string) => (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === sid).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
             const offOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
             const redOf = (sid: string) => reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === sid).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
@@ -203,11 +210,16 @@ const ReportsPage = () => {
                 const redemption = redOf(s.session_id);
                 return {
                     Session: s.title,
-                    Attendance: summaryAttendanceOf(s.session_id),
-                    FT: summaryCountOf(s.session_id, SessionResponseType.FT),
-                    SLV: summaryCountOf(s.session_id, SessionResponseType.SLV),
-                    MI: summaryCountOf(s.session_id, SessionResponseType.MI),
-                    HGB: summaryCountOf(s.session_id, SessionResponseType.HGB),
+                    ATT_SCND: summaryScannedAttendanceOf(s.session_id),
+                    ATT_MAN: summaryManualAttendanceOf(s.session_id),
+                    FT_SCND: summaryScannedOf(s.session_id, SessionResponseType.FT),
+                    FT_MAN: summaryManualOf(s.session_id, SessionResponseType.FT),
+                    SLV_SCND: summaryScannedOf(s.session_id, SessionResponseType.SLV),
+                    SLV_MAN: summaryManualOf(s.session_id, SessionResponseType.SLV),
+                    MI_SCND: summaryScannedOf(s.session_id, SessionResponseType.MI),
+                    MI_MAN: summaryManualOf(s.session_id, SessionResponseType.MI),
+                    HGB_SCND: summaryScannedOf(s.session_id, SessionResponseType.HGB),
+                    HGB_MAN: summaryManualOf(s.session_id, SessionResponseType.HGB),
                     VD: vdOf(s.session_id),
                     Offering: offering,
                     'Pledge Redemption': redemption,
@@ -215,13 +227,13 @@ const ReportsPage = () => {
                 };
             });
             const totals: Record<string, any> = { Session: 'Totals' };
-            (['Attendance', 'FT', 'SLV', 'MI', 'HGB', 'VD'] as const).forEach(k => totals[k] = rows.reduce((s, r) => s + Number(r[k]) || 0, 0));
+            (['ATT_SCND', 'ATT_MAN', 'FT_SCND', 'FT_MAN', 'SLV_SCND', 'SLV_MAN', 'MI_SCND', 'MI_MAN', 'HGB_SCND', 'HGB_MAN', 'VD'] as const).forEach(k => totals[k] = rows.reduce((s, r) => s + (Number(r[k]) || 0), 0));
             totals['Offering'] = summarySessionsList.reduce((s, sess) => s + offOf(sess.session_id), 0) + masterOff;
             totals['Pledge Redemption'] = summarySessionsList.reduce((s, sess) => s + redOf(sess.session_id), 0) + masterRed;
             totals['Financial Total'] = totals['Offering'] + totals['Pledge Redemption'];
-            rows.push({ Session: 'Full Event (Master)', Attendance: '-', FT: '-', SLV: '-', MI: '-', HGB: '-', VD: '-', Offering: masterOff, 'Pledge Redemption': masterRed, 'Financial Total': masterOff + masterRed });
+            rows.push({ Session: 'Full Event (Master)', ATT_SCND: '-', ATT_MAN: '-', FT_SCND: '-', FT_MAN: '-', SLV_SCND: '-', SLV_MAN: '-', MI_SCND: '-', MI_MAN: '-', HGB_SCND: '-', HGB_MAN: '-', VD: '-', Offering: masterOff, 'Pledge Redemption': masterRed, 'Financial Total': masterOff + masterRed });
             rows.push(totals);
-            exportToCSV(rows, `FGBMFI_Report_sessionsSummary_${summaryBasis === 'manual' ? 'Manual' : 'Scanned'}.csv`, cols);
+            exportToCSV(rows, 'FGBMFI_Report_sessionsSummary_Scanned-Manual.csv', cols);
             return;
         }
 
@@ -301,7 +313,7 @@ const ReportsPage = () => {
         }
 
         if (activeTab === 'ministryReport') {
-            const cols = ['Session', 'Response Type', 'S/N', 'Name', 'District', 'Chapter', 'Phone'];
+            const cols = ['Session', 'Response Type', 'S/N', 'Name', 'District', 'Chapter', 'Phone', 'Email'];
             if (showRank) cols.push('Rank');
             if (showOffice) cols.push('Office');
             if (showDelegateType) cols.push('Type');
@@ -321,6 +333,7 @@ const ReportsPage = () => {
                             District: r.district || '-',
                             Chapter: r.chapter || '-',
                             Phone: r.phone || '-',
+                            Email: emailOf(r),
                             Rank: r.rank || '-',
                             Office: r.office || '-',
                             Type: r.delegate_type || '-',
@@ -453,6 +466,7 @@ const ReportsPage = () => {
                                                     <th className="border p-1.5">District</th>
                                                     <th className="border p-1.5">Chapter</th>
                                                     <th className="border p-1.5">Phone</th>
+                                                    <th className="border p-1.5">Email</th>
                                                     {showRank && <th className="border p-1.5">Rank</th>}
                                                     {showOffice && <th className="border p-1.5">Office</th>}
                                                     {showDelegateType && <th className="border p-1.5">Type</th>}
@@ -466,6 +480,7 @@ const ReportsPage = () => {
                                                         <td className="border p-1.5 font-bold uppercase">{r.district || '-'}</td>
                                                         <td className="border p-1.5 font-bold uppercase">{r.chapter || '-'}</td>
                                                         <td className="border p-1.5 font-mono">{r.phone || '-'}</td>
+                                                        <td className="border p-1.5 font-mono text-[8px] break-all max-w-[140px]">{emailOf(r)}</td>
                                                         {showRank && <td className="border p-1.5 uppercase">{r.rank || '-'}</td>}
                                                         {showOffice && <td className="border p-1.5 uppercase">{r.office || '-'}</td>}
                                                         {showDelegateType && <td className="border p-1.5 uppercase">{(r as any).delegate_type || '-'}</td>}
@@ -569,7 +584,7 @@ const ReportsPage = () => {
                             </div>
                             <table className="w-full text-[10px] text-left border-collapse border border-gray-300">
                                 <thead className="bg-gray-50 uppercase text-gray-400 font-black">
-                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Chapter</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}{showDelegateType && <th className="border p-2">Type</th>}<th className="border p-2">Phone</th><th className="border p-2 text-center">Date/Time</th></tr>
+                                    <tr><th className="border p-2 w-8">S/N</th><th className="border p-2">Name</th><th className="border p-2">Chapter</th>{showOffice && <th className="border p-2">Office</th>}{showRank && <th className="border p-2">Rank</th>}{showDelegateType && <th className="border p-2">Type</th>}<th className="border p-2">Phone</th><th className="border p-2">Email</th><th className="border p-2 text-center">Date/Time</th></tr>
                                 </thead>
                                 <tbody>
                                     {group.map((d, i) => (
@@ -581,6 +596,7 @@ const ReportsPage = () => {
                                             {showRank && <td className="border p-2 uppercase">{d.rank}</td>}
                                             {showDelegateType && <td className="border p-2 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>}
                                             <td className="border p-2 font-mono">{d.phone}</td>
+                                            <td className="border p-2 font-mono text-[9px] break-all max-w-[150px]">{d.email || '-'}</td>
                                             <td className="border p-2 text-center text-gray-400 uppercase leading-tight font-black">
                                                 {d.checked_in_at ? (
                                                     <>
@@ -682,12 +698,6 @@ const ReportsPage = () => {
                             <option value={SessionResponseType.HGB}>{RESPONSE_TYPE_LABELS[SessionResponseType.HGB]}</option>
                         </select>
                     )}
-                    {activeTab === 'sessionsSummary' && (
-                        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl" title="Columns show the selected entry basis">
-                            <button onClick={() => setSummaryBasis('scanned')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${summaryBasis === 'scanned' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}>Scanned</button>
-                            <button onClick={() => setSummaryBasis('manual')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${summaryBasis === 'manual' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}>Manual</button>
-                        </div>
-                    )}
                     <button onClick={handleExportCSV} className="px-6 py-3 bg-green-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-700 transition-colors">Export CSV</button>
                     <button onClick={handleExportPDF} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Export PDF</button>
                 </div>
@@ -712,7 +722,7 @@ const ReportsPage = () => {
                     </div>
                     {selectedSessionId && <div className="text-xs font-black text-blue-700 uppercase mt-2">Session: {sessions.find(s => s.session_id === selectedSessionId)?.title}{alterCallFilter && activeTab === 'ministryReport' ? ` (${RESPONSE_TYPE_LABELS[alterCallFilter]})` : ''}</div>}
                     {activeTab === 'sessionsSummary' && (
-                        <div className="text-xs font-black text-blue-700 uppercase mt-2">Basis: {summaryBasis === 'manual' ? 'Manual' : 'Scanned'}</div>
+                        <div className="text-xs font-black text-blue-700 uppercase mt-2">Basis: Scanned / Manual</div>
                     )}
                 </div>
                 
@@ -730,16 +740,44 @@ const ReportsPage = () => {
                     {activeTab === 'sessionsSummary' && (
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-sm border min-w-max">
-                                <thead className="bg-slate-100 uppercase font-black text-[10px]">
-                                    <tr><th className="p-3 border text-left">Session</th><th className="p-3 border text-center">Attendance</th><th className="p-3 border text-center">FT</th><th className="p-3 border text-center">SLV</th><th className="p-3 border text-center">MI</th><th className="p-3 border text-center">HGB</th><th className="p-3 border text-center">VD</th><th className="p-3 border text-right">Offering</th><th className="p-3 border text-right">Pledge Redemption</th><th className="p-3 border text-right bg-blue-50">Financial Total</th></tr>
+                                <thead className="uppercase font-black text-[10px]">
+                                    <tr className="bg-slate-200 text-slate-700">
+                                        <th rowSpan={2} className="p-3 border text-left align-bottom">Session</th>
+                                        <th colSpan={2} className="p-2 border text-center">Attendance</th>
+                                        <th colSpan={2} className="p-2 border text-center">FT</th>
+                                        <th colSpan={2} className="p-2 border text-center">SLV</th>
+                                        <th colSpan={2} className="p-2 border text-center">MI</th>
+                                        <th colSpan={2} className="p-2 border text-center">HGB</th>
+                                        <th rowSpan={2} className="p-3 border text-center align-bottom">VD</th>
+                                        <th rowSpan={2} className="p-3 border text-right align-bottom">Offering</th>
+                                        <th rowSpan={2} className="p-3 border text-right align-bottom">Pledge Redemption</th>
+                                        <th rowSpan={2} className="p-3 border text-right align-bottom bg-blue-50">Financial Total</th>
+                                    </tr>
+                                    <tr className="bg-slate-100 text-slate-500">
+                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
+                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
+                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
+                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
+                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                        <th className="p-1.5 border text-center text-[9px]">SCND</th>
+                                        <th className="p-1.5 border text-center text-[9px] bg-blue-50 text-blue-900">MAN</th>
+                                    </tr>
                                 </thead>
                                 <tbody className="divide-y">
                                     {summarySessionsList.map(s => {
-                                        const att = summaryAttendanceOf(s.session_id);
-                                        const ft = summaryCountOf(s.session_id, SessionResponseType.FT);
-                                        const slv = summaryCountOf(s.session_id, SessionResponseType.SLV);
-                                        const mi = summaryCountOf(s.session_id, SessionResponseType.MI);
-                                        const hgb = summaryCountOf(s.session_id, SessionResponseType.HGB);
+                                        const attScnd = summaryScannedAttendanceOf(s.session_id);
+                                        const attMan = summaryManualAttendanceOf(s.session_id);
+                                        const ftScnd = summaryScannedOf(s.session_id, SessionResponseType.FT);
+                                        const ftMan = summaryManualOf(s.session_id, SessionResponseType.FT);
+                                        const slvScnd = summaryScannedOf(s.session_id, SessionResponseType.SLV);
+                                        const slvMan = summaryManualOf(s.session_id, SessionResponseType.SLV);
+                                        const miScnd = summaryScannedOf(s.session_id, SessionResponseType.MI);
+                                        const miMan = summaryManualOf(s.session_id, SessionResponseType.MI);
+                                        const hgbScnd = summaryScannedOf(s.session_id, SessionResponseType.HGB);
+                                        const hgbMan = summaryManualOf(s.session_id, SessionResponseType.HGB);
                                         const vd = (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((sum: number, v: any) => sum + (Number(v.total_distributed) || 0), 0);
                                         const offering = reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
                                         const redemption = reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((sum: number, f: any) => sum + (Number(f.amount) || 0), 0);
@@ -747,11 +785,16 @@ const ReportsPage = () => {
                                         return (
                                             <tr key={s.session_id} className="hover:bg-gray-50 border-b">
                                                 <td className="p-3 border font-black uppercase text-xs">{s.title}</td>
-                                                <td className="p-3 border text-center font-bold">{att}</td>
-                                                <td className="p-3 border text-center font-bold">{ft}</td>
-                                                <td className="p-3 border text-center font-bold">{slv}</td>
-                                                <td className="p-3 border text-center font-bold">{mi}</td>
-                                                <td className="p-3 border text-center font-bold">{hgb}</td>
+                                                <td className="p-3 border text-center font-bold">{attScnd}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{attMan}</td>
+                                                <td className="p-3 border text-center font-bold">{ftScnd}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{ftMan}</td>
+                                                <td className="p-3 border text-center font-bold">{slvScnd}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{slvMan}</td>
+                                                <td className="p-3 border text-center font-bold">{miScnd}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{miMan}</td>
+                                                <td className="p-3 border text-center font-bold">{hgbScnd}</td>
+                                                <td className="p-3 border text-center font-bold bg-blue-50 text-blue-900">{hgbMan}</td>
                                                 <td className="p-3 border text-center font-bold">{vd}</td>
                                                 <td className="p-3 border text-right font-bold">{formatCurrency(offering)}</td>
                                                 <td className="p-3 border text-right font-bold">{formatCurrency(redemption)}</td>
@@ -762,7 +805,8 @@ const ReportsPage = () => {
                                     <tr className="bg-yellow-50 font-black">
                                         <td className="p-3 border font-black uppercase text-xs">Full Event (Master)</td>
                                         <td className="p-3 border text-center">-</td>
-                                        <td colSpan={5} className="p-3 border"></td>
+                                        <td className="p-3 border text-center">-</td>
+                                        <td colSpan={9} className="p-3 border"></td>
                                         <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right font-bold">{formatCurrency(reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right font-black bg-blue-50">{formatCurrency(reportData.financials.filter((f: any) => (f.type === FinancialType.OFFERING || f.type === FinancialType.PLEDGE_REDEMPTION) && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
@@ -771,11 +815,16 @@ const ReportsPage = () => {
                                 <tfoot>
                                     <tr className="bg-blue-900 text-white font-black" style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}>
                                         <td className="p-3 border uppercase">Totals</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryAttendanceOf(s.session_id), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.FT), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.SLV), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.MI), 0)}</td>
-                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryCountOf(s.session_id, SessionResponseType.HGB), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedAttendanceOf(s.session_id), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualAttendanceOf(s.session_id), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.FT), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.FT), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.SLV), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.SLV), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.MI), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.MI), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryScannedOf(s.session_id, SessionResponseType.HGB), 0)}</td>
+                                        <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + summaryManualOf(s.session_id, SessionResponseType.HGB), 0)}</td>
                                         <td className="p-3 border text-center">{summarySessionsList.reduce((sum, s) => sum + (ministryData?.voiceDistribution || []).filter((v: any) => v.session_id === s.session_id).reduce((s2: number, v: any) => s2 + (Number(v.total_distributed) || 0), 0), 0)}</td>
                                         <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.OFFERING && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
                                         <td className="p-3 border text-right">{formatCurrency(summarySessionsList.reduce((sum, s) => sum + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && f.session_id === s.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0), 0) + reportData.financials.filter((f: any) => f.type === FinancialType.PLEDGE_REDEMPTION && !f.session_id).reduce((s2: number, f: any) => s2 + (Number(f.amount) || 0), 0))}</td>
