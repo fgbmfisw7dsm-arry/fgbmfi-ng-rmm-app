@@ -1991,7 +1991,7 @@ export const db = {
 
     finalizeImportBatch: async (
         batchId: string,
-        counts: { row_count?: number; inserted: number; updated: number; skipped: number; badgeReset: number }
+        counts: { row_count?: number; inserted: number; updated: number; skipped: number; badgeReset: number; stamped?: number }
     ): Promise<void> => {
         if (!batchId) return;
         const { error } = await supabase
@@ -2002,6 +2002,7 @@ export const db = {
                 updated: counts.updated,
                 skipped: counts.skipped,
                 badge_reset: counts.badgeReset,
+                ...(counts.stamped !== undefined ? { stamped: counts.stamped } : {}),
             })
             .eq('batch_id', batchId);
         if (error) console.error('[finalizeImportBatch] update failed:', error);
@@ -2025,7 +2026,7 @@ export const db = {
         regType: RegType = 'manual',
         opts?: { importBatchId?: string; resetBadge?: ImportBadgeReset },
         onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void
-    ): Promise<{ inserted: number; updated: number; skipped: number; stamped: number; badgeReset: number }> => {
+    ): Promise<{ inserted: number; updated: number; skipped: number; junk: number; stamped: number; badgeReset: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = splitCsvRecords(csv).map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
@@ -2038,6 +2039,7 @@ export const db = {
         let inserted = 0;
         let updated = 0;
         let skipped = 0;
+        let junk = 0;
         let stamped = 0;
         let badgeReset = 0;
         const resetBadge: ImportBadgeReset = opts?.resetBadge || 'none';
@@ -2078,6 +2080,7 @@ export const db = {
                 inserted += data?.inserted || 0;
                 updated += data?.updated || 0;
                 skipped += data?.skipped || 0;
+                junk += data?.junk || 0;
                 stamped += data?.stamped || 0;
                 badgeReset += data?.badgeReset || 0;
                 handled = true;
@@ -2174,7 +2177,7 @@ export const db = {
             if (onProgress) onProgress(inserted, updated, skipped, lines.length);
         }
 
-        return { inserted, updated, skipped, stamped, badgeReset };
+        return { inserted, updated, skipped, junk, stamped, badgeReset };
     },
 
     reconcileDistrictPortal: async (

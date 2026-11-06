@@ -411,7 +411,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">IMPORT BATCH — EXACT RE-UPLOAD COHORT</span>
-            Choose an <strong>Import Batch</strong> to restrict the run to the delegates from one CSV upload (label · date · row count). Combined with <strong>Badge Not Printed</strong> this is the reprint cohort; combined with <strong>All Statuses</strong> it reprints the whole upload without clearing anyone's printed stamp. Re-uploading a file that did not change any data still creates a batch and links its rows, so you can always retrieve and reprint that set — no date guessing required.
+            Choose an <strong>Import Batch</strong> to restrict the run to the delegates from one CSV upload (label · date · delegates · rows). Combined with <strong>Badge Not Printed</strong> this is the reprint cohort; combined with <strong>All Statuses</strong> it reprints the whole upload without clearing anyone's printed stamp. Re-uploading a file that did not change any data still creates a batch and links its rows, so you can always retrieve and reprint that set — no date guessing required. When a batch is selected the page also shows the batch's own cohort (<em>18 delegates · 17 not printed · 1 already printed</em>); if other filters are hiding any of them, a warning appears with <strong>Clear filters (keep batch)</strong>.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">RESETTING THE BADGE STAMP ON IMPORT</span>
@@ -533,7 +533,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">IMPORT BATCH (EXACT RE-UPLOAD COHORT)</span>
-            Every bulk CSV upload is recorded as an <strong>import batch</strong> and every row it inserts or matches is stamped with it. Pick a batch in the <strong>Import Batch</strong> dropdown to list exactly that upload — including rows the merge reported as "already complete" and therefore left untouched. This is the reliable way to find a re-uploaded set (the date range cannot tell two uploads on the same day apart). <strong>Repair Imported Names</strong> and <strong>Reconcile District Portal CSV</strong> also create batches (labelled <em>Repair: …</em> / <em>Reconcile: …</em>), so their cohorts are retrievable the same way.
+            Every bulk CSV upload is recorded as an <strong>import batch</strong> and every row it inserts or matches is stamped with it. Pick a batch in the <strong>Import Batch</strong> dropdown to list exactly that upload — including rows the merge reported as "already complete" and therefore left untouched. The dropdown shows <strong>delegates · rows</strong>: they can differ when the file repeats a person (same title, name and phone collapse into one delegate, and one delegate = one badge) or a summary row is ignored. This is the reliable way to find a re-uploaded set (the date range cannot tell two uploads on the same day apart). <strong>Repair Imported Names</strong> and <strong>Reconcile District Portal CSV</strong> also create batches (labelled <em>Repair: …</em> / <em>Reconcile: …</em>), so their cohorts are retrievable the same way.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BULK SELECT & BULK DELETE (ADMIN)</span>

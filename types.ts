@@ -141,6 +141,7 @@ export interface ImportBatch {
   reg_type: string | null;
   reset_badge: 'none' | 'changed' | 'all' | null;
   row_count: number;
+  stamped?: number | null;   // v1.97: distinct delegates linked to the batch
   inserted: number;
   updated: number;
   skipped: number;

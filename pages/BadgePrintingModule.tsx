@@ -128,6 +128,7 @@ const BadgePrintingModule = () => {
   const [allStatusesCount, setAllStatusesCount] = useState(0);
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false);
+  const [cohortStats, setCohortStats] = useState<{ total: number; notPrinted: number } | null>(null);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [batchDelegates, setBatchDelegates] = useState<Record<string, BadgeBatchDelegate[]>>({});
   const [batchDelegatesLoading, setBatchDelegatesLoading] = useState<string | null>(null);
@@ -261,7 +262,21 @@ const BadgePrintingModule = () => {
     });
     if (previewSeq.current !== run) return;
     setAllStatusesCount(scopeTotal);
-  }, [activeEventId, activeCohortFilters, selectedDelegates, sortBy]);
+
+    // v1.97: the selected import batch's own cohort (ignoring every other filter),
+    // so the page can say "19 delegates — 1 hidden by the active filters".
+    if (filters.importBatchId) {
+      const batchOnly: BadgeFilter = { importBatchId: filters.importBatchId, badgePrintedStatus: 'all' };
+      const [batchTotal, batchNotPrinted] = await Promise.all([
+        db.getFilteredDelegateCount(activeEventId, batchOnly),
+        db.getFilteredDelegateCount(activeEventId, { ...batchOnly, badgePrintedStatus: 'not_printed' }),
+      ]);
+      if (previewSeq.current !== run) return;
+      setCohortStats({ total: batchTotal, notPrinted: batchNotPrinted });
+    } else {
+      setCohortStats(null);
+    }
+  }, [activeEventId, activeCohortFilters, filters.importBatchId, selectedDelegates, sortBy]);
 
   const handleLoadMorePreview = useCallback(async () => {
     if (!activeEventId || previewLoadingMore) return;
@@ -354,6 +369,31 @@ const BadgePrintingModule = () => {
     setSearchTotal(0);
     setPreviewCount(0);
     setAllStatusesCount(0);
+  };
+
+  // v1.97: clear every filter EXCEPT the import batch, so "show all 19 in this
+  // batch" is a single click. Status goes to All so nothing is hidden.
+  const clearCohortFilters = () => {
+    setFilters((f) => ({
+      district: '',
+      chapter: '',
+      delegateType: '',
+      badgePrintedStatus: 'all',
+      surnameFrom: '',
+      surnameTo: '',
+      delegateNumberFrom: '',
+      delegateNumberTo: '',
+      createdFrom: '',
+      createdTo: '',
+      dateBasis: 'activity',
+      importBatchId: f.importBatchId,
+      selectedIds: [],
+    }));
+    setSelectedDelegates([]);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchPage(1);
+    setSearchTotal(0);
   };
 
   const handleSearchDelegates = useCallback(
@@ -1154,7 +1194,8 @@ const BadgePrintingModule = () => {
                   <option value="">All Imports</option>
                   {importBatches.map((b) => (
                     <option key={b.batch_id} value={b.batch_id}>
-                      {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')} · {b.row_count || (b.inserted + b.updated + b.skipped)} rows
+                      {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')} ·{' '}
+                      {b.stamped != null ? `${b.stamped} delegate${b.stamped === 1 ? '' : 's'} · ${b.row_count} rows` : `${b.row_count} rows`}
                     </option>
                   ))}
                 </select>
@@ -1530,6 +1571,36 @@ const BadgePrintingModule = () => {
             badgeCount={previewCount}
             pageCount={getBadgePageCount(previewCount, layout)}
           />
+
+          {filters.importBatchId && cohortStats && (
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black text-slate-800 uppercase tracking-widest">
+                    Import batch cohort
+                  </p>
+                  <p className="text-[10px] font-bold text-gray-600 mt-0.5">
+                    <span className="text-slate-900">{cohortStats.total}</span> delegate{cohortStats.total === 1 ? '' : 's'} in this batch
+                    {' · '}<span className="text-emerald-700">{cohortStats.notPrinted}</span> not printed
+                    {' · '}<span className="text-amber-600">{cohortStats.total - cohortStats.notPrinted}</span> already printed
+                  </p>
+                </div>
+                {(allStatusesCount < cohortStats.total || previewCount < allStatusesCount) && (
+                  <div className="text-right">
+                    <p className="text-[9px] font-black text-amber-700 uppercase tracking-wider">
+                      {cohortStats.total - previewCount} of {cohortStats.total} hidden by the active filters
+                    </p>
+                    <button
+                      onClick={clearCohortFilters}
+                      className="mt-1 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-[8px] font-black uppercase tracking-widest"
+                    >
+                      Clear filters (keep batch)
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {allStatusesCount > 0 && allStatusesCount !== previewCount && (
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">

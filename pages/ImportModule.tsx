@@ -128,7 +128,7 @@ const ImportModule = () => {
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
     const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
     const [resetBadge, setResetBadge] = useState<'none' | 'changed' | 'all'>('none');
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, junk?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -614,6 +614,7 @@ const ImportModule = () => {
                     updated: result.updated,
                     skipped: result.skipped,
                     badgeReset: result.badgeReset,
+                    stamped: result.stamped,
                 });
             }
 
@@ -627,6 +628,7 @@ const ImportModule = () => {
                     batchLabel: batchId ? batchLabel : undefined,
                     badgeReset: result.badgeReset,
                     stamped: result.stamped,
+                    junk: result.junk,
                     stats: importStats
                 });
                 setProgress(null);
@@ -1106,6 +1108,34 @@ const hasFile = repairHasFile;
     const knownCount = detectedColumns.filter(c => KNOWN_FIELDS[normalizeKey(c)]).length;
     const allKnownChecked = matchedCount === knownCount && matchedCount > 0;
 
+    // v1.97: repeated people INSIDE the file. Two rows with the same title +
+    // normalised name + phone collapse into one delegate on import (the server
+    // identity rule), which is why "rows processed" can exceed the batch cohort.
+    // Warn before writing anything.
+    const duplicateIdentityRows = (() => {
+        if (!mappedCsvData.trim()) return { duplicates: 0, examples: [] as string[] };
+        const norm = (v?: string) => (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const seen = new Set<string>();
+        const examples: string[] = [];
+        let duplicates = 0;
+        for (const line of splitCsvRecords(mappedCsvData)) {
+            const p = parseCsvLine(line);
+            if (p.length < 4) continue;
+            const first = (p[2] || '').trim();
+            const last = (p[3] || '').trim();
+            if (!first && !last) continue;
+            const key = `${norm(p[1])}|${norm(first)}|${norm(last)}|${normalizePhone(p[6] || '')}`;
+            const label = `${p[1] || ''} ${first} ${last}`.replace(/\s+/g, ' ').trim();
+            if (seen.has(key)) {
+                duplicates++;
+                if (examples.length < 3) examples.push(label);
+            } else {
+                seen.add(key);
+            }
+        }
+        return { duplicates, examples };
+    })();
+
     const handleClearDefaultTitles = async () => {
         if (!targetEventId) { setRepairResult({ type: 'error', count: 0, msg: 'Select an event to repair first.' }); return; }
         if (!repairHasFile) {
@@ -1212,15 +1242,29 @@ const hasFile = repairHasFile;
                                             {'\uD83D\uDD04'} {feedback.updated} existing records updated (gaps filled)
                                         </p>
                                     )}
-                                    {feedback.skipped !== undefined && feedback.skipped > 0 && (
+                                    {feedback.skipped !== undefined && (feedback.skipped - (feedback.junk || 0)) > 0 && (
                                         <p className="text-[10px] font-bold text-amber-600 uppercase">
-                                            {'\u23ED\uFE0F'} {feedback.skipped} records skipped (already complete)
+                                            {'\u23ED\uFE0F'} {feedback.skipped - (feedback.junk || 0)} records skipped (already complete)
+                                        </p>
+                                    )}
+                                    {feedback.junk !== undefined && feedback.junk > 0 && (
+                                        <p className="text-[10px] font-bold text-gray-500 uppercase">
+                                            {'\uD83E\uDDF9'} {feedback.junk} invalid / summary row(s) ignored (not delegates)
                                         </p>
                                     )}
                                     {feedback.batchLabel && (
                                         <p className="text-[10px] font-bold text-slate-600 uppercase">
                                             {'\uD83D\uDCE6'} Linked to import batch: {feedback.batchLabel}
-                                            {feedback.stamped ? ` (${feedback.stamped} rows)` : ''} — find it with the Import batch filter
+                                            {feedback.stamped ? ` — ${feedback.stamped} delegate${feedback.stamped === 1 ? '' : 's'}` : ''}
+                                            {' '}({((feedback.inserted || 0) + (feedback.updated || 0) + (feedback.skipped || 0))} rows processed)
+                                        </p>
+                                    )}
+                                    {feedback.batchLabel
+                                        && feedback.stamped !== undefined
+                                        && feedback.stamped !== ((feedback.inserted || 0) + (feedback.updated || 0) + (feedback.skipped || 0)) && (
+                                        <p className="text-[9px] font-bold text-amber-700 leading-snug">
+                                            {((feedback.inserted || 0) + (feedback.updated || 0) + (feedback.skipped || 0)) - feedback.stamped} row(s) did not create a separate delegate —
+                                            either the file repeated a person (same title, name and phone) or the row was invalid. One delegate = one badge.
                                         </p>
                                     )}
                                     {feedback.badgeReset !== undefined && feedback.badgeReset > 0 && (
@@ -1922,6 +1966,18 @@ const hasFile = repairHasFile;
                             in Batch Badge Printing or the Master List. Resetting the badge stamp is optional; "Only where data changed" only affects rows this file actually corrected.
                         </p>
                     </div>
+
+                    {duplicateIdentityRows.duplicates > 0 && (
+                        <div className="mt-3 p-3 rounded-xl border border-amber-300 bg-amber-50 text-[10px] font-bold text-amber-800 leading-relaxed">
+                            <span className="block font-black uppercase tracking-wider">
+                                {duplicateIdentityRows.duplicates} row(s) repeat a person already in this file
+                            </span>
+                            Same title, name and phone — they will merge into <strong>one delegate</strong> (one badge), so the batch cohort will be smaller than the row count.
+                            {duplicateIdentityRows.examples.length > 0 && (
+                                <span className="block mt-1 text-amber-700 normal-case">e.g. {duplicateIdentityRows.examples.join(' · ')}</span>
+                            )}
+                        </div>
+                    )}
 
                     <button
                         onClick={handleImport}

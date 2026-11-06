@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.96 (Repair/Reconcile now stamp import batches; Master List district loading smoothed; see §92)
+- **Current Version:** 1.97 (Import cohort counts — delegates vs rows, junk accounting, pre-import duplicate warning; see §93)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1320,6 +1320,22 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Master List "All Districts" smoothing (frontend only):** `loadAllDistricts` used to fire **one `get_paginated_delegates` RPC per district simultaneously** (20-25 at once). It now runs a **4-worker pool** over the district queue (sections still render progressively as each first page arrives), `await`s completion so the post-bulk-delete refresh is consistent, and uses a `districtsSeq` ref so a superseded run cannot overwrite a newer one. One RPC per district is inherent — each section paginates independently — and a true single-RPC batch would have to replicate the v1.50 delegate-type→district label routing in SQL, which risks section/pagination divergence; deliberately not attempted.
 - **Deploy:** run `supabase_migration_v1.96_repair_reconcile_batch_stamp.sql` then the frontend (frontend-first is safe via the 3-arg retry). `npm run typecheck` → 0 errors; `npm run build` passes.
 - **Verification:** run Repair → banner names a `Repair:` batch → find it in Master List → Import batch; run Reconcile apply → same with `Reconcile:`; a reconcile Preview (dry run) creates no batch and stamps nothing; Master List "All Districts" still renders every section, now at most 4 RPCs in flight (check the Network panel).
+
+## 93. Import Cohort Counts — delegates vs rows (v1.97)
+
+- **Reported:** an import reported `13 added + 6 skipped` (19 rows) while the batch cohort in Batch Badge Printing was **18**. Both numbers are correct — the batch links *delegates*, and two rows can be one delegate under the identity rule (`title_key + name_first_key + name_last_key + phone_normalized`, punctuation/case stripped), or a row can be rejected by the row-quality guard. Nothing on screen said so: the dropdown showed "19 rows" and the banner called the distinct count "rows".
+- **Schema (`supabase_migration_v1.97_import_batch_cohort_counts.sql`, idempotent):**
+  - `import_batches.stamped INT` = distinct delegates linked to the batch, backfilled once from `count(*) WHERE last_import_id = batch_id`.
+  - `import_delegates_batch_merge` returns a separate `junk` counter (same 4-arg signature → plain `CREATE OR REPLACE`). Junk rows still increment `skipped` (progress must still advance) **and** `junk`, so the UI can report them as "invalid/summary row ignored (not a delegate)" instead of "already complete".
+  - `supabase_schema.sql` reconciled (column + `v_junk` in the static RPC).
+- **UI (frontend):**
+  - **Import banner:** `13 new records · 6 skipped (already complete) · 2 invalid rows ignored · Linked to import batch: <file> — 18 delegates (19 rows processed)`, plus an amber line whenever `stamped ≠ rows processed`: *"N row(s) did not create a separate delegate — either the file repeated a person (same title, name and phone) or the row was invalid. One delegate = one badge."*
+  - **Pre-import warning (the prevention):** `ImportModule` computes identity keys over `mappedCsvData` and shows *"N row(s) repeat a person already in this file — they will merge into one delegate"* with up to three examples, **before** anything is written.
+  - **Batch dropdowns (Master List + Batch Badge Printing):** `14-09-26 NC2.csv · 05/11/2026 · 18 delegates · 19 rows` (falls back to `19 rows` only for legacy batches with no `stamped`).
+  - **Badge page cohort card (when an Import batch is selected):** `18 delegates in this batch · 17 not printed · 1 already printed`, and when the active filters hide any: `1 of 18 hidden by the active filters` + **Clear filters (keep batch)** (a new `clearCohortFilters` that resets district/chapter/type/surname/number/date and sets status to All, while keeping the batch). `clearAllFilters` still clears everything.
+- **Why this is the right model:** importing 19 rows that resolve to 18 people genuinely produces 18 badges; the old UI made that look like data loss.
+- **Deploy:** run the migration then the frontend — frontend-first is also safe (the new `stamped` write is best-effort, `junk` simply reads 0, and the cohort card uses live counts).
+- **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes. Manual: import a file containing one repeated person → the amber warning appears pre-import, the banner says "18 delegates (19 rows processed)", and the badge cohort card shows 18 with the printed split.
 
 ## Code Conventions
 

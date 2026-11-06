@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS import_batches (
     reg_type TEXT,
     reset_badge TEXT DEFAULT 'none',
     row_count INT DEFAULT 0,
+    stamped INT,
     inserted INT DEFAULT 0,
     updated INT DEFAULT 0,
     skipped INT DEFAULT 0,
@@ -1655,6 +1656,7 @@ DECLARE
   v_inserted INT := 0;
   v_updated INT := 0;
   v_skipped INT := 0;
+  v_junk INT := 0;
   v_stamped INT := 0;
   v_badge_reset INT := 0;
   v_item JSONB;
@@ -1701,6 +1703,7 @@ BEGIN
        ~ '(GRAND TOTAL|ZONE SUMMARY|REGISTRATION RECORDS|SUBTOTAL|SOURCE:|MARKED AS|PER NOTES|AS AT|DATE OF BIRTH|RECORDS|NOTES:|NAIRA|DELIVERABLES|SUMMARY|BATCH |ADULTS|TEENS|CHILDREN|TOTAL|CAT=)'
     THEN
       v_skipped := v_skipped + 1;
+      v_junk := v_junk + 1;
       CONTINUE;
     END IF;
 
@@ -1923,6 +1926,7 @@ BEGIN
     'inserted', v_inserted,
     'updated', v_updated,
     'skipped', v_skipped,
+    'junk', v_junk,
     'stamped', v_stamped,
     'badgeReset', v_badge_reset,
     'batch', p_import_id,
