@@ -1,13 +1,13 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS, DateBasis, ImportBatch } from '../types';
+import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS, DateBasis, ImportBatch, BadgeBatchDelegate } from '../types';
 import { AppContext } from '../context/AppContext';
 import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
 import { useQuery } from '@tanstack/react-query';
 import BadgePreview from '../components/BadgePreview';
 import BatchStatusBadge from '../components/BatchStatusBadge';
-import { describeDateRange } from '../services/utils';
+import { describeDateRange, exportToCSV } from '../services/utils';
 type Tab = 'generate' | 'batches' | 'reprint' | 'history';
 
 // Registration-date filters are picked as local calendar days; the service
@@ -127,6 +127,13 @@ const BadgePrintingModule = () => {
   const [previewCount, setPreviewCount] = useState(0);
   const [allStatusesCount, setAllStatusesCount] = useState(0);
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
+  const [previewLoadingMore, setPreviewLoadingMore] = useState(false);
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
+  const [batchDelegates, setBatchDelegates] = useState<Record<string, BadgeBatchDelegate[]>>({});
+  const [batchDelegatesLoading, setBatchDelegatesLoading] = useState<string | null>(null);
+  const [batchDelegatesError, setBatchDelegatesError] = useState<string | null>(null);
+  const [batchSearch, setBatchSearch] = useState('');
+  const previewSeq = useRef(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
@@ -172,6 +179,8 @@ const BadgePrintingModule = () => {
   const showOffice = eventConfig.show_office !== false;
   const A6_PREVIEW_LIMIT = 8;
   const SEARCH_PAGE_SIZE = 25;
+  const PREVIEW_PAGE = 25;
+  const PREVIEW_MAX = 250;
 
   useEffect(() => {
     db.getSettings()
@@ -218,36 +227,99 @@ const BadgePrintingModule = () => {
     loadPrintLogs();
   }, [loadBatches, loadPrintLogs]);
 
+  const activeCohortFilters = useCallback((): BadgeFilter => ({
+    ...filters,
+    badgePrintedStatus: filters.badgePrintedStatus || 'all',
+    selectedIds: selectedDelegates.length
+      ? selectedDelegates.map((d) => d.delegate_id)
+      : undefined,
+  }), [filters, selectedDelegates]);
+
   const handlePreviewCount = useCallback(async () => {
     if (!activeEventId) return;
-    const activeFilters: BadgeFilter = {
-      ...filters,
-      badgePrintedStatus: filters.badgePrintedStatus || 'all',
-      selectedIds: selectedDelegates.length
-        ? selectedDelegates.map((d) => d.delegate_id)
-        : undefined,
-    };
+    const activeFilters = activeCohortFilters();
+    const run = ++previewSeq.current;
 
     if (activeFilters.selectedIds?.length) {
       setPreviewCount(activeFilters.selectedIds.length);
       setAllStatusesCount(activeFilters.selectedIds.length);
-    } else {
-      const count = await db.getFilteredDelegateCount(activeEventId, activeFilters);
-      setPreviewCount(count);
-      if (count > 0) {
-        const sample = await db.getFilteredDelegates(activeEventId, activeFilters, sortBy, 10, 0);
-        setPreviewDelegates(sample);
-      } else {
-        setPreviewDelegates([]);
-      }
-      const scopeTotal = await db.getFilteredDelegateCount(activeEventId, {
-        ...activeFilters,
-        badgePrintedStatus: 'all',
-        selectedIds: undefined,
-      });
-      setAllStatusesCount(scopeTotal);
+      setPreviewDelegates(selectedDelegates.slice(0, PREVIEW_PAGE));
+      return;
     }
-  }, [activeEventId, filters, selectedDelegates]);
+
+    // One request carries both the rows and the exact total, so the list and the
+    // count can never disagree. A newer run invalidates this one on arrival.
+    const { rows, total } = await db.getBadgeCohort(activeEventId, activeFilters, sortBy, PREVIEW_PAGE, 0);
+    if (previewSeq.current !== run) return;
+    setPreviewCount(total);
+    setPreviewDelegates(rows);
+
+    const scopeTotal = await db.getFilteredDelegateCount(activeEventId, {
+      ...activeFilters,
+      badgePrintedStatus: 'all',
+      selectedIds: undefined,
+    });
+    if (previewSeq.current !== run) return;
+    setAllStatusesCount(scopeTotal);
+  }, [activeEventId, activeCohortFilters, selectedDelegates, sortBy]);
+
+  const handleLoadMorePreview = useCallback(async () => {
+    if (!activeEventId || previewLoadingMore) return;
+    const current = previewDelegates.length;
+    const take = Math.min(PREVIEW_PAGE, PREVIEW_MAX - current);
+    if (take <= 0) return;
+    const run = previewSeq.current;
+    setPreviewLoadingMore(true);
+    try {
+      const { rows } = await db.getBadgeCohort(activeEventId, activeCohortFilters(), sortBy, take, current);
+      if (previewSeq.current !== run) return;
+      setPreviewDelegates(prev => [...prev, ...rows]);
+    } finally {
+      setPreviewLoadingMore(false);
+    }
+  }, [activeEventId, activeCohortFilters, previewDelegates.length, previewLoadingMore, sortBy]);
+
+  const handleToggleBatchDelegates = useCallback(async (batch: BadgeBatch) => {
+    setBatchDelegatesError(null);
+    setBatchSearch('');
+    if (expandedBatchId === batch.batch_id) {
+      setExpandedBatchId(null);
+      return;
+    }
+    setExpandedBatchId(batch.batch_id);
+    if (batchDelegates[batch.batch_id]) return;
+    setBatchDelegatesLoading(batch.batch_id);
+    try {
+      const rows = await db.getBadgeBatchDelegates(batch.batch_id);
+      setBatchDelegates(prev => ({ ...prev, [batch.batch_id]: rows }));
+    } catch (e: any) {
+      setBatchDelegatesError(e?.message || 'Could not load the batch delegates.');
+    } finally {
+      setBatchDelegatesLoading(null);
+    }
+  }, [batchDelegates, expandedBatchId]);
+
+  const exportBatchDelegates = (batch: BadgeBatch) => {
+    const rows = (batchDelegates[batch.batch_id] || []).map((d, i) => ({
+      '#': i + 1,
+      title: d.title || '',
+      first_name: d.first_name,
+      last_name: d.last_name,
+      phone: d.phone || '',
+      email: d.email || '',
+      district: d.district || '',
+      chapter: d.chapter || '',
+      delegate_type: d.delegate_type || '',
+      external_id: d.external_id || '',
+      generated_at: d.generated_at ? new Date(d.generated_at).toLocaleString('en-GB') : '',
+      printed_at: d.badge_printed_at ? new Date(d.badge_printed_at).toLocaleString('en-GB') : '',
+    }));
+    exportToCSV(
+      rows,
+      `FGBMFI_Batch-${batch.batch_number}_Delegates.csv`,
+      ['#', 'title', 'first_name', 'last_name', 'phone', 'email', 'district', 'chapter', 'delegate_type', 'external_id', 'generated_at', 'printed_at']
+    );
+  };
 
   useEffect(() => {
     const timeout = setTimeout(handlePreviewCount, 300);
@@ -866,6 +938,14 @@ const BadgePrintingModule = () => {
     try {
       const marked = await db.markBadgeBatchPrinted(batchId);
       setFeedback({ type: 'success', msg: `Batch marked printed — ${marked} delegate(s) flagged as Badge Printed.` });
+      // The panel caches per-batch delegate rows; drop this batch so its
+      // Printed column reloads with the new timestamps.
+      setBatchDelegates(prev => {
+        if (!prev[batchId]) return prev;
+        const next = { ...prev };
+        delete next[batchId];
+        return next;
+      });
     } catch (e: any) {
       setFeedback({ type: 'error', msg: `Mark printed failed: ${e?.message || 'unknown error'}` });
     }
@@ -882,6 +962,7 @@ const BadgePrintingModule = () => {
     try {
       const cleared = await db.clearBadgePrintedFlags(activeEventId);
       setFeedback({ type: 'success', msg: `Cleared Badge Printed flags for ${cleared} delegate(s).` });
+      setBatchDelegates({});
       handlePreviewCount();
       loadBatches();
       loadPrintLogs();
@@ -1457,11 +1538,11 @@ const BadgePrintingModule = () => {
                   Scope Total
                 </p>
                 <p className="text-[10px] font-bold text-gray-600 text-right">
-                  <span className="text-blue-700">{allStatusesCount}</span> delegates match this{' '}
-                  {filters.district && <span className="capitalize">{filters.district}</span>}
-                  {filters.chapter && <> · {filters.chapter}</>}
-                  {!filters.district && !filters.chapter && 'selection'}
-                  {' '}· <span className="text-amber-600">{allStatusesCount - previewCount}</span> already printed
+                  <span className="text-blue-700">{allStatusesCount}</span> in scope
+                  {' · '}
+                  <span className="text-amber-600">{Math.max(allStatusesCount - previewCount, 0)}</span> already printed
+                  {' · '}
+                  <span className="text-emerald-700">{previewCount}</span> will be generated
                 </p>
               </div>
             </div>
@@ -1469,9 +1550,18 @@ const BadgePrintingModule = () => {
 
           {previewDelegates.length > 0 && (
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h2 className="text-[10px] font-black text-gray-400 uppercase mb-3 tracking-[0.2em]">
-                Matching Delegates (first {previewDelegates.length} of {previewCount})
-              </h2>
+              <div className="flex flex-wrap items-end justify-between gap-2 mb-3">
+                <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                  Showing {previewDelegates.length} of {previewCount} in this run
+                </h2>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                  {filters.dateBasis === 'created' ? 'Created' : 'Last activity'}
+                  {(filters.createdFrom || filters.createdTo) ? ` · ${describeDateRange({ from: filters.createdFrom, to: filters.createdTo })}` : ''}
+                  {filters.importBatchId ? ' · import batch' : ''}
+                  {filters.badgePrintedStatus === 'not_printed' ? ' · not printed'
+                    : filters.badgePrintedStatus === 'printed' ? ' · printed' : ' · all statuses'}
+                </p>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                 {previewDelegates.map((d) => (
                   <div key={d.delegate_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
@@ -1489,6 +1579,24 @@ const BadgePrintingModule = () => {
                   </div>
                 ))}
               </div>
+              {previewDelegates.length < previewCount && (
+                <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                    {previewDelegates.length >= PREVIEW_MAX
+                      ? `Showing the first ${PREVIEW_MAX} — use Batch Size / Batches Per Run to work through the rest`
+                      : `${previewCount - previewDelegates.length} more in this run`}
+                  </p>
+                  {previewDelegates.length < PREVIEW_MAX && (
+                    <button
+                      onClick={handleLoadMorePreview}
+                      disabled={previewLoadingMore}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[9px] font-black uppercase tracking-widest disabled:opacity-50"
+                    >
+                      {previewLoadingMore ? 'Loading…' : `Load ${Math.min(PREVIEW_PAGE, previewCount - previewDelegates.length)} more`}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1533,7 +1641,7 @@ const BadgePrintingModule = () => {
                 : previewCount === 0
                 ? 'Generate 0 Badges'
                 : previewCount <= batchSize * batchesPerRun
-                ? `Generate ${previewCount} Badges` + (allStatusesCount > previewCount ? ` (of ${allStatusesCount} total)` : '')
+                ? `Generate ${previewCount} Badge${previewCount === 1 ? '' : 's'}`
                 : `Generate ${Math.min(previewCount, batchSize * batchesPerRun)} of ${previewCount} Badges`}
             </button>
           </div>
@@ -1701,7 +1809,8 @@ const BadgePrintingModule = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {batches.map((batch) => (
-                    <tr key={batch.batch_id} className="hover:bg-gray-50">
+                    <React.Fragment key={batch.batch_id}>
+                    <tr className="hover:bg-gray-50">
                       {isAdmin && (
                         <td className="p-3">
                           <input type="checkbox" checked={selectedBatchIds.has(batch.batch_id)} onChange={() => toggleBatchSelect(batch.batch_id)} className="rounded" disabled={bulkDeleting} />
@@ -1730,7 +1839,18 @@ const BadgePrintingModule = () => {
                         <BatchStatusBadge status={batch.status} />
                       </td>
                       <td className="p-3">
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap">
+                          <button
+                            onClick={() => handleToggleBatchDelegates(batch)}
+                            className={`px-3 py-1.5 font-bold rounded-lg text-[8px] uppercase tracking-wider border ${
+                              expandedBatchId === batch.batch_id
+                                ? 'bg-slate-800 text-white border-slate-800'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            }`}
+                            title="List the delegates inside this batch"
+                          >
+                            {expandedBatchId === batch.batch_id ? 'Hide' : 'Delegates'}
+                          </button>
                           {batch.status === 'ready' && (
                             <>
                               <button
@@ -1770,7 +1890,7 @@ const BadgePrintingModule = () => {
                                   db.deleteBadgeBatch(batch.batch_id).then(() => loadBatches()).catch(() => {});
                                 }
                               }}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider ml-1"
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-[8px] uppercase tracking-wider"
                             >
                               Delete
                             </button>
@@ -1778,6 +1898,109 @@ const BadgePrintingModule = () => {
                         </div>
                       </td>
                     </tr>
+                    {expandedBatchId === batch.batch_id && (
+                      <tr className="bg-slate-50/60">
+                        <td colSpan={isAdmin ? 9 : 8} className="p-0">
+                          {(() => {
+                            const rows = batchDelegates[batch.batch_id] || [];
+                            const term = batchSearch.trim().toLowerCase();
+                            const filtered = term
+                              ? rows.filter(r => [r.title, r.first_name, r.last_name, r.phone, r.email, r.external_id, r.district, r.chapter, r.delegate_type]
+                                  .filter(Boolean).join(' ').toLowerCase().includes(term))
+                              : rows;
+                            return (
+                              <div className="p-5 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-[10px] font-black text-slate-800 uppercase tracking-widest">
+                                      Batch #{batch.batch_number} — {batch.badge_count} delegate(s)
+                                    </p>
+                                    <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">
+                                      {batch.layout} · {FEE_CATEGORY_LABELS[batch.fee_category || 'early_bird']}
+                                      {batch.filters?.district ? ` · ${batch.filters.district}` : ' · All Districts'}
+                                      {batch.filters?.delegateType ? ` · ${batch.filters.delegateType}` : ''}
+                                      {batch.filters?.createdFrom || batch.filters?.createdTo
+                                        ? ` · ${batch.filters?.dateBasis === 'created' ? 'created' : 'activity'} ${describeDateRange({ from: batch.filters?.createdFrom, to: batch.filters?.createdTo })}`
+                                        : ''}
+                                      {batch.filters?.importBatchId ? ' · import batch' : ''}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      value={batchSearch}
+                                      onChange={(e) => setBatchSearch(e.target.value)}
+                                      placeholder="Search name, phone, email, Reg ID…"
+                                      className="p-2 border border-gray-200 rounded-lg text-[10px] font-bold w-56 outline-none focus:border-blue-500"
+                                    />
+                                    <button
+                                      onClick={() => exportBatchDelegates(batch)}
+                                      disabled={!rows.length}
+                                      className="px-3 py-2 bg-green-700 text-white rounded-lg text-[8px] font-black uppercase tracking-wider disabled:opacity-40"
+                                    >
+                                      Export CSV
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {batchDelegatesLoading === batch.batch_id ? (
+                                  <p className="py-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider animate-pulse">Loading delegates…</p>
+                                ) : batchDelegatesError && expandedBatchId === batch.batch_id ? (
+                                  <p className="py-6 text-center text-[10px] font-bold text-red-600 uppercase tracking-wider">{batchDelegatesError}</p>
+                                ) : rows.length === 0 ? (
+                                  <p className="py-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                    No delegate records for this batch — its print log may have been cleared.
+                                  </p>
+                                ) : (
+                                  <>
+                                    <div className="overflow-x-auto bg-white rounded-xl border border-gray-100">
+                                      <table className="w-full text-[10px] text-left min-w-[900px]">
+                                        <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
+                                          <tr>
+                                            <th className="p-2 w-10">#</th>
+                                            <th className="p-2">Title</th>
+                                            <th className="p-2">Name</th>
+                                            <th className="p-2">Phone</th>
+                                            <th className="p-2">Email</th>
+                                            <th className="p-2">District</th>
+                                            <th className="p-2">Chapter</th>
+                                            <th className="p-2">Type</th>
+                                            <th className="p-2">Reg ID</th>
+                                            <th className="p-2">Generated</th>
+                                            <th className="p-2">Printed</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50">
+                                          {filtered.slice(0, 500).map((d, i) => (
+                                            <tr key={d.delegate_id} className="hover:bg-gray-50">
+                                              <td className="p-2 font-mono text-[9px] text-gray-400">{i + 1}</td>
+                                              <td className="p-2 font-bold text-gray-400 uppercase">{d.title || '-'}</td>
+                                              <td className="p-2 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
+                                              <td className="p-2 font-bold text-gray-600 tracking-tighter">{d.phone || '-'}</td>
+                                              <td className="p-2 lowercase text-blue-600 break-all max-w-[160px]">{d.email || '-'}</td>
+                                              <td className="p-2 font-medium">{d.district || '-'}</td>
+                                              <td className="p-2 font-medium text-[9px]">{d.chapter || '-'}</td>
+                                              <td className="p-2 font-medium text-[9px]">{d.delegate_type || 'Member'}</td>
+                                              <td className="p-2 font-mono text-[9px] text-gray-500">{d.external_id || '-'}</td>
+                                              <td className="p-2 font-mono text-[9px] text-gray-500">{d.generated_at ? formatDate(d.generated_at) : '-'}</td>
+                                              <td className="p-2 font-mono text-[9px] text-gray-500">{d.badge_printed_at ? formatDate(d.badge_printed_at) : '—'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                                      Showing {Math.min(filtered.length, 500)} of {filtered.length}
+                                      {term ? ` matching "${batchSearch}"` : ''} · Printed = the delegate's most recent print date
+                                    </p>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

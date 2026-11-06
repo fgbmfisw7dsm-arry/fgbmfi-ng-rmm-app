@@ -460,6 +460,14 @@ const MANUAL_SECTIONS: DocSection[] = [
             The <strong>Batches</strong> tab lists every batch with its number followed by the <strong>district in brackets</strong> (e.g., #7 (South East 1), or (All Districts)). The Generated PDF panel at the bottom offers <strong>Download PDF</strong>, <strong>Open in New Tab</strong>, and <strong>Print PDF</strong>, plus a <strong>✕ Close</strong> button so you can clear a preview and start a new operation without refreshing.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">MATCHING DELEGATES LIST (25 + LOAD MORE)</span>
+            The preview lists the first <strong>25</strong> delegates in the run with a <strong>Load more</strong> button (25 at a time, up to 250) and a header stating the cohort, e.g. <em>Showing 25 of 143 in this run · Last activity · 1 Sep – 6 Nov 2026 · not printed</em>. The count and the list come from the <strong>same query</strong>, so they always agree. Above it, the Scope Total line reads <em>N in scope · M already printed · X will be generated</em> — "in scope" includes delegates whose badges are already printed.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">BATCH DELEGATES — WHO IS IN A PRINTED BATCH</span>
+            In the <strong>Batches</strong> tab, press <strong>Delegates</strong> on any batch to expand the list of delegates it contains. The panel shows the batch summary (count, layout, fee category, and the filters it was generated with), a search box (name, phone, email, Reg ID, district, chapter, type) and a table with <strong>Title, Name, Phone, Email, District, Chapter, Type, Reg ID, Generated</strong> and <strong>Printed</strong> dates. <strong>Export CSV</strong> downloads the cohort for offline use. Note that <em>Printed</em> is the delegate's most recent print date (a delegate printed again later shows the later date); <em>Generated</em> is always exact for that batch. If a batch shows "no delegate records", its print log was cleared when the batch was deleted.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">CLEAR BADGE PRINTED FLAGS (ADMIN)</span>
             In the Batches tab header, the admin-only <strong>"Clear Badge Printed Flags"</strong> button resets every delegate's status to Badge Not Printed for the active event — for example after a test run. Batch records are retained; confirm when prompted.
           </div>

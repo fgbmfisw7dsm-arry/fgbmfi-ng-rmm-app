@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis, ImportBatch, ImportBadgeReset } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis, ImportBatch, ImportBadgeReset, BadgeBatchDelegate } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
@@ -4110,15 +4110,18 @@ export const db = {
         return [...new Set((data || []).map(d => d.district))];
     },
 
-    getFilteredDelegates: async (
+    // v1.95: single-request cohort — `total` and `rows` come from the SAME
+    // PostgREST response, so the preview count and the listed delegates cannot
+    // disagree (the old count-then-fetch pair could interleave across filter runs).
+    getBadgeCohort: async (
         eventId: string,
         filters: BadgeFilter,
         sortBy: BadgeSortField = 'surname',
-        limit: number = 500,
+        limit: number = 25,
         offset: number = 0
-    ): Promise<Delegate[]> => {
-        if (!eventId) return [];
-        let q = supabase.from('delegates').select('*').eq('event_id', eventId);
+    ): Promise<{ rows: Delegate[]; total: number }> => {
+        if (!eventId) return { rows: [], total: 0 };
+        let q = supabase.from('delegates').select('*', { count: 'exact' }).eq('event_id', eventId);
 
         if (filters.selectedIds?.length) {
             q = q.in('delegate_id', filters.selectedIds);
@@ -4148,9 +4151,73 @@ export const db = {
             sortBy === 'category' ? 'delegate_type' :
             sortBy === 'registration_date' ? 'created_at' : sortBy;
 
-        const { data, error } = await q.order(sortCol, { ascending: true }).range(offset, offset + limit - 1);
-        if (error) return [];
-        return (data || []) as Delegate[];
+        const { data, count, error } = await q.order(sortCol, { ascending: true }).range(offset, offset + limit - 1);
+        if (error) {
+            console.error('[getBadgeCohort] query error:', error.message);
+            return { rows: [], total: 0 };
+        }
+        return { rows: (data || []) as Delegate[], total: count || 0 };
+    },
+
+    getFilteredDelegates: async (
+        eventId: string,
+        filters: BadgeFilter,
+        sortBy: BadgeSortField = 'surname',
+        limit: number = 500,
+        offset: number = 0
+    ): Promise<Delegate[]> => {
+        const { rows } = await db.getBadgeCohort(eventId, filters, sortBy, limit, offset);
+        return rows;
+    },
+
+    // v1.95: the delegates inside a printed batch, from badge_print_logs (the
+    // authoritative batch membership) joined to their delegate record.
+    getBadgeBatchDelegates: async (batchId: string): Promise<BadgeBatchDelegate[]> => {
+        if (!batchId) return [];
+        const out: BadgeBatchDelegate[] = [];
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('badge_print_logs')
+                .select('delegate_id, action, created_at, delegates(title, first_name, last_name, phone, email, district, chapter, delegate_type, external_id, badge_printed_at)')
+                .eq('batch_id', batchId)
+                .order('created_at', { ascending: true })
+                .range(from, from + pageSize - 1);
+            if (error) {
+                console.error('[getBadgeBatchDelegates] query error:', error.message);
+                break;
+            }
+            if (!data || data.length === 0) break;
+            for (const r of data as any[]) {
+                const d = r.delegates;
+                if (!d) continue;
+                out.push({
+                    delegate_id: r.delegate_id,
+                    title: d.title || '',
+                    first_name: d.first_name || '',
+                    last_name: d.last_name || '',
+                    phone: d.phone || '',
+                    email: d.email || '',
+                    district: d.district || '',
+                    chapter: d.chapter || '',
+                    delegate_type: d.delegate_type || '',
+                    external_id: d.external_id || '',
+                    badge_printed_at: d.badge_printed_at || null,
+                    log_action: r.action,
+                    generated_at: r.created_at,
+                });
+            }
+            if (data.length < pageSize) break;
+            from += pageSize;
+        }
+        // A regenerated batch can hold more than one log row per delegate.
+        const seen = new Map<string, BadgeBatchDelegate>();
+        for (const r of out) if (!seen.has(r.delegate_id)) seen.set(r.delegate_id, r);
+        return Array.from(seen.values()).sort((a, b) =>
+            (a.last_name || '').localeCompare(b.last_name || '') ||
+            (a.first_name || '').localeCompare(b.first_name || '')
+        );
     },
 
     getFilteredDelegateCount: async (eventId: string, filters: BadgeFilter): Promise<number> => {

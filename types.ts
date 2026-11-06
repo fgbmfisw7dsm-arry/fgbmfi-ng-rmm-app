@@ -151,6 +151,30 @@ export interface ImportBatch {
 
 export type ImportBadgeReset = 'none' | 'changed' | 'all';
 
+// v1.95: one badge cohort response — rows and total come from the SAME request
+// so the on-screen count and the listed delegates can never disagree.
+export interface BadgeCohort {
+  rows: Delegate[];
+  total: number;
+}
+
+// v1.95: a delegate inside a printed batch (badge_print_logs + delegates embed).
+export interface BadgeBatchDelegate {
+  delegate_id: string;
+  title?: string;
+  first_name: string;
+  last_name: string;
+  phone?: string;
+  email?: string;
+  district?: string;
+  chapter?: string;
+  delegate_type?: string;
+  external_id?: string;
+  badge_printed_at?: string | null;
+  log_action?: string;
+  generated_at?: string | null;
+}
+
 // v1.93: which timestamp a registration date-range filter uses.
 //   created  — first registration / upload only (v1.92 behaviour)
 //   activity — created OR last detail change (generated column last_activity_at)

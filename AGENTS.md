@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.94 (Import batches — exact re-upload cohort + optional badge-stamp reset; see §90)
+- **Current Version:** 1.95 (Badge cohort consistency — single-query preview + 25/Load more, and batch delegate lists; see §91)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1298,6 +1298,18 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Operator notes:** `last_import_id` holds only the **latest** upload per person (history lives in `audit_log`); re-importing the same file creates a new batch and moves the rows to it; the reset destroys `badge_printed_at` for the affected rows, which is why the default is changed-only.
 - **Deploy order (strict):** run `supabase_migration_v1.94_import_batches.sql` then deploy the frontend. The legacy RPC retry keeps imports working if the order slips, but the badge/Master List batch filters need the columns.
 - **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes. Migration self-checks: exactly one `get_paginated_delegates` and one `import_delegates_batch_merge`, `delegates.last_import_id` exists, and the activity trigger no longer mentions the import marker. Manual: import an unchanged district file → `skipped` counts as before but the banner shows a batch, and *Import batch = that upload + Badge Not Printed* lists exactly its rows; choose "Only where data changed" → only corrected rows lose their stamp; mark a batch printed → the import-batch cohort does not change.
+
+## 91. Badge Cohort Consistency + Batch Delegate Lists (v1.95)
+
+- **Problem solved (reported):** with a wide date range the page reported N badges but listed only a few delegates. `handlePreviewCount` made **two separate requests** (a count, then a 10-row sample) with **no request sequencing**, and the effect re-runs on every filter control (two date inputs + date basis + badge status). Overlapping runs could therefore commit a count from one filter state and a list from another — a persistent mismatch. The list was also capped at 10 rows.
+- **Fix — one request, one truth:** new `db.getBadgeCohort(eventId, filters, sortBy, limit, offset) → { rows, total }` issues a **single** PostgREST call (`select('*', { count: 'exact' })` + `.order().range()`), so the total and the rows are produced by the same query. `getFilteredDelegates` is now a thin wrapper (`(await getBadgeCohort(...)).rows`) so existing callers (generate paging) are unchanged.
+- **Page (`BadgePrintingModule.tsx`):** `previewSeq` ref discards any response whose run is no longer current (both the first page and Load more); manual selection now also populates the list; the preview shows **25 rows** with **Load more** (25 per click, cap `PREVIEW_MAX = 250`) and a header stating the cohort (`Last activity · 1 Sep – 6 Nov 2026 · not printed`). The Scope Total line is now explicit — `N in scope · M already printed · X will be generated` — and the Generate button no longer says `(of N total)`, which was the source of the "2 badges" misread.
+- **Batch delegate list (no migration):** `db.getBadgeBatchDelegates(batchId)` reads `badge_print_logs` for that batch (authoritative membership, `(batch_id)` index already exists, SELECT open to authenticated) embedding `delegates(title, first_name, last_name, phone, email, district, chapter, delegate_type, external_id, badge_printed_at)`, paged 1,000 at a time, deduped per delegate (a regenerated batch can hold several log rows) and sorted by surname/first name client-side.
+- **UI (Batches tab):** a **Delegates** button on each batch row toggles a full-width inline panel: batch summary (count, layout, fee, district/type/date+basis/import-batch filters), a search box (name/phone/email/Reg ID/district/chapter/type), the table `# · Title · Name · Phone · Email · District · Chapter · Type · Reg ID · Generated · Printed`, and **Export CSV** of the cohort. Batches with no logs show an explicit "no delegate records — print log may have been cleared" state. Rendered rows are capped at 500 with a `Showing X of Y` note.
+- **Caveat (documented in the UI):** `Printed` reads `delegates.badge_printed_at`, i.e. the delegate's **most recent** print, not the per-batch moment; `Generated` (from the log row) is exact for that batch.
+- **types.ts additive exceptions:** `BadgeCohort`, `BadgeBatchDelegate`.
+- **Deploy:** frontend only — no SQL, no RPC, no RLS change. `npm run typecheck` → 0 errors; `npm run build` passes.
+- **Verification:** wide date range → the list count and the row count always agree, and Load more reaches the full cohort; Generate prints exactly the previewed total; a batch's delegate list matches its `badge_count`, search narrows it, CSV includes phone and email; deleting a batch removes its list (logs cascade).
 
 ## Code Conventions
 
