@@ -361,6 +361,8 @@ export interface BadgeFilter {
   delegateNumberTo?: string;
   surnameFrom?: string;
   surnameTo?: string;
+  createdFrom?: string;
+  createdTo?: string;
   selectedIds?: string[];
 }
 

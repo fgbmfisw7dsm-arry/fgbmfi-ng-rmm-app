@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
 import { getQueue, setQueue } from './queueStore';
@@ -681,6 +681,8 @@ const USE_REGISTER_RPC = true;
 let registerRpcAvailable = true;
 const USE_SEARCH_RPC = true;
 let searchRpcAvailable = true;
+const USE_BULK_DELETE_RPC = true;
+let bulkDeleteRpcAvailable = true;
 
 export const setAuditEnabled = (enabled: boolean) => { auditEnabled = enabled; };
 
@@ -1359,12 +1361,12 @@ export const db = {
         return results;
     },
 
-    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType): Promise<Delegate[]> => {
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType, range?: DateRangeFilter): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
         while (true) {
-            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source);
+            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source, range);
             if (!paginated.data || paginated.data.length === 0) break;
             results.push(...paginated.data);
             if (paginated.data.length < pageSize) break;
@@ -1373,11 +1375,13 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType, range?: DateRangeFilter): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
             return { data: [], total: 0, page, pageSize, totalPages: 0 };
         }
+
+        const createdRange = toServerDateRange(range);
 
         let result: { data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number };
 
@@ -1403,6 +1407,8 @@ export const db = {
                 p_event_id: eventId || null,
                 p_registration_source: null,
                 p_reg_type: source || null,
+                p_created_from: createdRange.from ?? null,
+                p_created_to: createdRange.to ?? null,
             });
             if (!error && data && !guestAliasOr) {
                 result = data as any;
@@ -1432,6 +1438,8 @@ export const db = {
             } else if (source === 'manual') {
                 q = q.neq('reg_type', 'portal').neq('reg_type', 'web').neq('reg_type', 'ems');
             }
+            if (createdRange.from) q = q.gte('created_at', createdRange.from);
+            if (createdRange.to) q = q.lte('created_at', createdRange.to);
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
             const { data: rows, count, error } = await q2.range(from, from + pageSize - 1);
@@ -2497,6 +2505,97 @@ export const db = {
         }
         recordAuditLog(eventId, 'delegate_delete_bulk', `Deleted ${deleted} delegate(s) by id (scrambled-recovery)`, null, 'delegate', eventId, { count: deleted });
         return deleted;
+    },
+
+    getDelegateSelectionScope: async (
+        eventId: string,
+        opts: { search?: string; district?: string; region?: string; source?: RegType; range?: DateRangeFilter }
+    ): Promise<Array<{ delegate_id: string; name: string; district: string }>> => {
+        if (!eventId) return [];
+        const rows: Array<{ delegate_id: string; name: string; district: string }> = [];
+        let page = 1;
+        const pageSize = 1000;
+        while (true) {
+            const res = await db.getPaginatedDelegates(page, pageSize, opts.search, opts.district, opts.region, eventId, opts.source, opts.range);
+            if (!res.data?.length) break;
+            for (const d of res.data) {
+                rows.push({
+                    delegate_id: d.delegate_id,
+                    name: `${d.title || ''} ${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+                    district: d.district || '',
+                });
+            }
+            if (res.data.length < pageSize) break;
+            page++;
+            if (rows.length >= 50000) break;
+        }
+        return rows;
+    },
+
+    fetchDelegatesByIds: async (eventId: string, ids: string[]): Promise<Delegate[]> => {
+        if (!eventId || !ids.length) return [];
+        const out: Delegate[] = [];
+        const CHUNK = 200;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const { data, error } = await supabase.from('delegates').select('*').eq('event_id', eventId).in('delegate_id', chunk);
+            if (error) throw error;
+            out.push(...((data || []) as Delegate[]));
+        }
+        return out;
+    },
+
+    deleteDelegatesBulk: async (eventId: string, ids: string[]): Promise<{ deleted: number; failedIds: string[] }> => {
+        if (!eventId || !ids || ids.length === 0) return { deleted: 0, failedIds: [] };
+        await ensureEventActive(eventId);
+        const { data: ev } = await supabase.from('events').select('event_config').eq('event_id', eventId).maybeSingle();
+        const evCfg = (ev?.event_config || {}) as Record<string, unknown>;
+        if (evCfg.delegate_deletion_enabled !== true) {
+            throw new Error('Delete is disabled for this event. Enable "Allow Admins to Delete Delegates" in Events & Config first.');
+        }
+
+        if (USE_BULK_DELETE_RPC && bulkDeleteRpcAvailable) {
+            const { data, error } = await supabase.rpc('delete_delegates_bulk', { p_event_id: eventId, p_ids: ids });
+            if (!error && data) {
+                const deleted = Number((data as any)?.deleted) || 0;
+                const failedIds = (((data as any)?.failedIds || []) as string[]);
+                recordAuditLog(eventId, 'delegate_delete_bulk',
+                    `Deleted ${deleted} delegate(s) via Master List bulk delete`,
+                    null, 'delegate', eventId, { count: deleted, failed: failedIds.length, source: 'master_list' });
+                return { deleted, failedIds };
+            }
+            const msg = (error?.message || '').toLowerCase();
+            if (error && (msg.includes('could not find the function') || error.code === 'PGRST116' || error.code === 'PGRST202')) {
+                bulkDeleteRpcAvailable = false;
+            } else if (error) {
+                throw error;
+            }
+        }
+
+        const CHUNK = 500;
+        let deleted = 0;
+        const failedIds: string[] = [];
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            try {
+                const { error: cErr } = await supabase.from('checkins').delete().eq('event_id', eventId).in('delegate_id', chunk);
+                if (cErr) throw cErr;
+                const { error: sErr } = await supabase.from('session_responses').delete().eq('event_id', eventId).in('delegate_id', chunk);
+                if (sErr) throw sErr;
+                const { error: bErr } = await supabase.from('badge_print_logs').delete().eq('event_id', eventId).in('delegate_id', chunk);
+                if (bErr) throw bErr;
+                const { error: dErr } = await supabase.from('delegates').delete().eq('event_id', eventId).in('delegate_id', chunk);
+                if (dErr) throw dErr;
+                deleted += chunk.length;
+            } catch (e) {
+                console.error('[deleteDelegatesBulk] chunk failed:', e);
+                failedIds.push(...chunk);
+            }
+        }
+        recordAuditLog(eventId, 'delegate_delete_bulk',
+            `Deleted ${deleted} delegate(s) via Master List bulk delete`,
+            null, 'delegate', eventId, { count: deleted, failed: failedIds.length, source: 'master_list_fallback' });
+        return { deleted, failedIds };
     },
 
     junkReasonOf: (d: { first_name?: string; last_name?: string; district?: string; chapter?: string }): string | null => {
@@ -3942,6 +4041,9 @@ export const db = {
             if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
             if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
             if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
+            const createdRange = toServerDateRange({ from: filters.createdFrom, to: filters.createdTo });
+            if (createdRange.from) q = q.gte('created_at', createdRange.from);
+            if (createdRange.to) q = q.lte('created_at', createdRange.to);
 
             if (filters.badgePrintedStatus === 'printed') {
                 q = q.eq('badge_printed', true);
@@ -3973,6 +4075,9 @@ export const db = {
         if (filters.surnameTo) q = q.lte('last_name', filters.surnameTo);
         if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
         if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
+        const createdRange = toServerDateRange({ from: filters.createdFrom, to: filters.createdTo });
+        if (createdRange.from) q = q.gte('created_at', createdRange.from);
+        if (createdRange.to) q = q.lte('created_at', createdRange.to);
 
         if (filters.badgePrintedStatus === 'printed') {
             q = q.eq('badge_printed', true);

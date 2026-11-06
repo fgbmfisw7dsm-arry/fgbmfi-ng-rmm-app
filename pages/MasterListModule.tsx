@@ -3,11 +3,24 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole } from '../types';
-import { exportToPDF, exportToCSV, formatCurrency, escapeHtml } from '../services/utils';
+import { exportToPDF, exportToCSV, formatCurrency, escapeHtml, downloadJSON, describeDateRange, hasDateRange } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
 const PAGE_SIZE = 25;
+
+interface SelectionInfo { name: string; district: string; }
+
+const selectionInfoOf = (d: Delegate): SelectionInfo => ({
+    name: `${d.title || ''} ${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+    district: (d.district || '').trim(),
+});
+
+const regDateOf = (d: Delegate): string => {
+    if (!d.created_at) return '-';
+    const t = new Date(d.created_at);
+    return Number.isNaN(t.getTime()) ? '-' : t.toLocaleDateString('en-GB');
+};
 
 const sourceFilterLabel = (sf: string) => sf === 'portal' ? 'Portal' : sf === 'web' ? 'Web' : sf === 'ems' ? 'EMS' : sf === 'manual' ? 'Manual' : '';
 const showRegId = (d: Delegate) => d.reg_type === 'portal' || d.reg_type === 'web';
@@ -60,6 +73,8 @@ const MasterListModule = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistrict, setSelectedDistrict] = useState('');
     const [sourceFilter, setSourceFilter] = useState<'portal' | 'web' | 'manual' | 'ems' | ''>('');
+    const [regFrom, setRegFrom] = useState('');
+    const [regTo, setRegTo] = useState('');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -78,6 +93,26 @@ const MasterListModule = () => {
     const [districtSections, setDistrictSections] = useState<Record<string, { delegates: Delegate[]; page: number; total: number; pages: number; loading: boolean }>>({});
     const [mergePrompt, setMergePrompt] = useState<{ dropId: string; candidates: Delegate[] } | null>(null);
     const [merging, setMerging] = useState(false);
+    const [selected, setSelected] = useState<Map<string, SelectionInfo>>(new Map());
+    const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+    const [confirmText, setConfirmText] = useState('');
+
+    const dateRange = useMemo(() => ({
+        from: regFrom || undefined,
+        to: regTo || undefined,
+    }), [regFrom, regTo]);
+    const dateRangeActive = hasDateRange(dateRange);
+    const dateRangeInvalid = !!(regFrom && regTo && regTo < regFrom);
+    const activeDateRange = dateRangeInvalid ? undefined : (dateRangeActive ? dateRange : undefined);
+    // An active date range behaves like the Source dropdown: it switches the page
+    // into the unified paginated table (the All-Districts section counts come from
+    // a separate RPC that knows nothing about dates).
+    const mode: 'sections' | 'unified' =
+        (selectedDistrict || searchTerm || sourceFilter || dateRangeActive) ? 'unified' : 'sections';
+    const canSelect = canManage;
 
     const loadData = useCallback(async (p?: number) => {
         if (!activeEventId) return;
@@ -85,7 +120,7 @@ const MasterListModule = () => {
         setListLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined, activeDateRange),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);
@@ -99,7 +134,7 @@ const MasterListModule = () => {
         } finally {
             setListLoading(false);
         }
-    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter]);
+    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange]);
 
     const loadDistrictPage = useCallback(async (district: string, pageNum: number) => {
         if (!activeEventId) return;
@@ -150,15 +185,23 @@ const MasterListModule = () => {
 
     useEffect(() => {
         if (!activeEventId) return;
-        if (!selectedDistrict && !searchTerm) {
+        if (mode === 'sections') {
             loadAllDistricts();
         } else {
             loadData(1);
         }
-    }, [activeEventId, selectedDistrict, searchTerm, sourceFilter]);
+    }, [activeEventId, mode, selectedDistrict, searchTerm, sourceFilter, regFrom, regTo]);
+
+    // Selection is event-scoped: never carry checked rows across an event switch.
+    useEffect(() => {
+        setSelected(new Map());
+        setBulkConfirmOpen(false);
+        setConfirmText('');
+        setBulkNotice(null);
+    }, [activeEventId]);
 
     useEffect(() => {
-        if (!selectedDistrict && !searchTerm) return;
+        if (mode === 'sections') return;
         const delegateSub = supabase.channel(`master_list_sync_${activeEventId}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'delegates', filter: activeEventId ? `event_id=eq.${activeEventId}` : undefined }, () => loadData(pageRef.current))
           .subscribe();
@@ -166,7 +209,7 @@ const MasterListModule = () => {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => loadData(pageRef.current))
           .subscribe();
         return () => { supabase.removeChannel(delegateSub); settingsSub.unsubscribe(); };
-    }, [loadData, selectedDistrict, searchTerm, sourceFilter]);
+    }, [loadData, mode, sourceFilter]);
 
     const officialDistricts = useMemo(() => {
         return (settings?.districts || [])
@@ -210,7 +253,7 @@ const MasterListModule = () => {
             alert("SUCCESS: Delegate record updated and normalized.");
             const editedDistrict = (editForm.district || '').trim();
             setEditingId(null);
-            if (!selectedDistrict && !searchTerm) {
+            if (mode === 'sections') {
                 loadDistrictPage(editedDistrict, districtSections[editedDistrict]?.page || 1);
                 db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined).then(setDistrictList).catch(() => {});
             } else {
@@ -243,8 +286,14 @@ const MasterListModule = () => {
         if (!window.confirm(`PERMANENTLY DELETE "${name}" (${d.district || ''}${d.chapter ? ' / ' + d.chapter : ''})?\n\nThis will also permanently remove this delegate's check-ins, session responses, and badge print history. Use "Merge" instead when the record is a duplicate of another delegate.\n\nThis action cannot be undone.`)) return;
         try {
             await db.deleteDelegate(d.delegate_id, activeEventId);
+            setSelected(prev => {
+                if (!prev.has(d.delegate_id)) return prev;
+                const next = new Map(prev);
+                next.delete(d.delegate_id);
+                return next;
+            });
             alert(`DELETED: ${name}`);
-            if (!selectedDistrict && !searchTerm) {
+            if (mode === 'sections') {
                 db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined).then(setDistrictList).catch(() => {});
                 loadDistrictPage(d.district, districtSections[d.district]?.page || 1);
             } else {
@@ -264,7 +313,7 @@ const MasterListModule = () => {
             alert(`SUCCESS: Records merged into ${keep.first_name} ${keep.last_name}. Check-ins, session responses, and badge history were preserved.`);
             setEditingId(null);
             setMergePrompt(null);
-            if (!selectedDistrict && !searchTerm) {
+            if (mode === 'sections') {
                 loadAllDistricts();
             } else {
                 await loadData();
@@ -312,14 +361,15 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
-            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange);
+            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (dateRangeActive ? 1 : 0);
             const headerCells = [
                 '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
                 showRank ? '<th class="p-3">Rank</th>' : '',
                 showOffice ? '<th class="p-3">Office</th>' : '',
                 showDelegateType ? '<th class="p-3">Type</th>' : '',
                 '<th class="p-3">Phone</th><th class="p-3">Source</th><th class="p-3">Reg ID</th>',
+                dateRangeActive ? '<th class="p-3">Registered</th>' : '',
                 showPaymentCols ? '<th class="p-3">Payment</th><th class="p-3">Payment Ref</th>' : '',
             ].join('');
             const rows = all.map((d, i) => {
@@ -335,12 +385,14 @@ const MasterListModule = () => {
                     `<td class="p-3 font-black text-gray-500 tracking-tighter">${escapeHtml(d.phone)}</td>`,
                     `<td class="p-3">${regBadge(d.reg_type)}</td>`,
                     `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (escapeHtml(d.external_id) || '-') : '-'}</td>`,
+                    dateRangeActive ? `<td class="p-3 font-mono text-[9px] text-gray-500">${regDateOf(d)}</td>` : '',
                     showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${escapeHtml(d.payment_reference) || '—'}</td>` : '',
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}` : '';
             const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
             const container = document.createElement('div');
             container.innerHTML = tableHtml;
@@ -349,7 +401,7 @@ const MasterListModule = () => {
             document.body.appendChild(container);
             await new Promise(r => requestAnimationFrame(r));
             await new Promise(r => setTimeout(r, 300));
-            exportToPDF(container, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.pdf`, 'landscape', 1600);
+            exportToPDF(container, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}.pdf`, 'landscape', 1600);
             document.body.removeChild(container);
         } catch (err) {
             console.error('PDF export error:', err);
@@ -365,20 +417,132 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange);
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}` : '';
             const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
             cols.push('phone', 'district', 'external_id', 'reg_type');
+            if (dateRangeActive) cols.push('created_at');
             if (showPaymentCols) cols.push('payment_amount', 'payment_reference');
-            exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}.csv`, cols);
+            exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}.csv`, cols);
         } catch (err) {
             console.error('CSV export error:', err);
         } finally {
             setExporting(null);
+        }
+    };
+
+    const selectedIds = useMemo(() => Array.from(selected.keys()), [selected]);
+
+    const scopeRecordCount = mode === 'sections'
+        ? districtList.reduce((sum, d) => sum + (d.count || 0), 0)
+        : totalRecords;
+
+    const selectionByDistrict = useMemo(() => {
+        const map = new Map<string, number>();
+        selected.forEach(v => {
+            const key = v.district || '(no district)';
+            map.set(key, (map.get(key) || 0) + 1);
+        });
+        return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+    }, [selected]);
+
+    const toggleRow = (d: Delegate) => {
+        setSelected(prev => {
+            const next = new Map(prev);
+            if (next.has(d.delegate_id)) next.delete(d.delegate_id);
+            else next.set(d.delegate_id, selectionInfoOf(d));
+            return next;
+        });
+        setBulkNotice(null);
+    };
+
+    const togglePage = (rows: Delegate[]) => {
+        setSelected(prev => {
+            const next = new Map(prev);
+            const allSelected = rows.length > 0 && rows.every(r => next.has(r.delegate_id));
+            for (const r of rows) {
+                if (allSelected) next.delete(r.delegate_id);
+                else next.set(r.delegate_id, selectionInfoOf(r));
+            }
+            return next;
+        });
+        setBulkNotice(null);
+    };
+
+    const clearSelection = () => {
+        setSelected(new Map());
+        setBulkConfirmOpen(false);
+        setConfirmText('');
+    };
+
+    const handleSelectAllMatching = async () => {
+        if (!activeEventId || bulkBusy) return;
+        setBulkBusy(true);
+        setBulkNotice(null);
+        try {
+            const rows = await db.getDelegateSelectionScope(activeEventId, {
+                search: searchTerm || undefined,
+                district: selectedDistrict || undefined,
+                region: scope.region,
+                source: sourceFilter || undefined,
+                range: activeDateRange,
+            });
+            setSelected(new Map(rows.map(r => [r.delegate_id, { name: r.name, district: r.district }])));
+            setBulkNotice(`Selected ${rows.length} delegate(s) matching the current filters.`);
+        } catch (e: any) {
+            alert('SELECT ALL FAILED: ' + (e.message || 'An error occurred.'));
+        } finally {
+            setBulkBusy(false);
+        }
+    };
+
+    const handleBulkBackup = async () => {
+        if (!activeEventId || selectedIds.length === 0) return;
+        try {
+            const rows = await db.fetchDelegatesByIds(activeEventId, selectedIds);
+            downloadJSON({
+                exported_at: new Date().toISOString(),
+                event: activeEvent?.name || activeEventId,
+                count: rows.length,
+                delegates: rows,
+            }, `FGBMFI_Delegate_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+        } catch (e: any) {
+            alert('BACKUP FAILED: ' + (e.message || 'An error occurred.'));
+        }
+    };
+
+    const refreshAfterBulk = async () => {
+        if (mode === 'sections') {
+            await loadAllDistricts();
+        } else {
+            await loadData(pageRef.current);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (!activeEventId || selectedIds.length === 0 || bulkDeleting) return;
+        setBulkDeleting(true);
+        try {
+            const res = await db.deleteDelegatesBulk(activeEventId, selectedIds);
+            const failed = new Set(res.failedIds);
+            const kept = new Map<string, SelectionInfo>();
+            selected.forEach((info, id) => { if (failed.has(id)) kept.set(id, info); });
+            setSelected(kept);
+            setBulkConfirmOpen(false);
+            setConfirmText('');
+            setBulkNotice(res.deleted > 0
+                ? `Deleted ${res.deleted} delegate(s).${res.failedIds.length ? ` ${res.failedIds.length} failed and are still selected for retry.` : ''}`
+                : 'Nothing was deleted.');
+            await refreshAfterBulk();
+        } catch (e: any) {
+            alert('BULK DELETE FAILED: ' + (e.message || 'An error occurred.'));
+        } finally {
+            setBulkDeleting(false);
         }
     };
 
@@ -509,6 +673,22 @@ const MasterListModule = () => {
                         <option value="ems">EMS</option>
                         <option value="manual">Manual</option>
                     </select>
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${dateRangeActive ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
+                        title="Filter on the date each delegate was first registered / uploaded.">
+                        <span className="text-[8px] font-black uppercase tracking-widest text-gray-500 pl-1">Registered</span>
+                        <input type="date" className="p-1 border rounded-md bg-white text-[10px] font-bold"
+                            value={regFrom} onChange={e => setRegFrom(e.target.value)} />
+                        <span className="text-[8px] font-black text-gray-400">to</span>
+                        <input type="date" className="p-1 border rounded-md bg-white text-[10px] font-bold"
+                            value={regTo} onChange={e => setRegTo(e.target.value)} />
+                        {dateRangeActive && (
+                            <button onClick={() => { setRegFrom(''); setRegTo(''); }}
+                                className="text-[9px] font-black text-red-500 hover:text-red-700 px-1" title="Clear the registration date range">×</button>
+                        )}
+                    </div>
+                    {dateRangeInvalid && (
+                        <span className="text-[9px] font-black uppercase text-red-600 self-center">End date is before start date</span>
+                    )}
                     {paymentEnabled && (
                         <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-all ${showPaymentCols ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
                             title="EMS registrations capture Payment Amount & Reference. Toggle to show these columns.">
@@ -528,9 +708,89 @@ const MasterListModule = () => {
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
                     <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
-                    <button onClick={() => (!selectedDistrict && !searchTerm ? loadAllDistricts() : loadData())} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
+                    <button onClick={() => (mode === 'sections' ? loadAllDistricts() : loadData())} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
                 </div>
             </div>
+
+            {dateRangeActive && (
+                <div className="no-print -mt-2 text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2">
+                    Showing delegates registered {describeDateRange(dateRange)}{dateRangeInvalid ? ' — invalid range, showing all dates' : ''}
+                    {' · '}{totalRecords} record(s)
+                </div>
+            )}
+
+            {bulkNotice && (
+                <div className="no-print flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2 text-[10px] font-black uppercase tracking-wider">
+                    <span>{bulkNotice}</span>
+                    <button onClick={() => setBulkNotice(null)} className="text-emerald-500 hover:text-emerald-800">×</button>
+                </div>
+            )}
+
+            {canSelect && selected.size > 0 && (
+                <div className="no-print bg-slate-900 text-white rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+                    <div className="flex items-center gap-3">
+                        <span className="bg-white text-slate-900 rounded-full px-3 py-1 text-[10px] font-black uppercase">{selected.size} selected</span>
+                        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wider">
+                            {selectionByDistrict.slice(0, 4).map(([d, n]) => `${d} (${n})`).join(' · ')}
+                            {selectionByDistrict.length > 4 ? ` · +${selectionByDistrict.length - 4} more districts` : ''}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={handleSelectAllMatching} disabled={bulkBusy}
+                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-[9px] font-black uppercase tracking-widest disabled:opacity-50">
+                            {bulkBusy ? 'Selecting…' : `Select all matching${scopeRecordCount ? ` (${scopeRecordCount})` : ''}`}
+                        </button>
+                        <button onClick={clearSelection} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-[9px] font-black uppercase tracking-widest">Clear</button>
+                        <button onClick={() => { setBulkConfirmOpen(true); setConfirmText(''); }}
+                            className="px-4 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-[9px] font-black uppercase tracking-widest">Delete selected</button>
+                    </div>
+                </div>
+            )}
+
+            {canSelect && bulkConfirmOpen && selected.size > 0 && (
+                <div className="no-print bg-red-50 border-2 border-red-200 rounded-2xl p-6 space-y-4">
+                    <div className="flex justify-between items-start border-b border-red-200 pb-3">
+                        <div>
+                            <h3 className="text-lg font-black text-red-900 uppercase tracking-widest">Confirm bulk delete</h3>
+                            <p className="text-[10px] font-bold text-red-700 uppercase tracking-wider">
+                                {selected.size} delegate(s) · {selectionByDistrict.map(([d, n]) => `${d}: ${n}`).join(' · ')}
+                            </p>
+                        </div>
+                        <button onClick={() => { setBulkConfirmOpen(false); setConfirmText(''); }} className="text-red-400 hover:text-red-700 font-black uppercase text-[10px]">Cancel [X]</button>
+                    </div>
+                    <p className="text-xs font-bold text-red-800 leading-relaxed">
+                        This permanently removes these delegates and their check-ins, session responses and badge print history.
+                        It cannot be undone. Use <span className="font-black">Merge</span> instead when a record is a duplicate of another delegate.
+                    </p>
+                    <div className="max-h-40 overflow-y-auto bg-white border border-red-100 rounded-xl divide-y divide-red-50">
+                        {Array.from(selected.entries()).slice(0, 50).map(([id, info]) => (
+                            <div key={id} className="px-3 py-1.5 flex justify-between gap-3 text-[10px] font-bold">
+                                <span className="text-gray-800 uppercase truncate">{info.name || id.slice(0, 8)}</span>
+                                <span className="text-gray-400 uppercase shrink-0">{info.district || '—'}</span>
+                            </div>
+                        ))}
+                        {selected.size > 50 && (
+                            <div className="px-3 py-1.5 text-[9px] font-black text-gray-400 uppercase">…and {selected.size - 50} more</div>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <button onClick={handleBulkBackup} disabled={bulkDeleting}
+                            className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded-lg text-[9px] font-black uppercase tracking-widest disabled:opacity-50">Download backup JSON</button>
+                        {selected.size > 20 ? (
+                            <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-black text-red-700 uppercase tracking-wider">Type DELETE to confirm:</span>
+                                <input value={confirmText} onChange={e => setConfirmText(e.target.value)}
+                                    className="p-2 border-2 border-red-300 rounded-lg font-black text-xs uppercase w-32" placeholder="DELETE" />
+                            </div>
+                        ) : null}
+                        <button onClick={handleBulkDelete}
+                            disabled={bulkDeleting || (selected.size > 20 && confirmText.trim().toUpperCase() !== 'DELETE')}
+                            className="ml-auto px-6 py-2.5 bg-red-700 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-red-800 disabled:opacity-40">
+                            {bulkDeleting ? 'DELETING…' : `DELETE ${selected.size} DELEGATE(S)`}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div ref={listRef} className="bg-white rounded-xl shadow-sm border p-6 min-h-screen">
                 <div className="print-only mb-8 text-center border-b pb-6">
@@ -538,9 +798,9 @@ const MasterListModule = () => {
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
 
-                {((!selectedDistrict && !searchTerm) ? districtListLoading : listLoading) ? (
+                {(mode === 'sections' ? districtListLoading : listLoading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
-                ) : !selectedDistrict && !searchTerm ? (
+                ) : mode === 'sections' ? (
                     /* --- MULTI-DISTRICT VIEW: per-district sections with independent pagination --- */
                     districtList.length === 0 ? (
                         <div className="py-20 text-center space-y-4">
@@ -555,7 +815,7 @@ const MasterListModule = () => {
                             const secPages = sec?.pages || 0;
                             const secLoading = sec?.loading ?? true;
                             const secTotal = sec?.total || count;
-                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0);
+                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 1 : 0);
                             const isOfficial = isValueOfficial(district, officialDistricts);
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
@@ -566,7 +826,7 @@ const MasterListModule = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-[10px] text-left min-w-[1000px]">
                                             <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                                <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                                <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <th className="p-3">Registered</th>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {secLoading ? (
@@ -576,6 +836,12 @@ const MasterListModule = () => {
                                                 ) : (
                                                     delegates.map((d, i) => (
                                                         <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
+                                                            {canSelect && (
+                                                                <td className="p-3 no-print text-center">
+                                                                    <input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40"
+                                                                        checked={selected.has(d.delegate_id)} onChange={() => toggleRow(d)} title={canDelete ? 'Select this delegate' : 'Delete is disabled for this event — enable it in Events & Config'} />
+                                                                </td>
+                                                            )}
                                                             <td className="p-3 text-[9px] font-mono text-gray-400">{(secPage - 1) * PAGE_SIZE + i + 1}</td>
                                                             <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
                                                             <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
@@ -587,6 +853,7 @@ const MasterListModule = () => {
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
+                                                            {dateRangeActive && <td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td>}
                                                             {showPaymentCols && <>
                                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
                                                                 <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
@@ -645,11 +912,17 @@ const MasterListModule = () => {
                         <div className="overflow-x-auto">
                             <table className="w-full text-[10px] text-left min-w-[1000px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr><th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <th className="p-3">Registered</th>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {delegates.map((d, i) => (
                                         <tr key={d.delegate_id} className={`hover:bg-gray-50 transition-colors ${editingId === d.delegate_id ? 'bg-blue-50' : ''}`}>
+                                            {canSelect && (
+                                                <td className="p-3 no-print text-center">
+                                                    <input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40"
+                                                        checked={selected.has(d.delegate_id)} onChange={() => toggleRow(d)} title={canDelete ? 'Select this delegate' : 'Delete is disabled for this event — enable it in Events & Config'} />
+                                                </td>
+                                            )}
                                             <td className="p-3 text-[9px] font-mono text-gray-400">{(page - 1) * PAGE_SIZE + i + 1}</td>
                                             <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
                                             <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
@@ -661,6 +934,7 @@ const MasterListModule = () => {
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
+                                            {dateRangeActive && <td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td>}
                                             {showPaymentCols && <>
                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
                                                 <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
@@ -682,7 +956,7 @@ const MasterListModule = () => {
                                     ))}
                                     {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
                                         <tr key={`__pad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -690,7 +964,7 @@ const MasterListModule = () => {
                         </div>
                     </div>
                 )}
-                {totalPages > 1 && (selectedDistrict || searchTerm) && (
+                {totalPages > 1 && (selectedDistrict || searchTerm || sourceFilter || dateRangeActive) && (
                     <div className="no-print mt-6 flex items-center justify-center gap-3 pt-4 border-t border-gray-200">
                         <button onClick={() => loadData(1)} disabled={page <= 1} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">First</button>
                         <button onClick={() => loadData(page - 1)} disabled={page <= 1} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Prev</button>

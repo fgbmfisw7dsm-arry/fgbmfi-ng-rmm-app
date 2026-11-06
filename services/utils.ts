@@ -430,6 +430,48 @@ export const downloadJSON = (data: any, filename: string) => {
     document.body.removeChild(link);
 };
 
+// Registration date-range helpers. `delegates.created_at` is UTC, but officers
+// pick local calendar days — convert to inclusive local-day bounds so the first
+// and last hour of the selected window are never lost.
+export interface DateRangeFilter {
+    from?: string;
+    to?: string;
+}
+
+export const hasDateRange = (range?: DateRangeFilter | null): boolean =>
+    !!(range && (range.from || range.to));
+
+export const localDayStartISO = (day?: string): string | undefined => {
+    if (!day) return undefined;
+    const d = new Date(`${day}T00:00:00.000`);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+};
+
+export const localDayEndISO = (day?: string): string | undefined => {
+    if (!day) return undefined;
+    const d = new Date(`${day}T23:59:59.999`);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+};
+
+export const toServerDateRange = (range?: DateRangeFilter | null): { from?: string; to?: string } => ({
+    from: localDayStartISO(range?.from),
+    to: localDayEndISO(range?.to),
+});
+
+const dayLabel = (day?: string): string => {
+    if (!day) return '';
+    const d = new Date(`${day}T00:00:00.000`);
+    if (Number.isNaN(d.getTime())) return day;
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+export const describeDateRange = (range?: DateRangeFilter | null): string => {
+    if (!hasDateRange(range)) return '';
+    if (range?.from && range?.to) return `${dayLabel(range.from)} – ${dayLabel(range.to)}`;
+    if (range?.from) return `from ${dayLabel(range.from)}`;
+    return `up to ${dayLabel(range?.to)}`;
+};
+
 export const exportToCSV = (rows: Record<string, any>[], filename: string, columns?: string[]) => {
     const cols = columns || Object.keys(rows[0] || {});
     const header = cols.join(',');

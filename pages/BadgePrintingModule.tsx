@@ -7,8 +7,13 @@ import { generateBadgeImage } from '../services/badgeImageGenerator';
 import { useQuery } from '@tanstack/react-query';
 import BadgePreview from '../components/BadgePreview';
 import BatchStatusBadge from '../components/BatchStatusBadge';
-
+import { describeDateRange } from '../services/utils';
 type Tab = 'generate' | 'batches' | 'reprint' | 'history';
+
+// Registration-date filters are picked as local calendar days; the service
+// converts them to inclusive UTC bounds before querying `created_at`.
+const dateRangeSlug = (f: BadgeFilter): string =>
+  f.createdFrom || f.createdTo ? `_${f.createdFrom || 'start'}_to_${f.createdTo || 'end'}` : '';
 
 const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '8-up', label: '8-up Landscape (90×60mm)' },
@@ -103,6 +108,8 @@ const BadgePrintingModule = () => {
     surnameTo: '',
     delegateNumberFrom: '',
     delegateNumberTo: '',
+    createdFrom: '',
+    createdTo: '',
     selectedIds: [],
   });
 
@@ -254,6 +261,8 @@ const BadgePrintingModule = () => {
       surnameTo: '',
       delegateNumberFrom: '',
       delegateNumberTo: '',
+      createdFrom: '',
+      createdTo: '',
       selectedIds: [],
     });
     setSelectedDelegates([]);
@@ -341,6 +350,7 @@ const BadgePrintingModule = () => {
     if (active.badgePrintedStatus && active.badgePrintedStatus !== 'all') count++;
     if (active.surnameFrom || active.surnameTo) count++;
     if (active.delegateNumberFrom || active.delegateNumberTo) count++;
+    if (active.createdFrom || active.createdTo) count++;
     if (active.selectedIds?.length) count++;
     return count;
   };
@@ -383,6 +393,8 @@ const BadgePrintingModule = () => {
         activeFilters.surnameTo ||
         activeFilters.delegateNumberFrom ||
         activeFilters.delegateNumberTo ||
+        activeFilters.createdFrom ||
+        activeFilters.createdTo ||
         (activeFilters.badgePrintedStatus && activeFilters.badgePrintedStatus !== 'all');
 
       if (!hasFilters) {
@@ -548,7 +560,7 @@ const BadgePrintingModule = () => {
             .replace(/-+/g, '-')
             .replace(/^-|-$/g, '');
           const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '').replace('T', '_');
-          const badgeFileName = `FGBMFI_Batch-${batch.batch_number}_${districtSlug}_${timestamp}.pdf`;
+          const badgeFileName = `FGBMFI_Batch-${batch.batch_number}_${districtSlug}${dateRangeSlug(filters)}_${timestamp}.pdf`;
 
           const pdfUrl = await db.uploadBadgePDF(batch.batch_id, pdfBytes, badgeFileName);
           await db.updateBadgeBatchStatus(batch.batch_id, 'ready', pdfUrl);
@@ -690,7 +702,7 @@ const BadgePrintingModule = () => {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
     const batchNum = generatedBatchNumber || '0';
-    return `FGBMFI_Batch-${batchNum}_${districtSlug}_${timestamp}.pdf`;
+    return `FGBMFI_Batch-${batchNum}_${districtSlug}${dateRangeSlug(filters)}_${timestamp}.pdf`;
   };
 
   const handleDownload = async () => {
@@ -1140,6 +1152,45 @@ const BadgePrintingModule = () => {
                     }))
                   }
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  Registered From
+                </label>
+                <input
+                  type="date"
+                  className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={filters.createdFrom || ''}
+                  onChange={(e) => setFilters((f) => ({ ...f, createdFrom: e.target.value || undefined }))}
+                />
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  Registered To
+                </label>
+                <input
+                  type="date"
+                  className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={filters.createdTo || ''}
+                  onChange={(e) => setFilters((f) => ({ ...f, createdTo: e.target.value || undefined }))}
+                />
+              </div>
+              <div className="sm:col-span-2 flex items-end">
+                <p className="text-[8px] leading-snug text-gray-400 font-bold uppercase tracking-wider">
+                  {(filters.createdFrom || filters.createdTo) ? (
+                    <span className="text-blue-700">
+                      Registered {describeDateRange({ from: filters.createdFrom, to: filters.createdTo })}
+                      {filters.createdFrom && filters.createdTo && filters.createdTo < filters.createdFrom
+                        ? ' — check the dates (end is before start)'
+                        : ''}
+                    </span>
+                  ) : (
+                    'Filters on the date each delegate was first registered / uploaded. Re-imports of existing people keep their original date.'
+                  )}
+                </p>
               </div>
             </div>
 

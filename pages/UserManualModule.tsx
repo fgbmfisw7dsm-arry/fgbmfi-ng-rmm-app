@@ -407,7 +407,11 @@ const MANUAL_SECTIONS: DocSection[] = [
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FILTER BAR</span>
-            Narrow by District, Chapter, Delegate Type, Surname range, or Delegate Number. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
+            Narrow by District, Chapter, Delegate Type, Surname range, Delegate Number, or <strong>Registered From / To</strong>. The date range filters on the date each delegate was first registered or uploaded, and combines with every other filter — e.g. <em>All Districts, registered 1–31 Oct 2026, Badge Not Printed</em>. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">DATE RANGE = "FIRST REGISTERED"</span>
+            The range uses the delegate's original registration/upload date. Re-uploading a file whose people already exist <strong>merges</strong> into the existing records and keeps their original date, so only genuinely new people appear in a later range. The chosen range is saved on the batch and shown in the batch file name.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">"SKIP ALREADY PRINTED" GUARD (DEFAULT ON)</span>
@@ -506,6 +510,14 @@ const MANUAL_SECTIONS: DocSection[] = [
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FULL-DATASET PDF & CSV EXPORT</span>
             Export buttons fetch the complete dataset (all pages, 500 delegates at a time) before generating the PDF or CSV file. The filename includes the district name or "All-Districts". Buttons show "Exporting..." with a loading state during the fetch.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">REGISTERED DATE RANGE</span>
+            Pick <strong>Registered</strong> From / To (local calendar days, inclusive) to list only delegates first registered or uploaded in that window — e.g. <em>1–31 October 2026</em>. It works with the District, Source and Search filters, and the exports honor it too (the PDF/CSV carry a "Registered" column and the filename states the range). While a range is active the page uses the unified table (the per-district section counts come from a separate summary and would ignore dates). An end date before the start date is flagged and the range is ignored until corrected.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">BULK SELECT & BULK DELETE (ADMIN)</span>
+            Tick the checkboxes (or the header box for the current page) to select delegates, then use <strong>Select all matching (N)</strong> to extend the selection to every record matching the current filters. The dark selection bar shows the count and the district breakdown. <strong>Delete selected</strong> opens the confirmation panel: review the list, download a <strong>backup JSON</strong>, and (for more than 20 records) type <strong>DELETE</strong> to enable the delete button. The delete runs as one transaction and removes each delegate's check-ins, session responses and badge print history. It obeys the event's <strong>Allow Admins to Delete Delegates</strong> switch — when that is off the checkboxes are greyed out. Use <strong>Merge</strong> instead when a record is a duplicate of another delegate (merge keeps the attendance/badge history).
           </div>
         </div>
       </>

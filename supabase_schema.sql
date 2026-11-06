@@ -891,6 +891,8 @@ CREATE INDEX IF NOT EXISTS idx_pledges_event_session ON pledges(event_id, sessio
 CREATE INDEX IF NOT EXISTS idx_delegates_event_id ON delegates(event_id);
 CREATE INDEX IF NOT EXISTS idx_delegates_external_id ON delegates(external_id) WHERE external_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_delegates_badge_printed ON delegates(event_id, badge_printed);
+-- v1.92: registration date-range filter (Master List + badge printing cohorts)
+CREATE INDEX IF NOT EXISTS idx_delegates_event_created_at ON delegates(event_id, created_at);
 
 -- Unique indexes
 DROP INDEX IF EXISTS idx_delegates_qr_hash;
@@ -1318,7 +1320,9 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_region TEXT DEFAULT NULL,
   p_event_id UUID DEFAULT NULL,
   p_registration_source TEXT DEFAULT NULL,
-  p_reg_type TEXT DEFAULT NULL
+  p_reg_type TEXT DEFAULT NULL,
+  p_created_from TIMESTAMPTZ DEFAULT NULL,
+  p_created_to TIMESTAMPTZ DEFAULT NULL
 ) RETURNS JSON
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -1376,7 +1380,10 @@ BEGIN
     OR (p_reg_type = 'web'    AND reg_type = 'web')
     OR (p_reg_type = 'ems'    AND reg_type = 'ems')
     OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
-  );
+  )
+  -- v1.92: inclusive registration window (client sends local-day bounds as UTC)
+  AND (p_created_from IS NULL OR created_at >= p_created_from)
+  AND (p_created_to   IS NULL OR created_at <= p_created_to);
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
   FROM (
@@ -1422,6 +1429,9 @@ BEGIN
       OR (p_reg_type = 'ems'    AND reg_type = 'ems')
       OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
     )
+    -- v1.92: inclusive registration window
+    AND (p_created_from IS NULL OR created_at >= p_created_from)
+    AND (p_created_to   IS NULL OR created_at <= p_created_to)
     ORDER BY chapter, last_name, first_name
     LIMIT p_page_size
     OFFSET offset_val
@@ -1434,6 +1444,84 @@ BEGIN
     'pageSize', p_page_size,
     'totalPages', CEIL(total_count::FLOAT / p_page_size)
   );
+END;
+$func$;
+
+-- v1.92 — transactional bulk delete (Master List checkboxes).
+-- SECURITY INVOKER so RLS governs; explicit admin gate + event-active guard +
+-- the per-event `delegate_deletion_enabled` switch are enforced server-side.
+CREATE OR REPLACE FUNCTION delete_delegates_bulk(
+  p_event_id UUID,
+  p_ids UUID[]
+) RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $func$
+DECLARE
+  v_active BOOLEAN;
+  v_cfg JSONB;
+  v_deleted INT := 0;
+  v_sample TEXT;
+BEGIN
+  IF NOT is_admin_user() THEN
+    RAISE EXCEPTION 'FORBIDDEN: administrator privileges required';
+  END IF;
+
+  IF p_event_id IS NULL OR p_ids IS NULL OR array_length(p_ids, 1) IS NULL THEN
+    RETURN jsonb_build_object('deleted', 0, 'failedIds', '[]'::jsonb);
+  END IF;
+
+  IF array_length(p_ids, 1) > 25000 THEN
+    RAISE EXCEPTION 'BULK_LIMIT: at most 25000 delegates per bulk delete';
+  END IF;
+
+  SELECT is_active, event_config INTO v_active, v_cfg
+  FROM events WHERE event_id = p_event_id;
+
+  IF v_active IS NULL THEN
+    RAISE EXCEPTION 'EVENT_NOT_FOUND: no event with that id';
+  END IF;
+
+  IF v_active = false THEN
+    RAISE EXCEPTION 'EVENT_LOCKED: This event is locked (read-only). Unlock it in Events & Config to delete delegates.';
+  END IF;
+
+  IF COALESCE((v_cfg ->> 'delegate_deletion_enabled')::boolean, false) IS NOT TRUE THEN
+    RAISE EXCEPTION 'DELETE_DISABLED: Delete is disabled for this event. Enable "Allow Admins to Delete Delegates" in Events & Config first.';
+  END IF;
+
+  SELECT string_agg(trim(concat(first_name, ' ', last_name)), ', ' ORDER BY last_name)
+  INTO v_sample
+  FROM (
+    SELECT first_name, last_name
+    FROM delegates
+    WHERE event_id = p_event_id AND delegate_id = ANY(p_ids)
+    ORDER BY last_name
+    LIMIT 5
+  ) s;
+
+  DELETE FROM checkins          WHERE event_id = p_event_id AND delegate_id = ANY(p_ids);
+  DELETE FROM session_responses WHERE event_id = p_event_id AND delegate_id = ANY(p_ids);
+  DELETE FROM badge_print_logs  WHERE event_id = p_event_id AND delegate_id = ANY(p_ids);
+
+  DELETE FROM delegates WHERE event_id = p_event_id AND delegate_id = ANY(p_ids);
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+
+  INSERT INTO audit_log (event_id, action_type, performed_by, performer_email, target_type, target_id, summary, metadata)
+  VALUES (
+    p_event_id,
+    'delegate_delete_bulk',
+    auth.uid(),
+    nullif(auth.jwt() ->> 'email', ''),
+    'delegate',
+    p_event_id,
+    format('Deleted %s delegate(s) via Master List bulk delete', v_deleted)
+      || CASE WHEN v_sample IS NOT NULL THEN ': ' || v_sample ELSE '' END,
+    jsonb_build_object('count', v_deleted, 'source', 'master_list_rpc')
+  );
+
+  RETURN jsonb_build_object('deleted', v_deleted, 'failedIds', '[]'::jsonb);
 END;
 $func$;
 
