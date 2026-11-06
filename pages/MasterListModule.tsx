@@ -723,7 +723,7 @@ const MasterListModule = () => {
                         <option value="">All Imports</option>
                         {importBatches.map(b => (
                             <option key={b.batch_id} value={b.batch_id}>
-                                {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')} ·{' '}
+                                {(b.label || 'Import')} · {new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })} ·{' '}
                                 {b.stamped != null ? `${b.stamped} delegate${b.stamped === 1 ? '' : 's'} · ${b.row_count} rows` : `${b.row_count} rows`}
                             </option>
                         ))}

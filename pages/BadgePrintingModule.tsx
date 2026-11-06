@@ -129,6 +129,7 @@ const BadgePrintingModule = () => {
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false);
   const [cohortStats, setCohortStats] = useState<{ total: number; notPrinted: number } | null>(null);
+  const [cohortPrintedNames, setCohortPrintedNames] = useState<string[]>([]);
   const [resettingBatch, setResettingBatch] = useState(false);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [batchDelegates, setBatchDelegates] = useState<Record<string, BadgeBatchDelegate[]>>({});
@@ -163,6 +164,9 @@ const BadgePrintingModule = () => {
   const [availableChapters, setAvailableChapters] = useState<{ chapter_name: string; chapter_code?: string }[]>([]);
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
+  const selectedBatch = filters.importBatchId
+    ? (importBatches.find((b) => b.batch_id === filters.importBatchId) || null)
+    : null;
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
@@ -274,8 +278,27 @@ const BadgePrintingModule = () => {
       ]);
       if (previewSeq.current !== run) return;
       setCohortStats({ total: batchTotal, notPrinted: batchNotPrinted });
+
+      // Name the already-printed members so the operator can see exactly which
+      // delegates the "Reset N" action affects.
+      if (batchTotal > batchNotPrinted) {
+        const { rows: printedRows } = await db.getBadgeCohort(
+          activeEventId,
+          { importBatchId: filters.importBatchId, badgePrintedStatus: 'printed' },
+          'surname',
+          10,
+          0
+        );
+        if (previewSeq.current !== run) return;
+        setCohortPrintedNames(printedRows.map((d) =>
+          `${d.title || ''} ${d.first_name} ${d.last_name}`.replace(/\s+/g, ' ').trim()
+        ));
+      } else {
+        setCohortPrintedNames([]);
+      }
     } else {
       setCohortStats(null);
+      setCohortPrintedNames([]);
     }
   }, [activeEventId, activeCohortFilters, filters.importBatchId, selectedDelegates, sortBy]);
 
@@ -1246,7 +1269,7 @@ const BadgePrintingModule = () => {
                   <option value="">All Imports</option>
                   {importBatches.map((b) => (
                     <option key={b.batch_id} value={b.batch_id}>
-                      {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')} ·{' '}
+                      {(b.label || 'Import')} · {new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })} ·{' '}
                       {b.stamped != null ? `${b.stamped} delegate${b.stamped === 1 ? '' : 's'} · ${b.row_count} rows` : `${b.row_count} rows`}
                     </option>
                   ))}
@@ -1631,11 +1654,30 @@ const BadgePrintingModule = () => {
                   <p className="text-[10px] font-black text-slate-800 uppercase tracking-widest">
                     Import batch cohort
                   </p>
+                  {selectedBatch && (
+                    <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">
+                      {selectedBatch.label || 'Import'} · {new Date(selectedBatch.created_at).toLocaleString('en-GB')}
+                      {selectedBatch.stamped != null ? ` · ${selectedBatch.row_count} rows` : ''}
+                    </p>
+                  )}
+                  {cohortPrintedNames.length > 0 && (
+                    <p className="text-[9px] font-bold text-amber-700 mt-1 leading-snug">
+                      Already printed: {cohortPrintedNames.slice(0, 5).join(' · ')}
+                      {cohortStats && cohortStats.total - cohortStats.notPrinted > cohortPrintedNames.length
+                        ? ` · +${cohortStats.total - cohortStats.notPrinted - cohortPrintedNames.length} more`
+                        : ''}
+                    </p>
+                  )}
                   <p className="text-[10px] font-bold text-gray-600 mt-0.5">
                     <span className="text-slate-900">{cohortStats.total}</span> delegate{cohortStats.total === 1 ? '' : 's'} in this batch
                     {' · '}<span className="text-emerald-700">{cohortStats.notPrinted}</span> not printed
                     {' · '}<span className="text-amber-600">{cohortStats.total - cohortStats.notPrinted}</span> already printed
                   </p>
+                  {cohortStats.total === 0 && (
+                    <p className="text-[9px] font-bold text-red-600 mt-1">
+                      No delegates are linked to this batch — it may be an older import of the same file. Pick the newest one (time shown).
+                    </p>
+                  )}
                 </div>
                 <div className="text-right space-y-2">
                   {cohortStats.total - cohortStats.notPrinted > 0 && (
@@ -1770,7 +1812,19 @@ const BadgePrintingModule = () => {
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            {filters.importBatchId && cohortStats && (cohortStats.total - cohortStats.notPrinted) > 0 && (
+              <button
+                onClick={handleResetBatchPrinted}
+                disabled={resettingBatch || isLocked}
+                className="px-5 py-5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-lg"
+                title="Clear the Badge Printed stamp for the printed members of this batch so the whole upload reprints"
+              >
+                {resettingBatch
+                  ? 'Resetting…'
+                  : `Reset ${cohortStats.total - cohortStats.notPrinted} printed & include all`}
+              </button>
+            )}
             <button
               onClick={handleGenerate}
               disabled={generating || isLocked || previewCount === 0}
@@ -1781,7 +1835,7 @@ const BadgePrintingModule = () => {
                 : previewCount === 0
                 ? 'Generate 0 Badges'
                 : previewCount <= batchSize * batchesPerRun
-                ? `Generate ${previewCount} Badge${previewCount === 1 ? '' : 's'}`
+                ? `Generate ${previewCount} Badge${previewCount === 1 ? '' : 's'}${filters.importBatchId && cohortStats && cohortStats.total > previewCount ? ` of ${cohortStats.total}` : ''}`
                 : `Generate ${Math.min(previewCount, batchSize * batchesPerRun)} of ${previewCount} Badges`}
             </button>
           </div>
