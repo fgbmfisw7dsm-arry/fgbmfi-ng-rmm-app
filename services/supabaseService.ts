@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis, ImportBatch, ImportBadgeReset } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
@@ -1361,12 +1361,12 @@ export const db = {
         return results;
     },
 
-    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity'): Promise<Delegate[]> => {
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity', importBatchId?: string): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
         while (true) {
-            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source, range, basis);
+            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source, range, basis, importBatchId);
             if (!paginated.data || paginated.data.length === 0) break;
             results.push(...paginated.data);
             if (paginated.data.length < pageSize) break;
@@ -1375,7 +1375,7 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity'): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity', importBatchId?: string): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
             return { data: [], total: 0, page, pageSize, totalPages: 0 };
@@ -1414,6 +1414,7 @@ export const db = {
                 p_created_from: createdRange.from ?? null,
                 p_created_to: createdRange.to ?? null,
                 p_date_basis: dateBasis,
+                p_import_id: importBatchId || null,
             });
             if (!error && data && !guestAliasOr) {
                 result = data as any;
@@ -1445,6 +1446,7 @@ export const db = {
             }
             if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
             if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
+            if (importBatchId) q = q.eq('last_import_id', importBatchId);
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
             const { data: rows, count, error } = await q2.range(from, from + pageSize - 1);
@@ -1967,7 +1969,63 @@ export const db = {
         return repaired;
     },
 
-    importDelegates: async (csv: string, eventId?: string, regType: RegType = 'manual', onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void): Promise<{ inserted: number; updated: number; skipped: number }> => {
+    createImportBatch: async (
+        eventId: string,
+        label: string,
+        regType: RegType,
+        resetBadge: ImportBadgeReset = 'none'
+    ): Promise<ImportBatch> => {
+        const { data, error } = await supabase
+            .from('import_batches')
+            .insert({
+                event_id: eventId,
+                label: (label || '').trim().slice(0, 200) || null,
+                reg_type: regType,
+                reset_badge: resetBadge,
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        return data as ImportBatch;
+    },
+
+    finalizeImportBatch: async (
+        batchId: string,
+        counts: { row_count?: number; inserted: number; updated: number; skipped: number; badgeReset: number }
+    ): Promise<void> => {
+        if (!batchId) return;
+        const { error } = await supabase
+            .from('import_batches')
+            .update({
+                row_count: counts.row_count ?? (counts.inserted + counts.updated + counts.skipped),
+                inserted: counts.inserted,
+                updated: counts.updated,
+                skipped: counts.skipped,
+                badge_reset: counts.badgeReset,
+            })
+            .eq('batch_id', batchId);
+        if (error) console.error('[finalizeImportBatch] update failed:', error);
+    },
+
+    getImportBatches: async (eventId: string, limit: number = 20): Promise<ImportBatch[]> => {
+        if (!eventId) return [];
+        const { data, error } = await supabase
+            .from('import_batches')
+            .select('*')
+            .eq('event_id', eventId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+        if (error) return [];
+        return (data || []) as ImportBatch[];
+    },
+
+    importDelegates: async (
+        csv: string,
+        eventId?: string,
+        regType: RegType = 'manual',
+        opts?: { importBatchId?: string; resetBadge?: ImportBadgeReset },
+        onProgress?: (inserted: number, updated: number, skipped: number, total: number) => void
+    ): Promise<{ inserted: number; updated: number; skipped: number; stamped: number; badgeReset: number }> => {
         if (!eventId) throw new Error('importDelegates requires eventId');
         const lines = splitCsvRecords(csv).map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
@@ -1980,6 +2038,10 @@ export const db = {
         let inserted = 0;
         let updated = 0;
         let skipped = 0;
+        let stamped = 0;
+        let badgeReset = 0;
+        const resetBadge: ImportBadgeReset = opts?.resetBadge || 'none';
+        const importBatchId = opts?.importBatchId || null;
 
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
@@ -2004,16 +2066,38 @@ export const db = {
                 };
             });
 
+            let handled = false;
             try {
                 const { data, error } = await supabase.rpc('import_delegates_batch_merge', {
                     p_delegates: JSON.parse(JSON.stringify(payload)),
-                    p_event_id: eventId
+                    p_event_id: eventId,
+                    p_import_id: importBatchId,
+                    p_reset_badge: resetBadge,
                 });
                 if (error) throw error;
                 inserted += data?.inserted || 0;
                 updated += data?.updated || 0;
                 skipped += data?.skipped || 0;
+                stamped += data?.stamped || 0;
+                badgeReset += data?.badgeReset || 0;
+                handled = true;
             } catch {
+                // Pre-v1.94 database: retry the legacy 2-arg signature before
+                // degrading to per-row inserts (imports keep working, unbatched).
+                try {
+                    const { data, error } = await supabase.rpc('import_delegates_batch_merge', {
+                        p_delegates: JSON.parse(JSON.stringify(payload)),
+                        p_event_id: eventId
+                    });
+                    if (error) throw error;
+                    inserted += data?.inserted || 0;
+                    updated += data?.updated || 0;
+                    skipped += data?.skipped || 0;
+                    handled = true;
+                } catch { /* fall through to per-row */ }
+            }
+
+            if (!handled) {
                 for (const rec of payload) {
                     try {
                         const { error } = await supabase.from('delegates').insert(rec);
@@ -2090,7 +2174,7 @@ export const db = {
             if (onProgress) onProgress(inserted, updated, skipped, lines.length);
         }
 
-        return { inserted, updated, skipped };
+        return { inserted, updated, skipped, stamped, badgeReset };
     },
 
     reconcileDistrictPortal: async (csv: string, eventId?: string, dryRun: boolean = true): Promise<{ inserted: number; updated: number; skipped: number; total: number }> => {
@@ -2514,14 +2598,14 @@ export const db = {
 
     getDelegateSelectionScope: async (
         eventId: string,
-        opts: { search?: string; district?: string; region?: string; source?: RegType; range?: DateRangeFilter; basis?: DateBasis }
+        opts: { search?: string; district?: string; region?: string; source?: RegType; range?: DateRangeFilter; basis?: DateBasis; importBatchId?: string }
     ): Promise<Array<{ delegate_id: string; name: string; district: string }>> => {
         if (!eventId) return [];
         const rows: Array<{ delegate_id: string; name: string; district: string }> = [];
         let page = 1;
         const pageSize = 1000;
         while (true) {
-            const res = await db.getPaginatedDelegates(page, pageSize, opts.search, opts.district, opts.region, eventId, opts.source, opts.range, opts.basis ?? 'activity');
+            const res = await db.getPaginatedDelegates(page, pageSize, opts.search, opts.district, opts.region, eventId, opts.source, opts.range, opts.basis ?? 'activity', opts.importBatchId);
             if (!res.data?.length) break;
             for (const d of res.data) {
                 rows.push({
@@ -4050,6 +4134,7 @@ export const db = {
             const dateColumn = filters.dateBasis === 'created' ? 'created_at' : 'last_activity_at';
             if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
             if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
+            if (filters.importBatchId) q = q.eq('last_import_id', filters.importBatchId);
 
             if (filters.badgePrintedStatus === 'printed') {
                 q = q.eq('badge_printed', true);
@@ -4085,6 +4170,7 @@ export const db = {
         const dateColumn = filters.dateBasis === 'created' ? 'created_at' : 'last_activity_at';
         if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
         if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
+        if (filters.importBatchId) q = q.eq('last_import_id', filters.importBatchId);
 
         if (filters.badgePrintedStatus === 'printed') {
             q = q.eq('badge_printed', true);

@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.93 (Delegate activity date — created-or-updated date range with badge prints excluded; see §89)
+- **Current Version:** 1.94 (Import batches — exact re-upload cohort + optional badge-stamp reset; see §90)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1274,6 +1274,30 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Behaviour notes for operators:** import merge/gap-fill, Repair Imported Names, Reconcile Portal CSV, Reclassify Source, Master List edits and `repairExternalIds` **do** move the activity date (that is the feature). Rows updated before this deploy may carry activity dates from past badge prints — not backfillable; ranges behave correctly from deployment forward.
 - **Deploy order (strict):** run `supabase_migration_v1.93_delegate_activity_date.sql` **then** deploy the frontend. Unlike v1.92 there is no graceful fallback here: the badge module filters `last_activity_at` directly, so a frontend-first deploy would silently return 0 badge candidates. Adding the stored generated column rewrites `delegates` once — run at a quiet moment.
 - **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes. Migration self-checks: exactly one `get_paginated_delegates`, `last_activity_at` is generated, the activity index exists, and the trigger body no longer mentions badge columns. Manual: edit a delegate → it appears in today's activity range; mark a badge batch printed → activity range unchanged; "Created only" still returns the original intake; badge Generate with Print → Mark Printed → re-Preview shows the same cohort minus what was just marked.
+
+## 90. Import Batches — exact re-upload cohort + optional badge-stamp reset (v1.94)
+
+- **Problem solved:** re-uploading a CSV that matches existing delegates wrote **nothing** when every field already matched (the merge UPDATE is gated on filling a blank / repairing a corrupt value, `supabase_schema.sql` merge branch). No write → `updated_at` never moved → the v1.93 "Last activity" range could not see them, so those records were neither findable in the Master List nor reprintable from Batch Printing.
+- **Decision (product owner):** the **import batch** is the primary identifier — exact, repeatable twice in a day, and it preserves `badge_printed_at`. The badge-stamp reset is an **optional** per-import action, defaulting to **"only where data changed"**. The conservative fill-blank-only merge stays (no overwrite mode).
+- **Schema (`supabase_migration_v1.94_import_batches.sql`, idempotent, deploy BEFORE the frontend):**
+  - New `import_batches(batch_id, event_id, label, reg_type, reset_badge, row_count, inserted, updated, skipped, badge_reset, created_by, created_at)` + `(event_id, created_at DESC)` index + RLS mirroring `badge_batches` (SELECT/INSERT/UPDATE for admin + event_admin; no UI deletes).
+  - `delegates.last_import_id UUID REFERENCES import_batches ON DELETE SET NULL` + `delegates.last_imported_at` + `idx_delegates_event_last_import(event_id, last_import_id)`.
+  - **Activity trigger** re-generated with `last_import_id` / `last_imported_at` added to the ignore list (same catalogue-driven comparison as v1.93), so stamping an import **does not** move `last_activity_at`. "Activity" still means "details changed".
+  - `get_paginated_delegates` gains trailing `p_import_id UUID DEFAULT NULL` (12-arg; the 11-arg is dropped first — overload trap).
+  - `import_delegates_batch_merge(p_delegates, p_event_id, p_import_id UUID DEFAULT NULL, p_reset_badge TEXT DEFAULT 'none')` (2-arg dropped first):
+    - INSERT stamps `last_import_id` / `last_imported_at`;
+    - every match is stamped (skipped when it already carries this batch — idempotent re-runs);
+    - reset `'changed'` = only rows where the fill applied; `'all'` = every matched row (`badge_printed=false, badge_printed_at=NULL`);
+    - returns `{inserted, updated, skipped, stamped, badgeReset, batch, total}` and counts a reset-only row as **updated** (not skipped).
+- **Service (`supabaseService.ts`):** `createImportBatch`, `finalizeImportBatch`, `getImportBatches`; `importDelegates(csv, eventId, regType, opts?, onProgress?)` where `opts = { importBatchId?, resetBadge? }`. A **legacy 2-arg RPC retry** sits between the new RPC call and the per-row fallback, so a frontend deploy against a pre-v1.94 database still imports (just without batch markers). `getPaginatedDelegates` / `fetchAllDelegatesForExport` / `getDelegateSelectionScope` take a trailing `importBatchId`; badge `getFilteredDelegates`/`getFilteredDelegateCount` filter `last_import_id`.
+- **UI:**
+  - **ImportModule:** *Reset Badge Printed stamp* selector — No reset (default) · Only where data changed · All matched (behind a confirm explaining the reprint volume). The upload creates an `import_batches` row (label = CSV file name, falling back to a timestamp), finalizes the counters, and the success banner reports `Linked to import batch: <label> (N rows)` + `X badge stamps cleared — now Badge Not Printed`. Batch creation failure degrades to a plain import.
+  - **Batch Badge Printing:** new **Import Batch** dropdown (last 20 for the event: label · date · rows), counted in the active-filter badge and included in `hasFilters`, so *Import batch + Not Printed* is the reprint cohort. The batch id is stored in `badge_batches.filters`.
+  - **Master List:** the same **Import Batch** select next to Source; it acts as a filter (unified table) and the export filename gets an `import-batch` suffix.
+- **types.ts additive exceptions:** `ImportBatch`, `ImportBadgeReset`, `Delegate.last_import_id` / `last_imported_at`, `BadgeFilter.importBatchId`.
+- **Operator notes:** `last_import_id` holds only the **latest** upload per person (history lives in `audit_log`); re-importing the same file creates a new batch and moves the rows to it; the reset destroys `badge_printed_at` for the affected rows, which is why the default is changed-only.
+- **Deploy order (strict):** run `supabase_migration_v1.94_import_batches.sql` then deploy the frontend. The legacy RPC retry keeps imports working if the order slips, but the badge/Master List batch filters need the columns.
+- **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes. Migration self-checks: exactly one `get_paginated_delegates` and one `import_delegates_batch_merge`, `delegates.last_import_id` exists, and the activity trigger no longer mentions the import marker. Manual: import an unchanged district file → `skipped` counts as before but the banner shows a batch, and *Import batch = that upload + Badge Not Printed* lists exactly its rows; choose "Only where data changed" → only corrected rows lose their stamp; mark a batch printed → the import-batch cohort does not change.
 
 ## Code Conventions
 

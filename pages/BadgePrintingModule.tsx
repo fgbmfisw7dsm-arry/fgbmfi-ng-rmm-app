@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS, DateBasis } from '../types';
+import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS, DateBasis, ImportBatch } from '../types';
 import { AppContext } from '../context/AppContext';
 import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
@@ -153,6 +153,7 @@ const BadgePrintingModule = () => {
   const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
   const [availableChapters, setAvailableChapters] = useState<{ chapter_name: string; chapter_code?: string }[]>([]);
   const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
+  const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [reprintBatches, setReprintBatches] = useState<string[]>([]);
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
@@ -180,6 +181,11 @@ const BadgePrintingModule = () => {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!activeEventId) { setImportBatches([]); return; }
+    db.getImportBatches(activeEventId, 20).then(setImportBatches).catch(() => setImportBatches([]));
+  }, [activeEventId]);
 
 
 
@@ -355,6 +361,7 @@ const BadgePrintingModule = () => {
     if (active.surnameFrom || active.surnameTo) count++;
     if (active.delegateNumberFrom || active.delegateNumberTo) count++;
     if (active.createdFrom || active.createdTo) count++;
+    if (active.importBatchId) count++;
     if (active.selectedIds?.length) count++;
     return count;
   };
@@ -399,6 +406,7 @@ const BadgePrintingModule = () => {
         activeFilters.delegateNumberTo ||
         activeFilters.createdFrom ||
         activeFilters.createdTo ||
+        activeFilters.importBatchId ||
         (activeFilters.badgePrintedStatus && activeFilters.badgePrintedStatus !== 'all');
 
       if (!hasFilters) {
@@ -1045,6 +1053,27 @@ const BadgePrintingModule = () => {
                   {delegateTypes.map((t) => (
                     <option key={t} value={t}>
                       {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  Import Batch
+                </label>
+                <select
+                  className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={filters.importBatchId || ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, importBatchId: e.target.value || undefined }))
+                  }
+                  title="Every row from one CSV upload is linked to an import batch."
+                >
+                  <option value="">All Imports</option>
+                  {importBatches.map((b) => (
+                    <option key={b.batch_id} value={b.batch_id}>
+                      {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')} · {b.row_count || (b.inserted + b.updated + b.skipped)} rows
                     </option>
                   ))}
                 </select>

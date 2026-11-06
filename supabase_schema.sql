@@ -21,6 +21,27 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- v1.94: one row per bulk CSV upload. Every delegate row the import inserts or
+-- matches is stamped with last_import_id, so an exact cohort ("reprint what I
+-- just uploaded") is retrievable without relying on dates.
+CREATE TABLE IF NOT EXISTS import_batches (
+    batch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    label TEXT,
+    reg_type TEXT,
+    reset_badge TEXT DEFAULT 'none',
+    row_count INT DEFAULT 0,
+    inserted INT DEFAULT 0,
+    updated INT DEFAULT 0,
+    skipped INT DEFAULT 0,
+    badge_reset INT DEFAULT 0,
+    created_by UUID DEFAULT auth.uid(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_batches_event_created
+    ON import_batches (event_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS delegates (
     delegate_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT,
@@ -51,7 +72,11 @@ CREATE TABLE IF NOT EXISTS delegates (
     -- in §12 compares every non-generated column except badge_printed/_at).
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     -- v1.93: latest activity = created or last detail change (filter column).
-    last_activity_at TIMESTAMPTZ GENERATED ALWAYS AS (GREATEST(created_at, COALESCE(updated_at, created_at))) STORED
+    last_activity_at TIMESTAMPTZ GENERATED ALWAYS AS (GREATEST(created_at, COALESCE(updated_at, created_at))) STORED,
+    -- v1.94: most recent import batch this row arrived in / was matched by.
+    -- Excluded from the activity trigger (stamping an import is not a detail change).
+    last_import_id UUID REFERENCES import_batches(batch_id) ON DELETE SET NULL,
+    last_imported_at TIMESTAMPTZ
 );
 
 -- ---- Delegate identity normalization (Sprint 21 zero-tolerance dedup) ----
@@ -949,6 +974,8 @@ CREATE INDEX IF NOT EXISTS idx_delegates_event_created_at ON delegates(event_id,
 -- v1.93: activity date-range filter (created or last detail change)
 CREATE INDEX IF NOT EXISTS idx_delegates_event_updated ON delegates(event_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_delegates_event_activity ON delegates(event_id, last_activity_at);
+-- v1.94: exact import-batch cohort filter
+CREATE INDEX IF NOT EXISTS idx_delegates_event_last_import ON delegates(event_id, last_import_id);
 
 -- Unique indexes
 DROP INDEX IF EXISTS idx_delegates_qr_hash;
@@ -1379,7 +1406,8 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_reg_type TEXT DEFAULT NULL,
   p_created_from TIMESTAMPTZ DEFAULT NULL,
   p_created_to TIMESTAMPTZ DEFAULT NULL,
-  p_date_basis TEXT DEFAULT 'created'
+  p_date_basis TEXT DEFAULT 'created',
+  p_import_id UUID DEFAULT NULL
 ) RETURNS JSON
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -1450,7 +1478,8 @@ BEGIN
     p_created_to IS NULL
     OR (v_basis = 'created'  AND created_at <= p_created_to)
     OR (v_basis = 'activity' AND last_activity_at <= p_created_to)
-  );
+  )
+  AND (p_import_id IS NULL OR last_import_id = p_import_id);
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
   FROM (
@@ -1507,6 +1536,7 @@ BEGIN
       OR (v_basis = 'created'  AND created_at <= p_created_to)
       OR (v_basis = 'activity' AND last_activity_at <= p_created_to)
     )
+    AND (p_import_id IS NULL OR last_import_id = p_import_id)
     ORDER BY chapter, last_name, first_name
     LIMIT p_page_size
     OFFSET offset_val
@@ -1611,7 +1641,12 @@ $func$;
 -- Bulk import delegates with per-event dedup merge (insert + gap-fill update)
 -- Sprint 21: matches on canonical identity (event, title_key, name_first_key,
 -- name_last_key, phone_normalized) with email fallback when phone is blank.
-CREATE OR REPLACE FUNCTION import_delegates_batch_merge(p_delegates JSONB, p_event_id UUID)
+CREATE OR REPLACE FUNCTION import_delegates_batch_merge(
+  p_delegates JSONB,
+  p_event_id UUID,
+  p_import_id UUID DEFAULT NULL,
+  p_reset_badge TEXT DEFAULT 'none'
+)
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, extensions
@@ -1620,14 +1655,22 @@ DECLARE
   v_inserted INT := 0;
   v_updated INT := 0;
   v_skipped INT := 0;
+  v_stamped INT := 0;
+  v_badge_reset INT := 0;
   v_item JSONB;
   v_existing_id UUID;
   v_rows_affected INT;
+  v_stamp_affected INT;
+  v_reset_affected INT;
   v_phone_norm TEXT;
   v_title_key TEXT;
   v_first_key TEXT;
   v_last_key TEXT;
   v_email_lower TEXT;
+  v_reset_mode TEXT := CASE
+    WHEN LOWER(COALESCE(p_reset_badge, 'none')) IN ('changed', 'all') THEN LOWER(p_reset_badge)
+    ELSE 'none'
+  END;
 BEGIN
   IF NOT (is_admin_user() OR is_event_admin_user()) THEN
     RAISE EXCEPTION 'FORBIDDEN: administrator or event administrator privileges required';
@@ -1720,7 +1763,8 @@ BEGIN
         INSERT INTO delegates (
           title, first_name, last_name, district, chapter,
           phone, email, rank, office, delegate_type,
-          qr_hash, event_id, registration_source, external_id, reg_type
+          qr_hash, event_id, registration_source, external_id, reg_type,
+          last_import_id, last_imported_at
         ) VALUES (
           COALESCE(TRIM(v_item->>'title'), ''),
           TRIM(v_item->>'first_name'),
@@ -1736,9 +1780,14 @@ BEGIN
           p_event_id,
           COALESCE(v_item->>'registration_source', 'import'),
           COALESCE(NULLIF(TRIM(v_item->>'external_id'), ''), COALESCE(NULLIF(TRIM(v_item->>'title'), ''), 'Mr')),
-          COALESCE(v_item->>'reg_type', 'manual')
+          COALESCE(v_item->>'reg_type', 'manual'),
+          p_import_id,
+          CASE WHEN p_import_id IS NULL THEN NULL ELSE NOW() END
         );
         v_inserted := v_inserted + 1;
+        IF p_import_id IS NOT NULL THEN
+          v_stamped := v_stamped + 1;
+        END IF;
       EXCEPTION WHEN unique_violation THEN
         SELECT delegate_id INTO v_existing_id
         FROM delegates
@@ -1772,7 +1821,28 @@ BEGIN
             reg_type = CASE WHEN COALESCE(NULLIF(TRIM(delegates.reg_type), ''), '') = '' THEN COALESCE(v_item->>'reg_type', 'manual') ELSE delegates.reg_type END
           WHERE delegate_id = v_existing_id;
           GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
-          IF v_rows_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
+
+          v_stamp_affected := 0;
+          IF p_import_id IS NOT NULL THEN
+            UPDATE delegates
+               SET last_import_id = p_import_id, last_imported_at = NOW()
+             WHERE delegate_id = v_existing_id
+               AND last_import_id IS DISTINCT FROM p_import_id;
+            GET DIAGNOSTICS v_stamp_affected = ROW_COUNT;
+            v_stamped := v_stamped + v_stamp_affected;
+          END IF;
+
+          v_reset_affected := 0;
+          IF v_reset_mode <> 'none' AND (v_reset_mode = 'all' OR v_rows_affected > 0) THEN
+            UPDATE delegates
+               SET badge_printed = false, badge_printed_at = NULL
+             WHERE delegate_id = v_existing_id
+               AND (badge_printed = true OR badge_printed_at IS NOT NULL);
+            GET DIAGNOSTICS v_reset_affected = ROW_COUNT;
+            v_badge_reset := v_badge_reset + v_reset_affected;
+          END IF;
+
+          IF v_rows_affected > 0 OR v_reset_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
         ELSE
           v_skipped := v_skipped + 1;
         END IF;
@@ -1820,7 +1890,32 @@ BEGIN
           OR (NULLIF(v_phone_norm, '') IS NOT NULL AND normalize_phone_sql(delegates.phone) = v_phone_norm AND delegates.phone <> v_phone_norm)
         );
       GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
-      IF v_rows_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
+
+      -- v1.94: link the row to this import batch (does not move the activity
+      -- date — last_import_* is excluded from the trigger comparison).
+      v_stamp_affected := 0;
+      IF p_import_id IS NOT NULL THEN
+        UPDATE delegates
+           SET last_import_id = p_import_id, last_imported_at = NOW()
+         WHERE delegate_id = v_existing_id
+           AND last_import_id IS DISTINCT FROM p_import_id;
+        GET DIAGNOSTICS v_stamp_affected = ROW_COUNT;
+        v_stamped := v_stamped + v_stamp_affected;
+      END IF;
+
+      -- v1.94: optional badge-stamp reset ('changed' = only rows the file filled,
+      -- 'all' = every matched row).
+      v_reset_affected := 0;
+      IF v_reset_mode <> 'none' AND (v_reset_mode = 'all' OR v_rows_affected > 0) THEN
+        UPDATE delegates
+           SET badge_printed = false, badge_printed_at = NULL
+         WHERE delegate_id = v_existing_id
+           AND (badge_printed = true OR badge_printed_at IS NOT NULL);
+        GET DIAGNOSTICS v_reset_affected = ROW_COUNT;
+        v_badge_reset := v_badge_reset + v_reset_affected;
+      END IF;
+
+      IF v_rows_affected > 0 OR v_reset_affected > 0 THEN v_updated := v_updated + 1; ELSE v_skipped := v_skipped + 1; END IF;
     END IF;
   END LOOP;
 
@@ -1828,6 +1923,9 @@ BEGIN
     'inserted', v_inserted,
     'updated', v_updated,
     'skipped', v_skipped,
+    'stamped', v_stamped,
+    'badgeReset', v_badge_reset,
+    'batch', p_import_id,
     'total', v_inserted + v_updated + v_skipped
   );
 END;
@@ -2202,6 +2300,20 @@ CREATE POLICY "Admin can insert badge batches" ON badge_batches FOR INSERT TO au
 CREATE POLICY "Admin can update badge batches" ON badge_batches FOR UPDATE TO authenticated
   USING (is_admin_user() OR is_event_admin_user()) WITH CHECK (is_admin_user() OR is_event_admin_user());
 CREATE POLICY "Admin can delete badge batches" ON badge_batches FOR DELETE TO authenticated USING (is_admin_user());
+
+-- 12d.1 v1.94 import_batches: one row per bulk CSV upload. Read/write restricted
+--       to admin + event_admin (the only roles that can run a bulk import).
+ALTER TABLE import_batches ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS import_batches_select ON import_batches;
+DROP POLICY IF EXISTS import_batches_insert ON import_batches;
+DROP POLICY IF EXISTS import_batches_update ON import_batches;
+CREATE POLICY import_batches_select ON import_batches FOR SELECT TO authenticated
+  USING (is_admin_user() OR is_event_admin_user());
+CREATE POLICY import_batches_insert ON import_batches FOR INSERT TO authenticated
+  WITH CHECK (is_admin_user() OR is_event_admin_user());
+CREATE POLICY import_batches_update ON import_batches FOR UPDATE TO authenticated
+  USING (is_admin_user() OR is_event_admin_user())
+  WITH CHECK (is_admin_user() OR is_event_admin_user());
 
 -- 12e. session_response_summaries + session_voice_distribution: update scoped to
 --      officers (admin/event_admin/registrar) — hardening 2C F3.

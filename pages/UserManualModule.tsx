@@ -410,6 +410,14 @@ const MANUAL_SECTIONS: DocSection[] = [
             Narrow by District, Chapter, Delegate Type, Surname range, Delegate Number, or a date range. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">IMPORT BATCH — EXACT RE-UPLOAD COHORT</span>
+            Choose an <strong>Import Batch</strong> to restrict the run to the delegates from one CSV upload (label · date · row count). Combined with <strong>Badge Not Printed</strong> this is the reprint cohort; combined with <strong>All Statuses</strong> it reprints the whole upload without clearing anyone's printed stamp. Re-uploading a file that did not change any data still creates a batch and links its rows, so you can always retrieve and reprint that set — no date guessing required.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">RESETTING THE BADGE STAMP ON IMPORT</span>
+            On the Import Data page the <strong>Reset Badge Printed stamp</strong> option can clear the printed flag while importing: <strong>No reset</strong> (default), <strong>Only where data changed</strong> (a corrected record's old badge is superseded — recommended), or <strong>All matched</strong> (every row in the file becomes Not Printed; use with care, the next print run will reprint all of them). The import summary reports how many stamps were cleared, and the choice is stored on the import batch.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">DATE RANGE — LAST ACTIVITY OR CREATED</span>
             Choose a <strong>Date basis</strong>: <strong>Last activity</strong> (default — created <em>or</em> last detail change) or <strong>Created / registered only</strong>. Last activity is what you want for reprints: a delegate whose name, chapter or district was corrected after the original upload falls inside the window. <strong>Printing a badge is not activity</strong>, so marking a batch printed does not pull those delegates back into the range — re-running the same window keeps returning the same cohort minus whatever is already flagged printed. The chosen basis and dates are saved on the batch and appear in its file name (<code>…_2026-10-01_to_2026-10-31_created.pdf</code> for the created-only basis).
           </div>
@@ -514,6 +522,10 @@ const MANUAL_SECTIONS: DocSection[] = [
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">DATE RANGE — CREATED OR LAST ACTIVITY</span>
             Pick a date range and choose the <strong>basis</strong>: <strong>Last activity</strong> (default) matches delegates whose details changed in the window — last edit, repair, re-import merge or reconcile — falling back to the registration date when they were never updated; <strong>Created only</strong> matches the original registration/upload date (e.g. "the October intake"). While a range is active the table and the PDF/CSV show both a <strong>Registered</strong> and a <strong>Last activity</strong> column, so a September record appearing in an October search is clearly one that was edited. <strong>Printing a badge does not count as activity</strong>, so a reprint cohort does not grow while you mark batches. An end date before the start date is flagged and the range is ignored until corrected.
+          </div>
+          <div className="p-4 border rounded-xl bg-gray-50">
+            <span className="text-blue-600 block mb-1">IMPORT BATCH (EXACT RE-UPLOAD COHORT)</span>
+            Every bulk CSV upload is recorded as an <strong>import batch</strong> and every row it inserts or matches is stamped with it. Pick a batch in the <strong>Import Batch</strong> dropdown to list exactly that upload — including rows the merge reported as "already complete" and therefore left untouched. This is the reliable way to find a re-uploaded set (the date range cannot tell two uploads on the same day apart).
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BULK SELECT & BULK DELETE (ADMIN)</span>

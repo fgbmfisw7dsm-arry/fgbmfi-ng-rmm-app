@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis } from '../types';
+import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis, ImportBatch } from '../types';
 import { exportToPDF, exportToCSV, formatCurrency, escapeHtml, downloadJSON, describeDateRange, hasDateRange } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -92,6 +92,8 @@ const MasterListModule = () => {
     const [regFrom, setRegFrom] = useState('');
     const [regTo, setRegTo] = useState('');
     const [dateBasis, setDateBasis] = useState<DateBasis>('activity');
+    const [importBatchId, setImportBatchId] = useState('');
+    const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -128,7 +130,7 @@ const MasterListModule = () => {
     // into the unified paginated table (the All-Districts section counts come from
     // a separate RPC that knows nothing about dates).
     const mode: 'sections' | 'unified' =
-        (selectedDistrict || searchTerm || sourceFilter || dateRangeActive) ? 'unified' : 'sections';
+        (selectedDistrict || searchTerm || sourceFilter || dateRangeActive || importBatchId) ? 'unified' : 'sections';
     const canSelect = canManage;
 
     const loadData = useCallback(async (p?: number) => {
@@ -137,7 +139,7 @@ const MasterListModule = () => {
         setListLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined, activeDateRange, dateBasis),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined, activeDateRange, dateBasis, importBatchId || undefined),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);
@@ -151,7 +153,7 @@ const MasterListModule = () => {
         } finally {
             setListLoading(false);
         }
-    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange, dateBasis]);
+    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange, dateBasis, importBatchId]);
 
     const loadDistrictPage = useCallback(async (district: string, pageNum: number) => {
         if (!activeEventId) return;
@@ -207,7 +209,13 @@ const MasterListModule = () => {
         } else {
             loadData(1);
         }
-    }, [activeEventId, mode, selectedDistrict, searchTerm, sourceFilter, regFrom, regTo, dateBasis]);
+    }, [activeEventId, mode, selectedDistrict, searchTerm, sourceFilter, regFrom, regTo, dateBasis, importBatchId]);
+
+    // v1.94: import batches for the active event (filter dropdown).
+    useEffect(() => {
+        if (!activeEventId) { setImportBatches([]); return; }
+        db.getImportBatches(activeEventId, 30).then(setImportBatches).catch(() => setImportBatches([]));
+    }, [activeEventId]);
 
     // Selection is event-scoped: never carry checked rows across an event switch.
     useEffect(() => {
@@ -378,7 +386,7 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis, importBatchId || undefined);
             const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (dateRangeActive ? 2 : 0);
             const headerCells = [
                 '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
@@ -409,7 +417,7 @@ const MasterListModule = () => {
             }).join('');
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : '';
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
             const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
             const container = document.createElement('div');
             container.innerHTML = tableHtml;
@@ -434,10 +442,10 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis, importBatchId || undefined);
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : '';
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
             const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
@@ -509,6 +517,7 @@ const MasterListModule = () => {
                 source: sourceFilter || undefined,
                 range: activeDateRange,
                 basis: dateBasis,
+                importBatchId: importBatchId || undefined,
             });
             setSelected(new Map(rows.map(r => [r.delegate_id, { name: r.name, district: r.district }])));
             setBulkNotice(`Selected ${rows.length} delegate(s) matching the current filters.`);
@@ -690,6 +699,16 @@ const MasterListModule = () => {
                         <option value="web">Web</option>
                         <option value="ems">EMS</option>
                         <option value="manual">Manual</option>
+                    </select>
+                    <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase max-w-[240px]"
+                        value={importBatchId} onChange={e => setImportBatchId(e.target.value)}
+                        title="Every row from one CSV upload is linked to an import batch.">
+                        <option value="">All Imports</option>
+                        {importBatches.map(b => (
+                            <option key={b.batch_id} value={b.batch_id}>
+                                {(b.label || 'Import')} · {new Date(b.created_at).toLocaleDateString('en-GB')}
+                            </option>
+                        ))}
                     </select>
                     <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${dateRangeActive ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
                         title={dateBasis === 'created'
@@ -991,7 +1010,7 @@ const MasterListModule = () => {
                         </div>
                     </div>
                 )}
-                {totalPages > 1 && (selectedDistrict || searchTerm || sourceFilter || dateRangeActive) && (
+                {totalPages > 1 && (selectedDistrict || searchTerm || sourceFilter || dateRangeActive || importBatchId) && (
                     <div className="no-print mt-6 flex items-center justify-center gap-3 pt-4 border-t border-gray-200">
                         <button onClick={() => loadData(1)} disabled={page <= 1} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">First</button>
                         <button onClick={() => loadData(page - 1)} disabled={page <= 1} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 rounded-lg text-[10px] font-black uppercase">Prev</button>

@@ -127,7 +127,8 @@ const ImportModule = () => {
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
     const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
+    const [resetBadge, setResetBadge] = useState<'none' | 'changed' | 'all'>('none');
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -585,9 +586,36 @@ const ImportModule = () => {
         setFeedback(null);
 
         try {
-            const result = await db.importDelegates(dataToImport, activeEventId, regType, (inserted, updated, skipped, total) => {
-                setProgress({ current: inserted + updated + skipped, total });
-            });
+            const batchLabel = (fileName || '').trim() || `Manual import ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+            // One batch row per upload so the cohort can be retrieved/ reprinted
+            // exactly (Master List + Batch Badge Printing "Import batch" filter).
+            // Degrades to a plain import if the v1.94 schema is not applied yet.
+            let batchId: string | null = null;
+            try {
+                const batch = await db.createImportBatch(activeEventId, batchLabel, regType, resetBadge);
+                batchId = batch.batch_id;
+            } catch (batchErr) {
+                console.warn('[import] import_batches unavailable — importing without a batch marker:', batchErr);
+            }
+
+            const result = await db.importDelegates(
+                dataToImport,
+                activeEventId,
+                regType,
+                { importBatchId: batchId || undefined, resetBadge },
+                (inserted, updated, skipped, total) => {
+                    setProgress({ current: inserted + updated + skipped, total });
+                }
+            );
+
+            if (batchId) {
+                await db.finalizeImportBatch(batchId, {
+                    inserted: result.inserted,
+                    updated: result.updated,
+                    skipped: result.skipped,
+                    badgeReset: result.badgeReset,
+                });
+            }
 
             if (result.inserted > 0 || result.updated > 0 || result.skipped > 0) {
                 setFeedback({
@@ -596,6 +624,9 @@ const ImportModule = () => {
                     inserted: result.inserted,
                     updated: result.updated,
                     skipped: result.skipped,
+                    batchLabel: batchId ? batchLabel : undefined,
+                    badgeReset: result.badgeReset,
+                    stamped: result.stamped,
                     stats: importStats
                 });
                 setProgress(null);
@@ -1140,6 +1171,17 @@ const hasFile = repairHasFile;
                                     {feedback.skipped !== undefined && feedback.skipped > 0 && (
                                         <p className="text-[10px] font-bold text-amber-600 uppercase">
                                             {'\u23ED\uFE0F'} {feedback.skipped} records skipped (already complete)
+                                        </p>
+                                    )}
+                                    {feedback.batchLabel && (
+                                        <p className="text-[10px] font-bold text-slate-600 uppercase">
+                                            {'\uD83D\uDCE6'} Linked to import batch: {feedback.batchLabel}
+                                            {feedback.stamped ? ` (${feedback.stamped} rows)` : ''} — find it with the Import batch filter
+                                        </p>
+                                    )}
+                                    {feedback.badgeReset !== undefined && feedback.badgeReset > 0 && (
+                                        <p className="text-[10px] font-bold text-red-700 uppercase">
+                                            {'\uD83D\uDD16'} {feedback.badgeReset} badge stamps cleared — now Badge Not Printed
                                         </p>
                                     )}
                                     {(feedback.stats?.bannerUsed ?? 0) > 0 && (
@@ -1796,6 +1838,45 @@ const hasFile = repairHasFile;
                                 </button>
                             ))}
                         </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                        <label className="col-span-1 flex items-center gap-2 text-[10px] font-black uppercase text-gray-500">
+                            Reset Badge Printed stamp:
+                        </label>
+                        <div className="flex flex-wrap gap-2 col-span-2">
+                            {([
+                                { value: 'none', label: 'No reset', cls: 'bg-gray-800 text-white border-gray-800' },
+                                { value: 'changed', label: 'Only where data changed', cls: 'bg-amber-600 text-white border-amber-600' },
+                                { value: 'all', label: 'All matched', cls: 'bg-red-700 text-white border-red-700' },
+                            ] as const).map(opt => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => {
+                                        if (opt.value === 'all') {
+                                            const ok = window.confirm(
+                                                'RESET EVERY MATCHED DELEGATE?\n\nEvery existing delegate in this file will be marked Badge Not Printed, ' +
+                                                'including those whose data did not change. The next batch print run will reprint all of them.\n\n' +
+                                                'Use "Only where data changed" when you just want corrected records reprinted.'
+                                            );
+                                            if (!ok) return;
+                                        }
+                                        setResetBadge(opt.value);
+                                    }}
+                                    disabled={loading}
+                                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border-2 transition-all disabled:opacity-50 ${
+                                        resetBadge === opt.value ? opt.cls : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                                    }`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="col-span-3 text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-relaxed">
+                            Every row in this upload is linked to an import batch — find it later with the <span className="text-gray-600">Import batch</span> filter
+                            in Batch Badge Printing or the Master List. Resetting the badge stamp is optional; "Only where data changed" only affects rows this file actually corrected.
+                        </p>
                     </div>
 
                     <button

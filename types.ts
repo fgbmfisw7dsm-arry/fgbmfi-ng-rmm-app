@@ -127,7 +127,29 @@ export interface Delegate {
   // (created_at when never updated; badge printing does not move it).
   updated_at?: string | null;
   last_activity_at?: string | null;
+  // v1.94 (additive): the most recent import batch this row arrived in / was
+  // matched by. Stamping it does not move the activity date.
+  last_import_id?: string | null;
+  last_imported_at?: string | null;
 }
+
+// v1.94: one bulk-import run. label = CSV file name (or a manual note).
+export interface ImportBatch {
+  batch_id: string;
+  event_id: string;
+  label: string | null;
+  reg_type: string | null;
+  reset_badge: 'none' | 'changed' | 'all' | null;
+  row_count: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  badge_reset: number;
+  created_by?: string | null;
+  created_at: string;
+}
+
+export type ImportBadgeReset = 'none' | 'changed' | 'all';
 
 // v1.93: which timestamp a registration date-range filter uses.
 //   created  — first registration / upload only (v1.92 behaviour)
@@ -373,6 +395,7 @@ export interface BadgeFilter {
   createdFrom?: string;
   createdTo?: string;
   dateBasis?: DateBasis;
+  importBatchId?: string;
   selectedIds?: string[];
 }
 
