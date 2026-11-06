@@ -91,7 +91,9 @@ SELECT
   CASE WHEN EXISTS (
     SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_delegates_event_district'
   ) THEN 'OK' ELSE 'MISSING' END,
-  'Re-run this script.'::text
+  CASE WHEN EXISTS (
+    SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_delegates_event_district'
+  ) THEN 'No action needed.' ELSE 'Re-run this script.' END
 
 UNION ALL
 
@@ -103,4 +105,6 @@ SELECT
   CASE WHEN EXISTS (
     SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_delegates_event_district_norm'
   ) THEN 'OK' ELSE 'MISSING' END,
-  'Re-run this script.'::text;
+  CASE WHEN EXISTS (
+    SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_delegates_event_district_norm'
+  ) THEN 'No action needed.' ELSE 'Re-run this script.' END;
