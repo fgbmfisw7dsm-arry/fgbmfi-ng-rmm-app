@@ -682,9 +682,33 @@ const ImportModule = () => {
         downloadJSON(backup, `reconcile-backup-${(target || '').slice(0, 8)}.json`);
         setReconcileLoading(true);
         setReconcileResult(null);
+        // v1.96: stamp applied rows with an import batch so the reconciled cohort
+        // is retrievable from the Master List / Batch Badge Printing filters.
+        const batchLabel = `Reconcile: ${(fileName || '').trim() || new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+        let batchId: string | null = null;
         try {
-            const res = await db.reconcileDistrictPortal(mappedCsvData, target, false);
-            setReconcileResult({ type: 'applied', inserted: res.inserted, updated: res.updated, skipped: res.skipped, msg: `Event: ${targetsEventName}` });
+            const batch = await db.createImportBatch(target, batchLabel, 'portal', 'none');
+            batchId = batch.batch_id;
+        } catch (e) {
+            console.warn('[reconcile] import_batches unavailable — reconciling without a batch marker:', e);
+        }
+        try {
+            const res = await db.reconcileDistrictPortal(mappedCsvData, target, false, { importBatchId: batchId || undefined });
+            if (batchId) {
+                await db.finalizeImportBatch(batchId, {
+                    inserted: res.inserted,
+                    updated: res.updated,
+                    skipped: res.skipped,
+                    badgeReset: 0,
+                }).catch(() => {});
+            }
+            setReconcileResult({
+                type: 'applied',
+                inserted: res.inserted,
+                updated: res.updated,
+                skipped: res.skipped,
+                msg: `Event: ${targetsEventName}${batchId ? ` — linked to import batch "${batchLabel}"` : ''}`
+            });
         } catch (e: any) {
             setReconcileResult({ type: 'error', msg: e.message });
         } finally {
@@ -1021,7 +1045,27 @@ const ImportModule = () => {
             district: i.after.district || undefined,
             chapter: i.chapterReason ? (i.after.chapter || undefined) : undefined,
         }));
-        const res = await db.repairNamesFromFile(eventId, rows);
+        // v1.96: link repaired rows to an import batch so the cohort is retrievable
+        // (Master List / Batch Badge Printing "Import batch"). Degrades silently
+        // only if the batch table is unavailable.
+        const batchLabel = `Repair: ${(fileName || '').trim() || new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+        let batchId: string | null = null;
+        try {
+            const batch = await db.createImportBatch(eventId, batchLabel, 'manual', 'none');
+            batchId = batch.batch_id;
+        } catch (e) {
+            console.warn('[repair] import_batches unavailable — repairing without a batch marker:', e);
+        }
+        const res = await db.repairNamesFromFile(eventId, rows, { importBatchId: batchId || undefined });
+        if (batchId) {
+            await db.finalizeImportBatch(batchId, {
+                row_count: rows.length,
+                inserted: 0,
+                updated: res.updated,
+                skipped: res.errors,
+                badgeReset: 0,
+            }).catch(() => {});
+        }
         setRepairItems([]);
         const verified = res.verified ?? res.updated;
         const blankedTitles = actionable.filter((i: any) => !i.after.title && (i.before.title || '').trim()).length;
@@ -1029,7 +1073,7 @@ const ImportModule = () => {
         setRepairResult({
             type: 'repaired',
             count: res.updated,
-            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${blankedTitles > 0 ? `; ${blankedTitles} default 'Mr' titles CLEARED to blank` : ''}${fixedChapters > 0 ? `; ${fixedChapters} chapters corrected from the file` : ''}${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}. Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
+            msg: `Event: ${targetEventName} — updated ${res.updated} of ${rows.length} records; ${verified}/${res.updated} verified persisted${blankedTitles > 0 ? `; ${blankedTitles} default 'Mr' titles CLEARED to blank` : ''}${fixedChapters > 0 ? `; ${fixedChapters} chapters corrected from the file` : ''}${res.merged ? `; ${res.merged} stale duplicates merged into their corrected record` : ''}${res.errors > 0 ? `; ${res.errors} update errors` : ''}.${batchId ? ` Linked to import batch "${batchLabel}".` : ''} Backup JSON downloaded. Hard-refresh the Master List (on that event) to verify.`
         });
     };
 

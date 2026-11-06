@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.95 (Badge cohort consistency — single-query preview + 25/Load more, and batch delegate lists; see §91)
+- **Current Version:** 1.96 (Repair/Reconcile now stamp import batches; Master List district loading smoothed; see §92)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1310,6 +1310,16 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **types.ts additive exceptions:** `BadgeCohort`, `BadgeBatchDelegate`.
 - **Deploy:** frontend only — no SQL, no RPC, no RLS change. `npm run typecheck` → 0 errors; `npm run build` passes.
 - **Verification:** wide date range → the list count and the row count always agree, and Load more reaches the full cohort; Generate prints exactly the previewed total; a batch's delegate list matches its `badge_count`, search narrows it, CSV includes phone and email; deleting a batch removes its list (logs cascade).
+
+## 92. Import-batch stamping for Repair/Reconcile + Master List load smoothing (v1.96)
+
+- **Gap closed:** v1.94 stamped rows processed by the **bulk import** only. `Repair Imported Names` (client-side per-row updates) and `Reconcile District Portal CSV` (server RPC) created no batch, so their cohorts were invisible to the "Import batch" filter. Both now create an `import_batches` row labelled `Repair: <file|timestamp>` / `Reconcile: <file|timestamp>` and stamp every row they insert or match.
+- **Reconcile (`supabase_migration_v1.96_repair_reconcile_batch_stamp.sql`, idempotent):** `reconcile_delegate_matches` gains trailing `p_import_id UUID DEFAULT NULL` (4-arg; **the 3-arg overload is DROPPED first** — §74). Inserts stamp `last_import_id`/`last_imported_at`; matched rows are stamped **even when the gap-fill changed nothing**; dry-run is untouched; returns `stamped`/`batch`. Grants re-asserted + `NOTIFY pgrst`. The function lives only in migrations (the static schema never carried it), so no `supabase_schema.sql` change.
+- **Client fallback:** `reconcileDistrictPortal(csv, eventId, dryRun, { importBatchId })` retries the **3-arg** call when the error is `p_import_id` / `PGRST202` / `PGRST116`, so a frontend-first deploy still reconciles (without stamping) until the migration lands.
+- **Repair (`repairNamesFromFile(eventId, rows, { importBatchId })`):** the marker is merged into the per-row update payload (`last_import_id` + `last_imported_at`), and the survivor of a duplicate **merge** is stamped too. No SQL needed. `ImportModule.runApply` creates/finalises the batch and appends `Linked to import batch "…"` to the result message; `handleReconcileApply` does the same for reconcile. Batch creation failure degrades with a console warning (the repair/reconcile still runs).
+- **Master List "All Districts" smoothing (frontend only):** `loadAllDistricts` used to fire **one `get_paginated_delegates` RPC per district simultaneously** (20-25 at once). It now runs a **4-worker pool** over the district queue (sections still render progressively as each first page arrives), `await`s completion so the post-bulk-delete refresh is consistent, and uses a `districtsSeq` ref so a superseded run cannot overwrite a newer one. One RPC per district is inherent — each section paginates independently — and a true single-RPC batch would have to replicate the v1.50 delegate-type→district label routing in SQL, which risks section/pagination divergence; deliberately not attempted.
+- **Deploy:** run `supabase_migration_v1.96_repair_reconcile_batch_stamp.sql` then the frontend (frontend-first is safe via the 3-arg retry). `npm run typecheck` → 0 errors; `npm run build` passes.
+- **Verification:** run Repair → banner names a `Repair:` batch → find it in Master List → Import batch; run Reconcile apply → same with `Reconcile:`; a reconcile Preview (dry run) creates no batch and stamps nothing; Master List "All Districts" still renders every section, now at most 4 RPCs in flight (check the Network panel).
 
 ## Code Conventions
 

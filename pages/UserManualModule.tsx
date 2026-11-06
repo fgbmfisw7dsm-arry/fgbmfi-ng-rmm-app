@@ -517,7 +517,7 @@ const MANUAL_SECTIONS: DocSection[] = [
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">ALL DISTRICTS MODE</span>
-            When no specific district is selected and no search term is entered, each official district renders as an independent section with its own 25-row page and First/Prev/Next/Last pagination controls. All districts load in parallel on mount — 20K+ delegates without slowing the page.
+            When no specific district is selected and no search term is entered, each official district renders as an independent section with its own 25-row page and First/Prev/Next/Last pagination controls. Sections load in small batches (a few at a time) and appear as they arrive, so 20K+ delegates never stall the page.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">SPECIFIC DISTRICT / SEARCH MODE</span>
@@ -533,7 +533,7 @@ const MANUAL_SECTIONS: DocSection[] = [
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">IMPORT BATCH (EXACT RE-UPLOAD COHORT)</span>
-            Every bulk CSV upload is recorded as an <strong>import batch</strong> and every row it inserts or matches is stamped with it. Pick a batch in the <strong>Import Batch</strong> dropdown to list exactly that upload — including rows the merge reported as "already complete" and therefore left untouched. This is the reliable way to find a re-uploaded set (the date range cannot tell two uploads on the same day apart).
+            Every bulk CSV upload is recorded as an <strong>import batch</strong> and every row it inserts or matches is stamped with it. Pick a batch in the <strong>Import Batch</strong> dropdown to list exactly that upload — including rows the merge reported as "already complete" and therefore left untouched. This is the reliable way to find a re-uploaded set (the date range cannot tell two uploads on the same day apart). <strong>Repair Imported Names</strong> and <strong>Reconcile District Portal CSV</strong> also create batches (labelled <em>Repair: …</em> / <em>Reconcile: …</em>), so their cohorts are retrievable the same way.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BULK SELECT & BULK DELETE (ADMIN)</span>

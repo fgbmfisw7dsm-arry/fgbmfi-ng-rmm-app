@@ -2177,8 +2177,14 @@ export const db = {
         return { inserted, updated, skipped, stamped, badgeReset };
     },
 
-    reconcileDistrictPortal: async (csv: string, eventId?: string, dryRun: boolean = true): Promise<{ inserted: number; updated: number; skipped: number; total: number }> => {
+    reconcileDistrictPortal: async (
+        csv: string,
+        eventId?: string,
+        dryRun: boolean = true,
+        opts?: { importBatchId?: string }
+    ): Promise<{ inserted: number; updated: number; skipped: number; stamped: number; total: number }> => {
         if (!eventId) throw new Error('reconcileDistrictPortal requires eventId');
+        const importBatchId = opts?.importBatchId || null;
         const lines = splitCsvRecords(csv).map(l => parseCsvLine(l)).filter(p => p.length >= 3).filter(p => {
             const first = (p[2] || '').trim();
             const last = (p[3] || '').trim();
@@ -2190,6 +2196,7 @@ export const db = {
         let inserted = 0;
         let updated = 0;
         let skipped = 0;
+        let stamped = 0;
 
         for (let i = 0; i < lines.length; i += BATCH_SIZE) {
             const batch = lines.slice(i, i + BATCH_SIZE);
@@ -2209,22 +2216,43 @@ export const db = {
                 reg_type: 'portal'
             }));
 
-            const { data, error } = await supabase.rpc('reconcile_delegate_matches', {
-                p_delegates: JSON.parse(JSON.stringify(payload)),
-                p_event_id: eventId,
-                p_dry_run: dryRun
-            });
-            if (error) throw error;
+            let data: any = null;
+            let error: any = null;
+            try {
+                ({ data, error } = await supabase.rpc('reconcile_delegate_matches', {
+                    p_delegates: JSON.parse(JSON.stringify(payload)),
+                    p_event_id: eventId,
+                    p_dry_run: dryRun,
+                    p_import_id: importBatchId,
+                }));
+            } catch (e) {
+                error = e;
+            }
+            // Pre-v1.96 database: retry the 3-arg signature so reconcile still runs.
+            if (error) {
+                const msg = String((error as any)?.message || '').toLowerCase();
+                const missingParam = msg.includes('p_import_id') || (error as any)?.code === 'PGRST202' || (error as any)?.code === 'PGRST116';
+                if (!missingParam) throw error;
+                const retry = await supabase.rpc('reconcile_delegate_matches', {
+                    p_delegates: JSON.parse(JSON.stringify(payload)),
+                    p_event_id: eventId,
+                    p_dry_run: dryRun,
+                });
+                if (retry.error) throw retry.error;
+                data = retry.data;
+            }
+
             inserted += data?.inserted || 0;
             updated += data?.updated || 0;
             skipped += data?.skipped || 0;
+            stamped += data?.stamped || 0;
         }
 
         if (!dryRun && (inserted > 0 || updated > 0)) {
             await supabase.from('delegates').update({ reg_type: 'portal' }).eq('event_id', eventId).eq('registration_source', 'portal');
         }
 
-        return { inserted, updated, skipped, total: inserted + updated + skipped };
+        return { inserted, updated, skipped, stamped, total: inserted + updated + skipped };
     },
 
     getStats: async (eventId: string, district?: string, region?: string): Promise<DashboardStats> => {
@@ -3521,14 +3549,22 @@ export const db = {
         return candidates;
     },
 
-    repairNamesFromFile: async (eventId: string, rows: Array<{ delegateId: string; title?: string; firstName?: string; lastName?: string; district?: string; chapter?: string }>) => {
+    repairNamesFromFile: async (
+        eventId: string,
+        rows: Array<{ delegateId: string; title?: string; firstName?: string; lastName?: string; district?: string; chapter?: string }>,
+        opts?: { importBatchId?: string }
+    ) => {
         await ensureEventActive(eventId);
+        const importBatchId = opts?.importBatchId || null;
+        const stamp: Record<string, string> = importBatchId
+            ? { last_import_id: importBatchId, last_imported_at: new Date().toISOString() }
+            : {};
         let updated = 0;
         let errors = 0;
         let merged = 0;
         const wanted = new Map<string, Record<string, string>>();
         for (const r of rows) {
-            const updates: Record<string, string> = {};
+            const updates: Record<string, string> = { ...stamp };
             if (r.title !== undefined && r.title !== null) updates.title = r.title;
             if (r.firstName && r.firstName.trim()) updates.first_name = r.firstName.trim();
             if (r.lastName && r.lastName.trim()) updates.last_name = r.lastName.trim();
@@ -3557,6 +3593,12 @@ export const db = {
                 }
                 if (siblingId) {
                     await rehomeAndDeleteDelegate(eventId, r.delegateId, siblingId);
+                    if (importBatchId) {
+                        await supabase.from('delegates')
+                            .update({ last_import_id: importBatchId, last_imported_at: new Date().toISOString() })
+                            .eq('delegate_id', siblingId)
+                            .eq('event_id', eventId);
+                    }
                     merged++;
                 } else {
                     errors++;

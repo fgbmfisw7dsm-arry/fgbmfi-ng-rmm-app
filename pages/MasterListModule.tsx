@@ -107,6 +107,7 @@ const MasterListModule = () => {
     const [totalRecords, setTotalRecords] = useState(0);
     const pageRef = useRef(1);
     const listRef = useRef<HTMLDivElement>(null);
+    const districtsSeq = useRef(0);
     const [districtListLoading, setDistrictListLoading] = useState(false);
     const [districtList, setDistrictList] = useState<{ district: string; count: number }[]>([]);
     const [districtSections, setDistrictSections] = useState<Record<string, { delegates: Delegate[]; page: number; total: number; pages: number; loading: boolean }>>({});
@@ -178,12 +179,14 @@ const MasterListModule = () => {
 
     const loadAllDistricts = useCallback(async () => {
         if (!activeEventId) return;
+        const run = ++districtsSeq.current;
         setDistrictListLoading(true);
         try {
             const [list, settData] = await Promise.all([
                 db.getDistrictsWithDelegates(activeEventId, sourceFilter || undefined),
                 db.getSettings(),
             ]);
+            if (districtsSeq.current !== run) return;
             setDistrictList(list);
             setSettings(settData);
             const init: Record<string, any> = {};
@@ -191,14 +194,28 @@ const MasterListModule = () => {
                 init[d.district] = { delegates: [], page: 1, total: d.count, pages: Math.ceil(d.count / PAGE_SIZE), loading: true };
             }
             setDistrictSections(init);
-            for (const d of list) {
-                loadDistrictPage(d.district, 1);
-            }
+
+            // One RPC per district is inherent (each section paginates on its own),
+            // but firing 20-25 at once burst the connection pool. Four at a time
+            // keeps the server calm and renders each section as it arrives.
+            const queue = list.map(d => d.district);
+            const CONCURRENCY = 4;
+            let cursor = 0;
+            const worker = async () => {
+                while (cursor < queue.length) {
+                    if (districtsSeq.current !== run) return;
+                    const district = queue[cursor++];
+                    await loadDistrictPage(district, 1);
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker()));
         } catch (err) {
             console.error('[MasterList] loadAllDistricts error:', err);
         } finally {
-            setDistrictListLoading(false);
-            setListLoading(false);
+            if (districtsSeq.current === run) {
+                setDistrictListLoading(false);
+                setListLoading(false);
+            }
         }
     }, [activeEventId, sourceFilter, loadDistrictPage]);
 
