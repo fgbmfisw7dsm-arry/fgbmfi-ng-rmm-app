@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
-import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole } from '../types';
+import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis } from '../types';
 import { exportToPDF, exportToCSV, formatCurrency, escapeHtml, downloadJSON, describeDateRange, hasDateRange } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -19,6 +19,22 @@ const selectionInfoOf = (d: Delegate): SelectionInfo => ({
 const regDateOf = (d: Delegate): string => {
     if (!d.created_at) return '-';
     const t = new Date(d.created_at);
+    return Number.isNaN(t.getTime()) ? '-' : t.toLocaleDateString('en-GB');
+};
+
+// v1.93: 'last activity' = generated column, falling back to the newest of
+// updated_at / created_at when the column is absent (pre-migration payloads).
+const activityDateOf = (d: Delegate): string => {
+    let raw: string | null | undefined = d.last_activity_at;
+    if (!raw) {
+        const times = [d.created_at, d.updated_at]
+            .filter(Boolean)
+            .map(v => new Date(v as string).getTime())
+            .filter(t => !Number.isNaN(t));
+        raw = times.length ? new Date(Math.max(...times)).toISOString() : null;
+    }
+    if (!raw) return '-';
+    const t = new Date(raw);
     return Number.isNaN(t.getTime()) ? '-' : t.toLocaleDateString('en-GB');
 };
 
@@ -75,6 +91,7 @@ const MasterListModule = () => {
     const [sourceFilter, setSourceFilter] = useState<'portal' | 'web' | 'manual' | 'ems' | ''>('');
     const [regFrom, setRegFrom] = useState('');
     const [regTo, setRegTo] = useState('');
+    const [dateBasis, setDateBasis] = useState<DateBasis>('activity');
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [editForm, setEditForm] = useState<Partial<Delegate>>({
@@ -120,7 +137,7 @@ const MasterListModule = () => {
         setListLoading(true);
         try {
             const [paginated, settData] = await Promise.all([
-                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined, activeDateRange),
+                db.getPaginatedDelegates(currentPage, PAGE_SIZE, searchTerm || undefined, selectedDistrict || undefined, scope.region, activeEventId, sourceFilter || undefined, activeDateRange, dateBasis),
                 db.getSettings()
             ]);
             setDelegates(paginated.data);
@@ -134,7 +151,7 @@ const MasterListModule = () => {
         } finally {
             setListLoading(false);
         }
-    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange]);
+    }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange, dateBasis]);
 
     const loadDistrictPage = useCallback(async (district: string, pageNum: number) => {
         if (!activeEventId) return;
@@ -190,7 +207,7 @@ const MasterListModule = () => {
         } else {
             loadData(1);
         }
-    }, [activeEventId, mode, selectedDistrict, searchTerm, sourceFilter, regFrom, regTo]);
+    }, [activeEventId, mode, selectedDistrict, searchTerm, sourceFilter, regFrom, regTo, dateBasis]);
 
     // Selection is event-scoped: never carry checked rows across an event switch.
     useEffect(() => {
@@ -361,15 +378,15 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange);
-            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (dateRangeActive ? 1 : 0);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis);
+            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (dateRangeActive ? 2 : 0);
             const headerCells = [
                 '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
                 showRank ? '<th class="p-3">Rank</th>' : '',
                 showOffice ? '<th class="p-3">Office</th>' : '',
                 showDelegateType ? '<th class="p-3">Type</th>' : '',
                 '<th class="p-3">Phone</th><th class="p-3">Source</th><th class="p-3">Reg ID</th>',
-                dateRangeActive ? '<th class="p-3">Registered</th>' : '',
+                dateRangeActive ? '<th class="p-3">Registered</th><th class="p-3">Last activity</th>' : '',
                 showPaymentCols ? '<th class="p-3">Payment</th><th class="p-3">Payment Ref</th>' : '',
             ].join('');
             const rows = all.map((d, i) => {
@@ -385,14 +402,14 @@ const MasterListModule = () => {
                     `<td class="p-3 font-black text-gray-500 tracking-tighter">${escapeHtml(d.phone)}</td>`,
                     `<td class="p-3">${regBadge(d.reg_type)}</td>`,
                     `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (escapeHtml(d.external_id) || '-') : '-'}</td>`,
-                    dateRangeActive ? `<td class="p-3 font-mono text-[9px] text-gray-500">${regDateOf(d)}</td>` : '',
+                    dateRangeActive ? `<td class="p-3 font-mono text-[9px] text-gray-500">${regDateOf(d)}</td><td class="p-3 font-mono text-[9px] text-gray-500">${activityDateOf(d)}</td>` : '',
                     showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${escapeHtml(d.payment_reference) || '—'}</td>` : '',
                 ];
                 return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
             }).join('');
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}` : '';
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : '';
             const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
             const container = document.createElement('div');
             container.innerHTML = tableHtml;
@@ -417,16 +434,16 @@ const MasterListModule = () => {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
-            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange);
+            const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis);
             const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
             const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}` : '';
+            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : '';
             const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
             cols.push('phone', 'district', 'external_id', 'reg_type');
-            if (dateRangeActive) cols.push('created_at');
+            if (dateRangeActive) cols.push('created_at', 'last_activity_at');
             if (showPaymentCols) cols.push('payment_amount', 'payment_reference');
             exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}.csv`, cols);
         } catch (err) {
@@ -491,6 +508,7 @@ const MasterListModule = () => {
                 region: scope.region,
                 source: sourceFilter || undefined,
                 range: activeDateRange,
+                basis: dateBasis,
             });
             setSelected(new Map(rows.map(r => [r.delegate_id, { name: r.name, district: r.district }])));
             setBulkNotice(`Selected ${rows.length} delegate(s) matching the current filters.`);
@@ -674,8 +692,15 @@ const MasterListModule = () => {
                         <option value="manual">Manual</option>
                     </select>
                     <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${dateRangeActive ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
-                        title="Filter on the date each delegate was first registered / uploaded.">
-                        <span className="text-[8px] font-black uppercase tracking-widest text-gray-500 pl-1">Registered</span>
+                        title={dateBasis === 'created'
+                            ? 'Filter on the date each delegate was first registered / uploaded.'
+                            : 'Filter on the delegate\'s latest activity: last detail change, or registration when never updated. Badge printing does not count.'}>
+                        <select value={dateBasis} onChange={e => setDateBasis(e.target.value as DateBasis)}
+                            className="p-1 border rounded-md bg-white text-[9px] font-black uppercase tracking-wider text-gray-600"
+                            title="Which date the range uses">
+                            <option value="activity">Last activity</option>
+                            <option value="created">Created only</option>
+                        </select>
                         <input type="date" className="p-1 border rounded-md bg-white text-[10px] font-bold"
                             value={regFrom} onChange={e => setRegFrom(e.target.value)} />
                         <span className="text-[8px] font-black text-gray-400">to</span>
@@ -683,7 +708,7 @@ const MasterListModule = () => {
                             value={regTo} onChange={e => setRegTo(e.target.value)} />
                         {dateRangeActive && (
                             <button onClick={() => { setRegFrom(''); setRegTo(''); }}
-                                className="text-[9px] font-black text-red-500 hover:text-red-700 px-1" title="Clear the registration date range">×</button>
+                                className="text-[9px] font-black text-red-500 hover:text-red-700 px-1" title="Clear the date range">×</button>
                         )}
                     </div>
                     {dateRangeInvalid && (
@@ -714,8 +739,10 @@ const MasterListModule = () => {
 
             {dateRangeActive && (
                 <div className="no-print -mt-2 text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2">
-                    Showing delegates registered {describeDateRange(dateRange)}{dateRangeInvalid ? ' — invalid range, showing all dates' : ''}
+                    {dateBasis === 'created' ? 'Registered' : 'Last activity'} {describeDateRange(dateRange)}
+                    {dateRangeInvalid ? ' — invalid range, showing all dates' : ''}
                     {' · '}{totalRecords} record(s)
+                    {dateBasis === 'activity' ? ' · includes records edited in the window (badge printing does not count)' : ''}
                 </div>
             )}
 
@@ -815,7 +842,7 @@ const MasterListModule = () => {
                             const secPages = sec?.pages || 0;
                             const secLoading = sec?.loading ?? true;
                             const secTotal = sec?.total || count;
-                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 1 : 0);
+                            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 2 : 0);
                             const isOfficial = isValueOfficial(district, officialDistricts);
                             return (
                                 <div key={district} className="mb-6 border rounded-xl overflow-hidden shadow-sm print:break-inside-avoid">
@@ -826,7 +853,7 @@ const MasterListModule = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-[10px] text-left min-w-[1000px]">
                                             <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                                <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <th className="p-3">Registered</th>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                                <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <><th className="p-3">Registered</th><th className="p-3" title="Latest detail change, or registration when never updated. Badge printing does not count.">Last activity</th></>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {secLoading ? (
@@ -853,7 +880,7 @@ const MasterListModule = () => {
                                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
-                                                            {dateRangeActive && <td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td>}
+                                                            {dateRangeActive && <><td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td><td className="p-3 font-mono text-[9px] text-gray-600">{activityDateOf(d)}</td></>}
                                                             {showPaymentCols && <>
                                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
                                                                 <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
@@ -912,7 +939,7 @@ const MasterListModule = () => {
                         <div className="overflow-x-auto">
                             <table className="w-full text-[10px] text-left min-w-[1000px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <th className="p-3">Registered</th>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <><th className="p-3">Registered</th><th className="p-3" title="Latest detail change, or registration when never updated. Badge printing does not count.">Last activity</th></>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {delegates.map((d, i) => (
@@ -934,7 +961,7 @@ const MasterListModule = () => {
                                             <td className="p-3 font-black text-gray-500 tracking-tighter">{d.phone}</td>
                                             <td className="p-3">{d.reg_type === 'portal' ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span> : d.reg_type === 'web' ? <span className="inline-block px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span> : d.reg_type === 'ems' ? <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span> : <span className="inline-block px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>}</td>
                                             <td className="p-3 font-mono text-[9px] text-gray-500">{showRegId(d) ? (d.external_id || '-') : '-'}</td>
-                                            {dateRangeActive && <td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td>}
+                                            {dateRangeActive && <><td className="p-3 font-mono text-[9px] text-gray-500">{regDateOf(d)}</td><td className="p-3 font-mono text-[9px] text-gray-600">{activityDateOf(d)}</td></>}
                                             {showPaymentCols && <>
                                                 <td className="p-3 font-black text-gray-700">{d.payment_amount != null ? formatCurrency(d.payment_amount) : <span className="text-gray-300">—</span>}</td>
                                                 <td className="p-3 font-mono text-[9px] text-gray-500">{d.payment_reference || <span className="text-gray-300">—</span>}</td>
@@ -956,7 +983,7 @@ const MasterListModule = () => {
                                     ))}
                                     {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
                                         <tr key={`__pad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 1 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 2 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
                                         </tr>
                                     ))}
                                 </tbody>

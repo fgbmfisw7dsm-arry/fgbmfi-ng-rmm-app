@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { db } from '../services/supabaseService';
-import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS } from '../types';
+import { Delegate, Event, UserRole, isAdminRole, isRegistrarRole, getScopeFilter, BadgeFilter, BadgeSortField, BadgeLayout, BadgeBatchSize, BadgeBatch, BadgePrintLog, BatchStatus, BadgeGenerationProgress, FeeCategory, FEE_CATEGORY_LABELS, DateBasis } from '../types';
 import { AppContext } from '../context/AppContext';
 import { getBadgePageCount, generateBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
@@ -13,7 +13,9 @@ type Tab = 'generate' | 'batches' | 'reprint' | 'history';
 // Registration-date filters are picked as local calendar days; the service
 // converts them to inclusive UTC bounds before querying `created_at`.
 const dateRangeSlug = (f: BadgeFilter): string =>
-  f.createdFrom || f.createdTo ? `_${f.createdFrom || 'start'}_to_${f.createdTo || 'end'}` : '';
+  f.createdFrom || f.createdTo
+    ? `_${f.createdFrom || 'start'}_to_${f.createdTo || 'end'}${f.dateBasis === 'created' ? '_created' : ''}`
+    : '';
 
 const BADGE_LAYOUTS: { value: BadgeLayout; label: string }[] = [
   { value: '8-up', label: '8-up Landscape (90×60mm)' },
@@ -110,6 +112,7 @@ const BadgePrintingModule = () => {
     delegateNumberTo: '',
     createdFrom: '',
     createdTo: '',
+    dateBasis: 'activity',
     selectedIds: [],
   });
 
@@ -263,6 +266,7 @@ const BadgePrintingModule = () => {
       delegateNumberTo: '',
       createdFrom: '',
       createdTo: '',
+      dateBasis: 'activity',
       selectedIds: [],
     });
     setSelectedDelegates([]);
@@ -1158,7 +1162,7 @@ const BadgePrintingModule = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
               <div>
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
-                  Registered From
+                  Activity From
                 </label>
                 <input
                   type="date"
@@ -1169,7 +1173,7 @@ const BadgePrintingModule = () => {
               </div>
               <div>
                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
-                  Registered To
+                  Activity To
                 </label>
                 <input
                   type="date"
@@ -1182,15 +1186,31 @@ const BadgePrintingModule = () => {
                 <p className="text-[8px] leading-snug text-gray-400 font-bold uppercase tracking-wider">
                   {(filters.createdFrom || filters.createdTo) ? (
                     <span className="text-blue-700">
-                      Registered {describeDateRange({ from: filters.createdFrom, to: filters.createdTo })}
+                      {filters.dateBasis === 'created' ? 'Registered' : 'Last activity'} {describeDateRange({ from: filters.createdFrom, to: filters.createdTo })}
                       {filters.createdFrom && filters.createdTo && filters.createdTo < filters.createdFrom
                         ? ' — check the dates (end is before start)'
                         : ''}
                     </span>
                   ) : (
-                    'Filters on the date each delegate was first registered / uploaded. Re-imports of existing people keep their original date.'
+                    'Last activity = last detail change, or registration when never updated. Badge printing does not count as activity.'
                   )}
                 </p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                  Date basis
+                </label>
+                <select
+                  className="p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
+                  value={filters.dateBasis || 'activity'}
+                  onChange={(e) => setFilters((f) => ({ ...f, dateBasis: e.target.value as DateBasis }))}
+                >
+                  <option value="activity">Last activity (created or updated)</option>
+                  <option value="created">Created / registered only</option>
+                </select>
               </div>
             </div>
 

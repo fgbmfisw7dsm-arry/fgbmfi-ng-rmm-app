@@ -46,7 +46,12 @@ CREATE TABLE IF NOT EXISTS delegates (
     payment_reference TEXT,       -- v1.55: EMS registration payment reference (additive, nullable)
     badge_printed BOOLEAN NOT NULL DEFAULT false,
     badge_printed_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- v1.93: last DETAIL change (badge printing does not move it — the trigger
+    -- in §12 compares every non-generated column except badge_printed/_at).
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    -- v1.93: latest activity = created or last detail change (filter column).
+    last_activity_at TIMESTAMPTZ GENERATED ALWAYS AS (GREATEST(created_at, COALESCE(updated_at, created_at))) STORED
 );
 
 -- ---- Delegate identity normalization (Sprint 21 zero-tolerance dedup) ----
@@ -98,6 +103,54 @@ DROP TRIGGER IF EXISTS trg_delegates_identity_norm ON delegates;
 CREATE TRIGGER trg_delegates_identity_norm
 BEFORE INSERT OR UPDATE OF title, first_name, last_name, phone ON delegates
 FOR EACH ROW EXECUTE FUNCTION delegates_identity_norm_trigger();
+
+-- v1.93: delegates.updated_at tracks DETAIL changes only. A badge print
+-- (badge_printed / badge_printed_at) must not move it, or the reprint date-range
+-- cohort would grow while batches are being marked. Generated columns are
+-- excluded because a BEFORE trigger sees them unset in NEW but computed in OLD —
+-- including them would make every UPDATE look like a change.
+CREATE OR REPLACE FUNCTION touch_delegates_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF TG_OP <> 'UPDATE' THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.title IS DISTINCT FROM OLD.title
+     OR NEW.first_name IS DISTINCT FROM OLD.first_name
+     OR NEW.last_name IS DISTINCT FROM OLD.last_name
+     OR NEW.district IS DISTINCT FROM OLD.district
+     OR NEW.chapter IS DISTINCT FROM OLD.chapter
+     OR NEW.phone IS DISTINCT FROM OLD.phone
+     OR NEW.email IS DISTINCT FROM OLD.email
+     OR NEW.rank IS DISTINCT FROM OLD.rank
+     OR NEW.office IS DISTINCT FROM OLD.office
+     OR NEW.room_number IS DISTINCT FROM OLD.room_number
+     OR NEW.delegate_type IS DISTINCT FROM OLD.delegate_type
+     OR NEW.qr_hash IS DISTINCT FROM OLD.qr_hash
+     OR NEW.phone_normalized IS DISTINCT FROM OLD.phone_normalized
+     OR NEW.title_key IS DISTINCT FROM OLD.title_key
+     OR NEW.name_first_key IS DISTINCT FROM OLD.name_first_key
+     OR NEW.name_last_key IS DISTINCT FROM OLD.name_last_key
+     OR NEW.event_id IS DISTINCT FROM OLD.event_id
+     OR NEW.external_id IS DISTINCT FROM OLD.external_id
+     OR NEW.registration_source IS DISTINCT FROM OLD.registration_source
+     OR NEW.payment_amount IS DISTINCT FROM OLD.payment_amount
+     OR NEW.payment_reference IS DISTINCT FROM OLD.payment_reference THEN
+    NEW.updated_at := NOW();
+  ELSE
+    NEW.updated_at := OLD.updated_at;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_delegates_updated_at ON delegates;
+CREATE TRIGGER trg_delegates_updated_at
+BEFORE UPDATE ON delegates
+FOR EACH ROW EXECUTE FUNCTION touch_delegates_updated_at();
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -893,6 +946,9 @@ CREATE INDEX IF NOT EXISTS idx_delegates_external_id ON delegates(external_id) W
 CREATE INDEX IF NOT EXISTS idx_delegates_badge_printed ON delegates(event_id, badge_printed);
 -- v1.92: registration date-range filter (Master List + badge printing cohorts)
 CREATE INDEX IF NOT EXISTS idx_delegates_event_created_at ON delegates(event_id, created_at);
+-- v1.93: activity date-range filter (created or last detail change)
+CREATE INDEX IF NOT EXISTS idx_delegates_event_updated ON delegates(event_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_delegates_event_activity ON delegates(event_id, last_activity_at);
 
 -- Unique indexes
 DROP INDEX IF EXISTS idx_delegates_qr_hash;
@@ -1322,7 +1378,8 @@ CREATE OR REPLACE FUNCTION get_paginated_delegates(
   p_registration_source TEXT DEFAULT NULL,
   p_reg_type TEXT DEFAULT NULL,
   p_created_from TIMESTAMPTZ DEFAULT NULL,
-  p_created_to TIMESTAMPTZ DEFAULT NULL
+  p_created_to TIMESTAMPTZ DEFAULT NULL,
+  p_date_basis TEXT DEFAULT 'created'
 ) RETURNS JSON
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -1334,6 +1391,7 @@ DECLARE
   offset_val INTEGER;
   v_q TEXT;
   v_tokens TEXT[];
+  v_basis TEXT := CASE WHEN lower(COALESCE(p_date_basis, 'created')) = 'activity' THEN 'activity' ELSE 'created' END;
 BEGIN
   offset_val := (p_page - 1) * p_page_size;
   v_q := lower(btrim(coalesce(p_search, '')));
@@ -1381,9 +1439,18 @@ BEGIN
     OR (p_reg_type = 'ems'    AND reg_type = 'ems')
     OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
   )
-  -- v1.92: inclusive registration window (client sends local-day bounds as UTC)
-  AND (p_created_from IS NULL OR created_at >= p_created_from)
-  AND (p_created_to   IS NULL OR created_at <= p_created_to);
+  -- v1.92/v1.93: inclusive registration window; p_date_basis picks created_at
+  -- (first registration) or last_activity_at (created or last detail change).
+  AND (
+    p_created_from IS NULL
+    OR (v_basis = 'created'  AND created_at >= p_created_from)
+    OR (v_basis = 'activity' AND last_activity_at >= p_created_from)
+  )
+  AND (
+    p_created_to IS NULL
+    OR (v_basis = 'created'  AND created_at <= p_created_to)
+    OR (v_basis = 'activity' AND last_activity_at <= p_created_to)
+  );
 
   SELECT COALESCE(json_agg(delegate_rows), '[]'::JSON) INTO results
   FROM (
@@ -1429,9 +1496,17 @@ BEGIN
       OR (p_reg_type = 'ems'    AND reg_type = 'ems')
       OR (p_reg_type = 'manual' AND COALESCE(reg_type, 'manual') NOT IN ('portal', 'web', 'ems'))
     )
-    -- v1.92: inclusive registration window
-    AND (p_created_from IS NULL OR created_at >= p_created_from)
-    AND (p_created_to   IS NULL OR created_at <= p_created_to)
+    -- v1.92/v1.93: inclusive registration window
+    AND (
+      p_created_from IS NULL
+      OR (v_basis = 'created'  AND created_at >= p_created_from)
+      OR (v_basis = 'activity' AND last_activity_at >= p_created_from)
+    )
+    AND (
+      p_created_to IS NULL
+      OR (v_basis = 'created'  AND created_at <= p_created_to)
+      OR (v_basis = 'activity' AND last_activity_at <= p_created_to)
+    )
     ORDER BY chapter, last_name, first_name
     LIMIT p_page_size
     OFFSET offset_val

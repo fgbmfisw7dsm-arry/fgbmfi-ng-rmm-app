@@ -1,6 +1,6 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
-import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick } from '../types';
+import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis } from '../types';
 import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
@@ -1361,12 +1361,12 @@ export const db = {
         return results;
     },
 
-    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType, range?: DateRangeFilter): Promise<Delegate[]> => {
+    fetchAllDelegatesForExport: async (eventId: string, district?: string, search?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity'): Promise<Delegate[]> => {
         const results: Delegate[] = [];
         let page = 1;
         const pageSize = 500;
         while (true) {
-            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source, range);
+            const paginated = await db.getPaginatedDelegates(page, pageSize, search || undefined, district || undefined, undefined, eventId, source, range, basis);
             if (!paginated.data || paginated.data.length === 0) break;
             results.push(...paginated.data);
             if (paginated.data.length < pageSize) break;
@@ -1375,13 +1375,17 @@ export const db = {
         return results;
     },
 
-    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType, range?: DateRangeFilter): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+    getPaginatedDelegates: async (page: number = 1, pageSize: number = 25, search?: string, district?: string, region?: string, eventId?: string, source?: RegType, range?: DateRangeFilter, basis: DateBasis = 'activity'): Promise<{ data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number }> => {
         if (!eventId) {
             console.warn('[getPaginatedDelegates] BLOCKED: no eventId provided, returning empty');
             return { data: [], total: 0, page, pageSize, totalPages: 0 };
         }
 
         const createdRange = toServerDateRange(range);
+        // 'created' = first registration only; 'activity' = created or last detail
+        // change (generated column, badge printing excluded).
+        const dateBasis: DateBasis = basis === 'created' ? 'created' : 'activity';
+        const dateColumn = dateBasis === 'created' ? 'created_at' : 'last_activity_at';
 
         let result: { data: Delegate[]; total: number; page: number; pageSize: number; totalPages: number };
 
@@ -1409,6 +1413,7 @@ export const db = {
                 p_reg_type: source || null,
                 p_created_from: createdRange.from ?? null,
                 p_created_to: createdRange.to ?? null,
+                p_date_basis: dateBasis,
             });
             if (!error && data && !guestAliasOr) {
                 result = data as any;
@@ -1438,8 +1443,8 @@ export const db = {
             } else if (source === 'manual') {
                 q = q.neq('reg_type', 'portal').neq('reg_type', 'web').neq('reg_type', 'ems');
             }
-            if (createdRange.from) q = q.gte('created_at', createdRange.from);
-            if (createdRange.to) q = q.lte('created_at', createdRange.to);
+            if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
+            if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
             const from = (page - 1) * pageSize;
             const q2 = q.order('chapter').order('last_name').order('first_name');
             const { data: rows, count, error } = await q2.range(from, from + pageSize - 1);
@@ -2509,14 +2514,14 @@ export const db = {
 
     getDelegateSelectionScope: async (
         eventId: string,
-        opts: { search?: string; district?: string; region?: string; source?: RegType; range?: DateRangeFilter }
+        opts: { search?: string; district?: string; region?: string; source?: RegType; range?: DateRangeFilter; basis?: DateBasis }
     ): Promise<Array<{ delegate_id: string; name: string; district: string }>> => {
         if (!eventId) return [];
         const rows: Array<{ delegate_id: string; name: string; district: string }> = [];
         let page = 1;
         const pageSize = 1000;
         while (true) {
-            const res = await db.getPaginatedDelegates(page, pageSize, opts.search, opts.district, opts.region, eventId, opts.source, opts.range);
+            const res = await db.getPaginatedDelegates(page, pageSize, opts.search, opts.district, opts.region, eventId, opts.source, opts.range, opts.basis ?? 'activity');
             if (!res.data?.length) break;
             for (const d of res.data) {
                 rows.push({
@@ -4042,8 +4047,9 @@ export const db = {
             if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
             if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
             const createdRange = toServerDateRange({ from: filters.createdFrom, to: filters.createdTo });
-            if (createdRange.from) q = q.gte('created_at', createdRange.from);
-            if (createdRange.to) q = q.lte('created_at', createdRange.to);
+            const dateColumn = filters.dateBasis === 'created' ? 'created_at' : 'last_activity_at';
+            if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
+            if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
 
             if (filters.badgePrintedStatus === 'printed') {
                 q = q.eq('badge_printed', true);
@@ -4076,8 +4082,9 @@ export const db = {
         if (filters.delegateNumberFrom) q = q.gte('external_id', filters.delegateNumberFrom);
         if (filters.delegateNumberTo) q = q.lte('external_id', filters.delegateNumberTo);
         const createdRange = toServerDateRange({ from: filters.createdFrom, to: filters.createdTo });
-        if (createdRange.from) q = q.gte('created_at', createdRange.from);
-        if (createdRange.to) q = q.lte('created_at', createdRange.to);
+        const dateColumn = filters.dateBasis === 'created' ? 'created_at' : 'last_activity_at';
+        if (createdRange.from) q = q.gte(dateColumn, createdRange.from);
+        if (createdRange.to) q = q.lte(dateColumn, createdRange.to);
 
         if (filters.badgePrintedStatus === 'printed') {
             q = q.eq('badge_printed', true);

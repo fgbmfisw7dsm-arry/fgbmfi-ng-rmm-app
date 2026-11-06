@@ -123,7 +123,16 @@ export interface Delegate {
   payment_amount?: number | null;   // v1.55 (additive): EMS registration payment
   payment_reference?: string | null; // v1.55 (additive): EMS registration payment reference
   created_at: string;
+  // v1.93 (additive): last detail change + generated "latest activity" date
+  // (created_at when never updated; badge printing does not move it).
+  updated_at?: string | null;
+  last_activity_at?: string | null;
 }
+
+// v1.93: which timestamp a registration date-range filter uses.
+//   created  — first registration / upload only (v1.92 behaviour)
+//   activity — created OR last detail change (generated column last_activity_at)
+export type DateBasis = 'created' | 'activity';
 
 export interface User {
   id: string;
@@ -363,6 +372,7 @@ export interface BadgeFilter {
   surnameTo?: string;
   createdFrom?: string;
   createdTo?: string;
+  dateBasis?: DateBasis;
   selectedIds?: string[];
 }
 

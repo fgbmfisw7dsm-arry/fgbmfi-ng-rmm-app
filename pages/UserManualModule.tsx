@@ -407,11 +407,11 @@ const MANUAL_SECTIONS: DocSection[] = [
         <div className="space-y-4 text-xs font-bold text-gray-700">
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">FILTER BAR</span>
-            Narrow by District, Chapter, Delegate Type, Surname range, Delegate Number, or <strong>Registered From / To</strong>. The date range filters on the date each delegate was first registered or uploaded, and combines with every other filter — e.g. <em>All Districts, registered 1–31 Oct 2026, Badge Not Printed</em>. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
+            Narrow by District, Chapter, Delegate Type, Surname range, Delegate Number, or a date range. The <strong>Badge Status</strong> dropdown (All / Badge Printed / Badge Not Printed) replaces the old registration filter — badges are produced <em>before</em> check-in, so registration state is irrelevant here. Defaults to <strong>Badge Not Printed</strong>.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
-            <span className="text-blue-600 block mb-1">DATE RANGE = "FIRST REGISTERED"</span>
-            The range uses the delegate's original registration/upload date. Re-uploading a file whose people already exist <strong>merges</strong> into the existing records and keeps their original date, so only genuinely new people appear in a later range. The chosen range is saved on the batch and shown in the batch file name.
+            <span className="text-blue-600 block mb-1">DATE RANGE — LAST ACTIVITY OR CREATED</span>
+            Choose a <strong>Date basis</strong>: <strong>Last activity</strong> (default — created <em>or</em> last detail change) or <strong>Created / registered only</strong>. Last activity is what you want for reprints: a delegate whose name, chapter or district was corrected after the original upload falls inside the window. <strong>Printing a badge is not activity</strong>, so marking a batch printed does not pull those delegates back into the range — re-running the same window keeps returning the same cohort minus whatever is already flagged printed. The chosen basis and dates are saved on the batch and appear in its file name (<code>…_2026-10-01_to_2026-10-31_created.pdf</code> for the created-only basis).
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">"SKIP ALREADY PRINTED" GUARD (DEFAULT ON)</span>
@@ -512,8 +512,8 @@ const MANUAL_SECTIONS: DocSection[] = [
             Export buttons fetch the complete dataset (all pages, 500 delegates at a time) before generating the PDF or CSV file. The filename includes the district name or "All-Districts". Buttons show "Exporting..." with a loading state during the fetch.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
-            <span className="text-blue-600 block mb-1">REGISTERED DATE RANGE</span>
-            Pick <strong>Registered</strong> From / To (local calendar days, inclusive) to list only delegates first registered or uploaded in that window — e.g. <em>1–31 October 2026</em>. It works with the District, Source and Search filters, and the exports honor it too (the PDF/CSV carry a "Registered" column and the filename states the range). While a range is active the page uses the unified table (the per-district section counts come from a separate summary and would ignore dates). An end date before the start date is flagged and the range is ignored until corrected.
+            <span className="text-blue-600 block mb-1">DATE RANGE — CREATED OR LAST ACTIVITY</span>
+            Pick a date range and choose the <strong>basis</strong>: <strong>Last activity</strong> (default) matches delegates whose details changed in the window — last edit, repair, re-import merge or reconcile — falling back to the registration date when they were never updated; <strong>Created only</strong> matches the original registration/upload date (e.g. "the October intake"). While a range is active the table and the PDF/CSV show both a <strong>Registered</strong> and a <strong>Last activity</strong> column, so a September record appearing in an October search is clearly one that was edited. <strong>Printing a badge does not count as activity</strong>, so a reprint cohort does not grow while you mark batches. An end date before the start date is flagged and the range is ignored until corrected.
           </div>
           <div className="p-4 border rounded-xl bg-gray-50">
             <span className="text-blue-600 block mb-1">BULK SELECT & BULK DELETE (ADMIN)</span>
