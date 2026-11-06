@@ -118,15 +118,89 @@ export const resolveDistrictShortCode = (raw?: string | null): string => {
     return resolveDistrictAlias(v || trimmed) || trimmed;
 };
 
-// Strips a trailing chapter-code parenthetical (e.g. "(SW4-0123)") from a
-// chapter cell so only the chapter NAME is extracted for import. Only removes
-// the trailing "(...)" when its inner content matches the code shape
-// `[A-Z]{2}\d+-?\d{3,4}`; meaningful parentheticals like "(POLICE CHAPTER)"
-// or "(FRSC)" are preserved.
+// The registration portal emits its own enum spellings for delegate types
+// (`MEMBER_DELEGATE`, `DEPENDANT_DELEGATE`, `PAID_GUEST`, `NONPAYMENT_GUEST`,
+// `INTERNATIONAL_GUEST`). Imports must store the canonical EMS type so the
+// Master List Type filter, reports and badge band colours keep working.
+// Unknown values pass through untouched (and are surfaced as a warning in the
+// import preview) rather than silently becoming "Member".
+export const DELEGATE_TYPE_ALIASES: Record<string, string> = {
+    'PAID GUEST': 'National Guest',
+    'PAYING GUEST': 'National Guest',
+    'FEE PAYING GUEST': 'National Guest',
+    'NATIONAL GUEST': 'National Guest',
+    'NONPAYMENT GUEST': 'Free Guest',
+    'NON PAYMENT GUEST': 'Free Guest',
+    'FREE GUEST': 'Free Guest',
+    'INTERNATIONAL GUEST': 'International',
+    'FOREIGN GUEST': 'International',
+    'INTERNATIONAL': 'International',
+    'MEMBER DELEGATE': 'Member',
+    'MEMBER': 'Member',
+    'DEPENDANT DELEGATE': 'Dependant-Adult',
+    'DEPENDENT DELEGATE': 'Dependant-Adult',
+    'DEPENDANT': 'Dependant-Adult',
+    'DEPENDENT': 'Dependant-Adult',
+};
+
+const delegateTypeKey = (raw?: string | null): string =>
+    (raw || '').trim().toUpperCase().replace(/[_\-\s]+/g, ' ').trim();
+
+export const normalizeDelegateType = (raw?: string | null, knownTypes: string[] = []): string => {
+    const original = (raw || '').trim();
+    if (!original) return '';
+    const key = delegateTypeKey(original);
+    if (DELEGATE_TYPE_ALIASES[key]) return DELEGATE_TYPE_ALIASES[key];
+    const exact = knownTypes.find(t => delegateTypeKey(t) === key);
+    if (exact) return exact;
+    // `X_DELEGATE` / `X GUEST` → match the stem against the configured types so
+    // a future portal category (e.g. FACILITATOR_DELEGATE) needs no code change.
+    const stem = key.replace(/\s+(DELEGATE|DELEGATES)$/, '').trim();
+    if (stem && stem !== key) {
+        if (DELEGATE_TYPE_ALIASES[stem]) return DELEGATE_TYPE_ALIASES[stem];
+        const matched = knownTypes.find(t => delegateTypeKey(t) === stem);
+        if (matched) return matched;
+    }
+    return original;
+};
+
+// District spreadsheets commonly stamp the chapter's official code onto the
+// chapter cell ("GRA (SW4-0123)"). That code is `chapters.chapter_code`, not
+// part of the name, so imports store only the name. Only the code shape
+// `XXn-dddd` is removed; meaningful parentheticals like "(ngc)" or "(FRSC)"
+// survive untouched.
+export const CHAPTER_CODE_PATTERN = '[A-Z]{2,4}\\s*\\d{0,2}\\s*-\\s*\\d{3,4}';
+export const CHAPTER_CODE_RE = new RegExp(CHAPTER_CODE_PATTERN, 'i');
+
+// Returns the normalised code found in a chapter cell ('' when none), so
+// callers can detect a coded chapter without duplicating the pattern.
+export const chapterCodeOf = (raw?: string | null): string => {
+    const t = (raw || '').replace(/\s+/g, ' ').trim();
+    const m = t.match(CHAPTER_CODE_RE);
+    return m ? m[0].replace(/\s+/g, '').toUpperCase() : '';
+};
+
+const stripChapterCodes = (value: string): string => {
+    let out = value;
+    // Repeated so double-stamped cells ("GRA (SW4-0123) [SW4-0123]") fully clean.
+    for (let pass = 0; pass < 4; pass++) {
+        const before = out;
+        out = out
+            .replace(/\(\s*[A-Z]{2,4}\s*\d{0,2}\s*-\s*\d{3,4}\s*\)/gi, ' ')
+            .replace(/\[\s*[A-Z]{2,4}\s*\d{0,2}\s*-\s*\d{3,4}\s*\]/gi, ' ')
+            .replace(new RegExp(`^\\s*[A-Z]{2,4}\\s*\\d{0,2}\\s*-\\s*\\d{3,4}\\s*[-–—,:]?\\s*`, 'i'), '')
+            .replace(new RegExp(`\\s*[-–—,:]?\\s*[A-Z]{2,4}\\s*\\d{0,2}\\s*-\\s*\\d{3,4}\\s*$`, 'i'), '');
+        if (out === before) break;
+    }
+    return out.replace(/\s+/g, ' ').replace(/^[\s\-–—,:]+|[\s\-–—,:]+$/g, '').trim();
+};
+
 export const cleanChapterName = (raw?: string | null): string => {
     const t = (raw || '').replace(/\s+/g, ' ').trim();
-    if (!t) return t;
-    return t.replace(/\s*\(([A-Z]{2}\s*\d+\s*-?\s*\d{3,4})\)\s*$/i, '').replace(/\s+/g, ' ').trim();
+    if (!t || !CHAPTER_CODE_RE.test(t)) return t;
+    // Never blank a chapter: if the cell held nothing but a code we cannot
+    // recover the name, so the original value is kept for manual correction.
+    return stripChapterCodes(t) || t;
 };
 
 export const normalizePhone = (raw?: string | null): string => {

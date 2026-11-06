@@ -1,7 +1,7 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { User, UserRole, Delegate, Event, Session, SystemSettings, CheckInResult, Pledge, FinancialEntry, DashboardStats, CheckIn, FinancialType, SessionResponse, SessionResponseSummary, VoiceDistribution, SessionAttendanceManual, SessionMinistryDashboard, MinistryExportData, SessionResponseType, BadgeBatch, BadgePrintLog, BadgeFilter, BadgeSortField, BadgeLayout, BatchStatus, BadgePrintAction, AuditLog, RESPONSE_TYPE_LABELS, isRegistrarRole, isAdminRole, RegType, SessionKick, DateBasis, ImportBatch, ImportBadgeReset, BadgeBatchDelegate } from '../types';
-import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
+import { generateQrHash, generateRegId, normalizePhone, cleanChapterName, chapterCodeOf, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, resolveDistrictAlias, resolveDistrictShortCode, DISTRICT_ALIASES, parseCsvLine, splitCsvRecords, familyOfName, canonicalNameKeyStr, familyAwareNameKey, parseQrPayload, toServerDateRange, DateRangeFilter } from './utils';
 import { createClient } from '@supabase/supabase-js';
 import { buildOfflineRoster, ensureOfflineRoster, getRosterStatus, resolveBadgeLocally, resolveDelegateByIdLocally, getOfflineWindowOpen, searchRosterLocally, scopeKeyOf, getOfflineOwnerId } from './offlineRoster';
 import { getQueue, setQueue } from './queueStore';
@@ -2781,6 +2781,109 @@ export const db = {
         }
         console.log(`[deleteJunkDelegates] Deleted ${ids.length} junk delegate(s) from event ${eventId}`);
         return ids.length;
+    },
+
+    // Chapter codes are the districts' own spreadsheet habit (SW4/SW6 stamps the
+    // official chapters.chapter_code onto the chapter cell). Imports strip them,
+    // but this repairs rows saved before that rule existed.
+    findCodedChapters: async (eventId: string): Promise<{
+        rows: Array<{ delegate_id: string; title: string; first_name: string; last_name: string; district: string; chapter: string; cleaned: string; code: string }>;
+        total: number;
+    }> => {
+        if (!eventId) return { rows: [], total: 0 };
+        const rows: Array<{ delegate_id: string; title: string; first_name: string; last_name: string; district: string; chapter: string; cleaned: string; code: string }> = [];
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('delegates')
+                .select('delegate_id, title, first_name, last_name, district, chapter')
+                .eq('event_id', eventId)
+                .order('last_name', { ascending: true })
+                .order('first_name', { ascending: true })
+                .range(from, from + 999);
+            if (error) {
+                console.error('[findCodedChapters] fetch error:', error);
+                break;
+            }
+            if (!data || data.length === 0) break;
+            for (const d of data) {
+                const chapter = (d.chapter || '').trim();
+                const code = chapterCodeOf(chapter);
+                if (!code) continue;
+                const cleaned = cleanChapterName(chapter);
+                if (!cleaned || cleaned === chapter) continue;
+                rows.push({
+                    delegate_id: d.delegate_id,
+                    title: d.title || '',
+                    first_name: d.first_name || '',
+                    last_name: d.last_name || '',
+                    district: d.district || '',
+                    chapter,
+                    cleaned,
+                    code,
+                });
+            }
+            if (data.length < 1000) break;
+            from += 1000;
+        }
+        console.log(`[findCodedChapters] event ${eventId}: ${rows.length} row(s) carry a chapter code`);
+        return { rows, total: rows.length };
+    },
+
+    cleanChapterCodes: async (
+        eventId: string,
+        rows: Array<{ delegate_id: string; cleaned: string }>
+    ): Promise<{ updated: number; verified: number }> => {
+        if (!eventId || rows.length === 0) return { updated: 0, verified: 0 };
+        await ensureEventActive(eventId);
+        // Grouped by target name so a district's ~40 distinct chapters become a
+        // handful of chunked UPDATEs instead of one request per delegate.
+        const byChapter = new Map<string, string[]>();
+        for (const r of rows) {
+            const target = (r.cleaned || '').trim();
+            if (!target) continue;
+            const list = byChapter.get(target) || [];
+            list.push(r.delegate_id);
+            byChapter.set(target, list);
+        }
+        let updated = 0;
+        for (const [chapter, ids] of byChapter) {
+            for (let i = 0; i < ids.length; i += 500) {
+                const chunk = ids.slice(i, i + 500);
+                const { error } = await supabase
+                    .from('delegates')
+                    .update({ chapter })
+                    .eq('event_id', eventId)
+                    .in('delegate_id', chunk);
+                if (error) {
+                    console.error('[cleanChapterCodes] update error:', error);
+                    throw error;
+                }
+                updated += chunk.length;
+            }
+        }
+        const allIds = rows.map(r => r.delegate_id);
+        let verified = 0;
+        for (let i = 0; i < allIds.length; i += 500) {
+            const chunk = allIds.slice(i, i + 500);
+            const { data } = await supabase
+                .from('delegates')
+                .select('delegate_id, chapter')
+                .eq('event_id', eventId)
+                .in('delegate_id', chunk);
+            for (const r of data || []) if (!chapterCodeOf(r.chapter || '')) verified++;
+        }
+        await recordAuditLog(
+            eventId,
+            'delegate_chapter_code_cleanup',
+            `Removed chapter codes from ${updated} delegate row(s)`,
+            null,
+            'delegate',
+            eventId,
+            { count: updated, chapters: byChapter.size, verified }
+        );
+        console.log(`[cleanChapterCodes] event ${eventId}: updated ${updated}, verified ${verified}`);
+        return { updated, verified };
     },
 
     deleteDelegate: async (id: string, eventId: string): Promise<boolean> => {

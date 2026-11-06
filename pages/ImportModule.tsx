@@ -3,7 +3,7 @@ import React, { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import { db } from '../services/supabaseService';
 import { AppContext } from '../context/AppContext';
 import { isAdminRole, isEventAdminRole } from '../types';
-import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, splitCsvRecords, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
+import { exportToCSV, normalizePhone, resolveDistrictShortCode, cleanChapterName, chapterCodeOf, normalizeDelegateType, splitCsvRecords, parseFullName, tokenizeFullName, normalizeTitleToken, KNOWN_TITLES, parseCsvLine, csvEscape, downloadJSON, type NameOrder } from '../services/utils';
 
 const AMBIGUOUS_VALUE_KEYS = new Set([
     'mr', 'mrs', 'ms', 'miss', 'dr', 'chief', 'pastor', 'rev', 'engr',
@@ -34,16 +34,14 @@ const extractBannerDistrict = (line: string): string => {
     return '';
 };
 
-function normalizeDelegateType(raw: string): string {
-  const t = (raw || '').trim().toUpperCase().replace(/[_\-\s]+/g, ' ');
-  if (t === 'PAID GUEST') return 'National Guest';
-  if (t === 'NONPAYMENT GUEST' || t === 'NON PAYMENT GUEST' || t === 'FREE GUEST') return 'Free Guest';
-  if (t === 'INTERNATIONAL GUEST' || t === 'INTERNATIONAL') return 'International';
-  return (raw || '').trim();
-}
-
-function resolveGuestFields(district: string, chapter: string, delegateType: string, typeMap: Record<string, string> = {}): { district: string; chapter: string; delegateType: string } {
-  const t = normalizeDelegateType(delegateType);
+function resolveGuestFields(
+  district: string,
+  chapter: string,
+  delegateType: string,
+  typeMap: Record<string, string> = {},
+  knownTypes: string[] = []
+): { district: string; chapter: string; delegateType: string } {
+  const t = normalizeDelegateType(delegateType, knownTypes);
   const guestDistrict = (typeMap['Free Guest'] || typeMap['National Guest'] || '').trim();
   const d0 = (district || '').trim();
   const d = d0.toUpperCase() === 'GUE' ? (guestDistrict || d0) : d0;
@@ -128,15 +126,16 @@ const ImportModule = () => {
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
     const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
     const [resetBadge, setResetBadge] = useState<'none' | 'changed' | 'all'>('none');
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, junk?: number, resetHint?: boolean, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, junk?: number, resetHint?: boolean, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; chaptersCodeStripped?: number; chapterStripSample?: string; typesUnmapped?: number; typeSamples?: string; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
     const [columnMap, setColumnMap] = useState<Record<string, boolean>>({});
     const [bannerDistrict, setBannerDistrict] = useState('');
     const [typeDistrictMap, setTypeDistrictMap] = useState<Record<string, string>>({});
+    const [delegateTypes, setDelegateTypes] = useState<string[]>([]);
     const [nameOrder, setNameOrder] = useState<NameOrder | 'auto'>('auto');
-    const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0 });
+    const statsRef = useRef({ bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0, chaptersCodeStripped: 0, chapterStripSample: '', typesUnmapped: 0, typeSampleSet: new Set<string>() });
     const [scrambleAnalyses, setScrambleAnalyses] = useState<any[]>([]);
     const [scrambleSamples, setScrambleSamples] = useState<string[]>([]);
     const [scrambleTotal, setScrambleTotal] = useState(0);
@@ -156,7 +155,11 @@ const ImportModule = () => {
     const [reconcileResult, setReconcileResult] = useState<{ type: 'preview' | 'applied' | 'error'; inserted?: number; updated?: number; skipped?: number; msg?: string } | null>(null);
 
     useEffect(() => {
-        db.getSettings().then(s => { if (s && s.delegate_type_districts) setTypeDistrictMap(s.delegate_type_districts); }).catch(() => {});
+        db.getSettings().then(s => {
+            if (!s) return;
+            if (s.delegate_type_districts) setTypeDistrictMap(s.delegate_type_districts);
+            if (Array.isArray(s.delegate_types) && s.delegate_types.length > 0) setDelegateTypes(s.delegate_types);
+        }).catch(() => {});
     }, []);
 
     const KNOWN_FIELDS: Record<string, string> = {
@@ -372,7 +375,7 @@ const ImportModule = () => {
     };
 
     const mappedCsvData = React.useMemo(() => {
-      statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0 };
+      statsRef.current = { bannerUsed: 0, shortCodesResolved: 0, whatsappFilled: 0, chaptersInFile: 0, chaptersBlankAtSource: 0, chaptersCodeStripped: 0, chapterStripSample: '', typesUnmapped: 0, typeSampleSet: new Set<string>() };
       if (!csv.trim()) return csv;
       const lines = splitCsvRecords(csv);
       if (lines.length < 2) return showMapping ? '' : csv;
@@ -466,7 +469,15 @@ const ImportModule = () => {
         const chapterRaw = pickRowValue(values, fieldIndices.get('Chapter') || []);
         if (chapterRaw.trim()) statsRef.current.chaptersInFile++;
         else statsRef.current.chaptersBlankAtSource++;
-        colValues['Chapter'] = cleanChapterName(chapterRaw);
+        const chapterClean = cleanChapterName(chapterRaw);
+        // Chapter code stamped on the cell ("GRA (SW4-0123)") — the code is
+        // chapters.chapter_code, not part of the name, so it is not imported.
+        const chapterCode = chapterCodeOf(chapterRaw);
+        if (chapterCode && chapterClean !== chapterRaw.trim()) {
+          statsRef.current.chaptersCodeStripped++;
+          if (!statsRef.current.chapterStripSample) statsRef.current.chapterStripSample = `${chapterRaw.trim()} → ${chapterClean}`;
+        }
+        colValues['Chapter'] = chapterClean;
 
         const phoneFromPhoneCol = pickRowValue(values, phoneLikeIdx);
         const phoneFromWhatsapp = pickRowValue(values, whatsappIdx);
@@ -481,19 +492,30 @@ const ImportModule = () => {
         colValues['Email'] = emailVal;
         colValues['Rank'] = firstIdx('Rank') >= 0 ? (values[firstIdx('Rank')] || '') : '';
         colValues['Office'] = firstIdx('Office') >= 0 ? (values[firstIdx('Office')] || '') : '';
-        colValues['DelegateType'] = firstIdx('DelegateType') >= 0 ? (values[firstIdx('DelegateType')] || '') : '';
+        const typeRaw = firstIdx('DelegateType') >= 0 ? (values[firstIdx('DelegateType')] || '') : '';
+        colValues['DelegateType'] = typeRaw;
         colValues['RegId'] = firstIdx('RegId') >= 0 ? (values[firstIdx('RegId')] || '') : '';
 
-        const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '', typeDistrictMap);
+        const guest = resolveGuestFields(colValues['District'] || '', colValues['Chapter'] || '', colValues['DelegateType'] || '', typeDistrictMap, delegateTypes);
         colValues['District'] = guest.district;
         colValues['Chapter'] = guest.chapter;
         colValues['DelegateType'] = guest.delegateType;
+
+        // A portal category we cannot map would be stored verbatim — surface it
+        // before the operator presses Proceed instead of silently importing it.
+        if (typeRaw.trim() && delegateTypes.length > 0) {
+          const canonical = guest.delegateType.toLowerCase();
+          if (!delegateTypes.some(t => t.toLowerCase() === canonical)) {
+            statsRef.current.typesUnmapped++;
+            statsRef.current.typeSampleSet.add(typeRaw.trim());
+          }
+        }
 
         const row = OUTPUT_FIELDS.map(f => csvEscape(colValues[f] ?? '')).join(',');
         if (row.trim().replace(/,/g, '')) resultLines.push(row);
       }
       return resultLines.join('\n');
-    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder, typeDistrictMap]);
+    }, [csv, showMapping, detectedColumns, columnMap, bannerDistrict, nameOrder, typeDistrictMap, delegateTypes]);
 
     const importPreview = React.useMemo(() => {
       if (!csv.trim() || !showMapping || detectedColumns.length === 0) return null;
@@ -575,7 +597,8 @@ const ImportModule = () => {
             const first = parseCsvLine(line)[0] || '';
             return !!first.trim();
         }).length;
-        const importStats = { ...statsRef.current, portalRows, regType };
+        const { typeSampleSet, ...statsSnapshot } = statsRef.current;
+        const importStats = { ...statsSnapshot, portalRows, regType, typeSamples: Array.from(typeSampleSet).slice(0, 3).join(', ') };
         if (!dataToImport.trim()) {
             setFeedback({ type: 'error', msg: 'Please upload a CSV file or paste CSV data before attempting import.' });
             return;
@@ -1305,6 +1328,16 @@ const hasFile = repairHasFile;
                                             {'\uD83C\uDFF5\uFE0F'} {feedback.stats?.chaptersInFile} rows carry a Chapter ({feedback.stats?.chaptersBlankAtSource ?? 0} blank in file)
                                         </p>
                                     )}
+                                    {(feedback.stats?.chaptersCodeStripped ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-teal-700 uppercase">
+                                            {feedback.stats?.chaptersCodeStripped} chapter code(s) removed — chapter names saved without codes
+                                        </p>
+                                    )}
+                                    {(feedback.stats?.typesUnmapped ?? 0) > 0 && (
+                                        <p className="text-[10px] font-bold text-red-600 uppercase">
+                                            {feedback.stats?.typesUnmapped} row(s) kept an unrecognised delegate type ({feedback.stats?.typeSamples})
+                                        </p>
+                                    )}
                                     {(feedback.stats?.chaptersInFile ?? 0) > 0 && (feedback.skipped ?? 0) > 0 && (
                                         <p className="text-[10px] font-bold text-amber-700 uppercase">
                                             {'\u2139\uFE0F'} {feedback.skipped} existing rows were already complete — if any row still lacks Chapter in the Master List, apply the v1.46 import RPC patch then re-import.
@@ -1874,6 +1907,17 @@ const hasFile = repairHasFile;
                                                 )}
                                             </div>
                                         </div>
+                                    )}
+                                    {statsRef.current.chaptersCodeStripped > 0 && (
+                                        <p className="text-[8px] font-bold text-teal-700 uppercase mb-2">
+                                            {statsRef.current.chaptersCodeStripped} chapter code(s) detected — only the chapter name is saved. e.g. {statsRef.current.chapterStripSample}
+                                        </p>
+                                    )}
+                                    {statsRef.current.typesUnmapped > 0 && (
+                                        <p className="text-[8px] font-bold text-red-600 uppercase mb-2">
+                                            {statsRef.current.typesUnmapped} row(s) have a delegate type this file will store as-is:{' '}
+                                            {Array.from(statsRef.current.typeSampleSet).slice(0, 3).join(', ')} — add the type in System Setup if it should be classified.
+                                        </p>
                                     )}
                                     <p className="text-[8px] font-bold text-gray-500 uppercase mb-1">First records to import:</p>
                                     <div className="grid grid-cols-1 gap-1 font-mono text-[8px] text-gray-700">

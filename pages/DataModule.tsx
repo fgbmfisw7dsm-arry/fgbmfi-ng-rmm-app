@@ -60,6 +60,13 @@ const DataModule = () => {
     const [junkBackupReady, setJunkBackupReady] = useState(false);
     const [junkDeleting, setJunkDeleting] = useState(false);
 
+    // State for Chapter Code Cleanup (SW4/SW6 cells like "GRA (SW4-0123)")
+    const [ccRows, setCcRows] = useState<Array<{ delegate_id: string; title: string; first_name: string; last_name: string; district: string; chapter: string; cleaned: string; code: string }>>([]);
+    const [ccScanning, setCcScanning] = useState(false);
+    const [ccBackupReady, setCcBackupReady] = useState(false);
+    const [ccApplying, setCcApplying] = useState(false);
+    const [ccResult, setCcResult] = useState<string | null>(null);
+
     // State for Delegate Registration Source (Portal vs Manual)
     const [srcDist, setSrcDist] = useState<{ total: number; counts: Record<string, number> } | null>(null);
     const [srcScanning, setSrcScanning] = useState(false);
@@ -92,6 +99,7 @@ const DataModule = () => {
     }, []);
 
     const activeEvent = events.find(e => e.event_id === activeEventId);
+    const eventLocked = !!activeEvent && activeEvent.is_active === false;
 
     // --- LOGIC: HARMONIZE DISTRICTS ---
     const handleHarmonize = async () => {
@@ -317,6 +325,58 @@ const DataModule = () => {
             alert("Delete failed: " + e.message);
         } finally {
             setJunkDeleting(false);
+        }
+    };
+
+    // --- LOGIC: CHAPTER CODE CLEANUP (district files stamp chapters.chapter_code onto the cell) ---
+    const handleChapterCodeScan = async () => {
+        if (!activeEventId) return alert("Select an active event first.");
+        setCcScanning(true);
+        setCcBackupReady(false);
+        setCcResult(null);
+        try {
+            const { rows } = await db.findCodedChapters(activeEventId);
+            setCcRows(rows);
+            if (rows.length === 0) {
+                alert("No chapter codes found in the active event. Every chapter is already stored as a plain name.");
+            }
+        } catch (e: any) {
+            alert("Scan failed: " + (e.message || "Database connection error."));
+        } finally {
+            setCcScanning(false);
+        }
+    };
+
+    const handleChapterCodeBackup = async () => {
+        if (ccRows.length === 0) return alert("Scan first.");
+        try {
+            downloadJSON(
+                { event_id: activeEventId, event_name: activeEvent?.name || '', exported_at: new Date().toISOString(), coded_chapters: ccRows },
+                `BACKUP_CHAPTER_CODES_${activeEvent?.name || 'EVENT'}_${Date.now()}.json`
+            );
+            setCcBackupReady(true);
+            alert("BACKUP DOWNLOADED: You can now clean the chapter codes.");
+        } catch (e: any) {
+            alert("Backup failed: " + e.message);
+        }
+    };
+
+    const handleChapterCodeApply = async () => {
+        if (!ccBackupReady) return alert("Download the backup first.");
+        if (ccRows.length === 0) return alert("Scan first.");
+        if (!window.confirm(`This will rewrite the Chapter on ${ccRows.length} delegate row(s) in ${activeEvent?.name || 'the active event'} — the code is removed, the chapter name is kept. Only the chapter field changes. Continue?`)) return;
+        setCcApplying(true);
+        setCcResult(null);
+        try {
+            const { updated, verified } = await db.cleanChapterCodes(activeEventId!, ccRows);
+            setCcResult(`${updated} row(s) cleaned · ${verified} verified · ${ccRows.length - verified} still coded`);
+            alert(`SUCCESS: Chapter codes removed from ${updated} row(s) in ${activeEvent?.name || 'the active event'}.\n${verified} of ${ccRows.length} verified as clean.`);
+            setCcRows([]);
+            setCcBackupReady(false);
+        } catch (e: any) {
+            alert("Cleanup failed: " + e.message);
+        } finally {
+            setCcApplying(false);
         }
     };
 
@@ -906,6 +966,112 @@ const DataModule = () => {
                             className="w-full py-5 bg-red-600 text-white font-black rounded-xl uppercase text-sm tracking-[0.2em] shadow-2xl hover:bg-red-700 disabled:opacity-10"
                         >
                             {junkDeleting ? 'DELETING...' : `DELETE ${junkRows.length} JUNK ROW(S)`}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* MODULE 4b: CHAPTER CODE CLEANUP */}
+            <div className="bg-white rounded-3xl shadow-xl border-t-8 border-violet-500 overflow-hidden">
+                <div className="p-6 bg-violet-50 border-b border-violet-100">
+                    <h3 className="text-lg font-black text-violet-900 uppercase">Clean Chapter Codes</h3>
+                    <p className="text-[10px] font-bold text-violet-700 uppercase">District files (SW4 / SW6) stamp the chapter's official code onto the chapter cell — e.g. <span className="text-violet-900">GRA (SW4-0123)</span>. New imports strip it automatically; this repairs rows saved before that rule. Only the Chapter field is written.</p>
+                </div>
+                <div className="p-8 space-y-6">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-black text-gray-400 uppercase block mb-1">Target Event:</span>
+                        <span className="text-xl font-black text-blue-900 uppercase">{activeEvent?.name || 'NO EVENT SELECTED'}</span>
+                    </div>
+
+                    {eventLocked && (
+                        <div className="p-4 rounded-xl border border-amber-200 bg-amber-50">
+                            <span className="text-[10px] font-black text-amber-800 uppercase">Event is locked (read-only) — unlock it in Events &amp; Config before cleaning.</span>
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">1</span>
+                            Scan for Coded Chapters
+                        </label>
+                        <button
+                            onClick={handleChapterCodeScan}
+                            disabled={ccScanning || !activeEventId}
+                            className="w-full py-4 bg-violet-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-violet-700 transition-all disabled:opacity-30"
+                        >
+                            {ccScanning ? 'SCANNING...' : (ccRows.length > 0 ? `Scan Again (${ccRows.length} found)` : 'Scan Active Event')}
+                        </button>
+                    </div>
+
+                    {ccRows.length > 0 && (
+                        <div className="bg-violet-50/60 rounded-xl border border-violet-100 overflow-hidden">
+                            <div className="flex items-center justify-between px-4 py-2 bg-violet-100">
+                                <span className="text-[10px] font-black text-violet-900 uppercase">{ccRows.length} Coded Row(s) Detected</span>
+                                <span className="text-[8px] font-bold text-violet-700 uppercase">Chapter name is kept — only the code is removed</span>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto">
+                                <table className="w-full text-[10px]">
+                                    <thead className="sticky top-0 bg-violet-100 text-violet-900 uppercase font-black tracking-wider">
+                                        <tr>
+                                            <th className="p-2 text-left w-10">#</th>
+                                            <th className="p-2 text-left">Name</th>
+                                            <th className="p-2 text-left">District</th>
+                                            <th className="p-2 text-left">Current Chapter</th>
+                                            <th className="p-2 text-left">Becomes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {ccRows.slice(0, 200).map((r, i) => (
+                                            <tr key={r.delegate_id} className="border-b border-violet-100 bg-white">
+                                                <td className="p-2 font-mono text-gray-400">{i + 1}</td>
+                                                <td className="p-2 font-mono text-violet-900">{r.title ? `${r.title} ` : ''}{r.first_name} {r.last_name}</td>
+                                                <td className="p-2 font-mono text-gray-600">{r.district || '—'}</td>
+                                                <td className="p-2 font-mono text-red-600">{r.chapter}</td>
+                                                <td className="p-2 font-mono font-black text-green-700">{r.cleaned}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {ccRows.length > 200 && (
+                                <div className="px-4 py-2 bg-violet-50 text-[9px] font-bold text-violet-700 uppercase">
+                                    Showing first 200 of {ccRows.length} — all {ccRows.length} will be cleaned.
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {ccResult && (
+                        <div className="p-4 rounded-xl border border-green-200 bg-green-50">
+                            <span className="block text-[11px] font-black text-green-800 uppercase">{ccResult}</span>
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase flex items-center gap-2">
+                            <span className="bg-gray-200 w-5 h-5 rounded-full flex items-center justify-center">2</span>
+                            Backup Coded Rows
+                        </label>
+                        <button
+                            onClick={handleChapterCodeBackup}
+                            disabled={ccRows.length === 0}
+                            className="w-full py-4 bg-slate-800 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-30"
+                        >
+                            {ccBackupReady ? 'Backup Downloaded' : 'Generate & Download Backup'}
+                        </button>
+                    </div>
+
+                    <div className={`space-y-2 transition-all duration-500 ${ccBackupReady ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
+                        <label className="text-[10px] font-black text-violet-700 uppercase flex items-center gap-2">
+                            <span className="bg-violet-100 w-5 h-5 rounded-full flex items-center justify-center">3</span>
+                            Apply Chapter Cleanup
+                        </label>
+                        <button
+                            onClick={handleChapterCodeApply}
+                            disabled={ccApplying || ccRows.length === 0 || eventLocked}
+                            className="w-full py-5 bg-violet-700 text-white font-black rounded-xl uppercase text-sm tracking-[0.2em] shadow-2xl hover:bg-violet-800 disabled:opacity-10"
+                        >
+                            {ccApplying ? 'CLEANING...' : `CLEAN ${ccRows.length} ROW(S)`}
                         </button>
                     </div>
                 </div>
