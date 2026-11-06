@@ -36,7 +36,28 @@ const CHAPTERS_CACHE_MS = 60_000;
 
 let settingsCache: { settings: SystemSettings; at: number } | null = null;
 const SETTINGS_CACHE_MS = 30_000;
-const invalidateSettingsCache = () => { settingsCache = null; delegateTypeDistrictCache = null; };
+// Single-flight: the Master List mounts 3-4 cold getSettings() callers at once
+// (loadAllDistricts + getDistrictsWithDelegates + getDelegateTypeDistrictMap).
+// Without this they each re-fetched system_settings AND the full chapters table.
+let settingsInFlight: Promise<SystemSettings> | null = null;
+// Chapter district names are merged into settings.districts; they change only
+// when the chapters registry is imported, so they get a longer TTL.
+let chapterDistrictCache: { districts: string[]; at: number } | null = null;
+const CHAPTER_DISTRICT_CACHE_MS = 5 * 60_000;
+const invalidateSettingsCache = () => {
+    settingsCache = null;
+    delegateTypeDistrictCache = null;
+    chapterDistrictCache = null;
+};
+
+// Master List RPC health: false once PostgREST reports the function missing, so
+// the page can tell the operator it is running on the slow client fallback.
+let paginatedRpcAvailable = true;
+let districtCountsRpcAvailable = true;
+const isMissingFunctionError = (e: any): boolean => {
+    const msg = String(e?.message || '').toLowerCase();
+    return e?.code === 'PGRST202' || e?.code === 'PGRST116' || msg.includes('could not find the function');
+};
 
 // v1.82: server-side live event pin (system_settings.live_event_id).
 let liveEventCache: { id: string | null; at: number } | null = null;
@@ -724,6 +745,60 @@ const recordAuditLog = (
     })().catch(() => {});
 };
 
+const DEFAULT_SETTINGS: SystemSettings = {
+    titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'],
+    districts: ['North Central 1', 'North Central 2', 'North Central 3', 'North Central 4', 'North Central 5', 'North East 1', 'North East 2', 'North West 1', 'North West 2', 'North West 3', 'South East 1', 'South East 2', 'South East 3', 'South South 1', 'South South 2', 'South South 3', 'South South 4', 'South West 1', 'South West 2', 'South West 3', 'South West 4', 'South West 5', 'South West 6', 'South West 7', 'SOUTH WEST 8', 'Guest', 'International'],
+    ranks: [],
+    offices: [],
+    regions: [],
+    delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'],
+    delegate_type_districts: { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' },
+    audit_enabled: true,
+} as SystemSettings;
+
+// Chapter districts are only needed to widen the District dropdown; they are
+// fetched once per TTL instead of on every cold settings read.
+const getChapterDistrictNames = async (): Promise<string[]> => {
+    if (chapterDistrictCache && Date.now() - chapterDistrictCache.at < CHAPTER_DISTRICT_CACHE_MS) {
+        return chapterDistrictCache.districts;
+    }
+    try {
+        const { data } = await supabase.from('chapters').select('district');
+        const set = new Set<string>();
+        (data || []).forEach((c: any) => {
+            const d = c?.district;
+            if (d && !LEGACY_GUEST_DISTRICT_RE.test(d)) set.add(d);
+        });
+        const districts = Array.from(set);
+        chapterDistrictCache = { districts, at: Date.now() };
+        return districts;
+    } catch {
+        return [];
+    }
+};
+
+const loadSettingsFresh = async (): Promise<SystemSettings> => {
+    const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
+    if (error) throw error;
+    const settings: SystemSettings = data || { ...DEFAULT_SETTINGS };
+    const chapterDistricts = await getChapterDistrictNames();
+    if (chapterDistricts.length > 0) {
+        const merged = [...new Set([...(settings.districts || []), ...chapterDistricts])]
+            .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+        settings.districts = merged;
+    }
+    if (settings.audit_enabled === undefined) settings.audit_enabled = true;
+    if (!Array.isArray(settings.titles) || !Array.isArray(settings.delegate_types)) {
+        console.warn('[getSettings] system_settings missing titles/delegate_types columns — run supabase_migration_fix_system_settings_columns.sql');
+    }
+    if (!settings.delegate_type_districts || typeof settings.delegate_type_districts !== 'object') {
+        settings.delegate_type_districts = { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' };
+    }
+    updateAuditSyncCache(settings);
+    settingsCache = { settings: { ...settings }, at: Date.now() };
+    return settings;
+};
+
 export const db = {
     getEvents: async (): Promise<Event[]> =>
         handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
@@ -819,6 +894,9 @@ export const db = {
                 inserted += upsertedRows.length > 0 ? upsertedRows.length : batch.length;
             }
         }
+        // New district names may have arrived with the registry; let the District
+        // dropdown pick them up without waiting for the 5-minute TTL.
+        chapterDistrictCache = null;
         return { inserted, errors };
     },
 
@@ -826,29 +904,21 @@ export const db = {
         if (settingsCache && Date.now() - settingsCache.at < SETTINGS_CACHE_MS) {
             return { ...settingsCache.settings };
         }
-        const defaultData = { titles: ['Mr', 'Mrs', 'Ms', 'Chief', 'Dr', 'Prof', 'Engr', 'Elder'], districts: ['North Central 1', 'North Central 2', 'North Central 3', 'North Central 4', 'North Central 5', 'North East 1', 'North East 2', 'North West 1', 'North West 2', 'North West 3', 'South East 1', 'South East 2', 'South East 3', 'South South 1', 'South South 2', 'South South 3', 'South South 4', 'South West 1', 'South West 2', 'South West 3', 'South West 4', 'South West 5', 'South West 6', 'South West 7', 'SOUTH WEST 8', 'Guest', 'International'], ranks: [], offices: [], regions: [], delegate_types: ['Member', 'National Guest', 'Free Guest', 'Dependant-Adult', 'Dependant-Teen', 'Dependant-Children', 'International'], delegate_type_districts: { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' }, audit_enabled: true };
-        const { data, error } = await supabase.from('system_settings').select('*').limit(1).maybeSingle();
-        if (error) throw error;
-        const settings = data || defaultData;
-        try {
-            const { data: chapterDistricts } = await supabase.from('chapters').select('district');
-            if (chapterDistricts?.length) {
-                const chapterDistSet = new Set((chapterDistricts as any[]).map(c => c.district).filter((d?: string) => d && !LEGACY_GUEST_DISTRICT_RE.test(d)));
-                const merged = [...new Set([...(settings.districts || []), ...chapterDistSet])].sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-                settings.districts = merged;
-            }
-        } catch { /* chapters table may not exist yet */ }
-        if (settings.audit_enabled === undefined) settings.audit_enabled = true;
-        if (!Array.isArray(settings.titles) || !Array.isArray(settings.delegate_types)) {
-            console.warn('[getSettings] system_settings missing titles/delegate_types columns — run supabase_migration_fix_system_settings_columns.sql');
+        // Concurrent cold callers share one request (see settingsInFlight).
+        if (!settingsInFlight) {
+            settingsInFlight = loadSettingsFresh().finally(() => { settingsInFlight = null; });
         }
-        if (!settings.delegate_type_districts || typeof settings.delegate_type_districts !== 'object') {
-            settings.delegate_type_districts = { 'Free Guest': 'Guest', 'National Guest': 'Guest', 'International': 'International' };
-        }
-        updateAuditSyncCache(settings);
-        settingsCache = { settings: { ...settings }, at: Date.now() };
-        return settings;
+        const settings = await settingsInFlight;
+        return { ...settings };
     },
+
+    // Master List diagnostics: true when the server RPCs it depends on answered.
+    // false means the page is running on the slow client fallback and the
+    // matching migration has not been applied.
+    getMasterListRpcHealth: () => ({
+        paginated: paginatedRpcAvailable,
+        districtCounts: districtCountsRpcAvailable,
+    }),
 
     // v1.82: server-side live event pin. Returns null when unpinned or when the
     // migration has not been applied yet (frontend-first deploy is non-breaking).
@@ -1398,12 +1468,23 @@ export const db = {
             const districtNorm = normalize(district);
             const isGuestTarget = guestTargets.some(t => normalize(t).toUpperCase() === districtNorm.toUpperCase());
             if (isGuestTarget) {
-                guestAliasOr = `district.ilike.${districtNorm},district.ilike.%/external,district.ilike.%/guest`;
+                // Exact legacy labels + the routed label. Leading-wildcard ILIKE
+                // (the old `%/external`, `%/guest`) forced a full scan per request.
+                guestAliasOr = [
+                    `district.ilike.${districtNorm}`,
+                    'district.ilike.National/External',
+                    'district.ilike.International/External',
+                    'district.ilike.International/Guest',
+                ].join(',');
             }
         }
 
         try {
-            if (guestAliasOr) throw new Error('Guest alias filter — using fallback');
+            if (guestAliasOr) {
+                // Deliberate: legacy guest labels are merged across districts, so
+                // the alias query is used instead of the RPC. Not an RPC failure.
+                throw Object.assign(new Error('guest alias scope'), { __guestAlias: true });
+            }
             const { data, error } = await supabase.rpc('get_paginated_delegates', {
                 p_page: page, p_page_size: pageSize,
                 p_search: search || null, p_district: guestAliasOr ? null : (district || null),
@@ -1417,13 +1498,22 @@ export const db = {
                 p_import_id: importBatchId || null,
             });
             if (!error && data && !guestAliasOr) {
+                paginatedRpcAvailable = true;
                 result = data as any;
-                console.log('[getPaginatedDelegates] RPC success, eventId:', eventId, 'returned:', result.data?.length, 'delegates, total:', result.total);
             } else {
                 throw error || new Error('RPC empty');
             }
-        } catch (e) {
-            console.log('[getPaginatedDelegates] RPC failed, using fallback. eventId:', eventId, 'error:', (e as any)?.message);
+        } catch (e: any) {
+            if (!e?.__guestAlias) {
+                if (isMissingFunctionError(e)) {
+                    if (paginatedRpcAvailable) {
+                        console.error('[getPaginatedDelegates] get_paginated_delegates RPC is missing on the server — running the slow client fallback. Apply supabase_migration_v1.94_import_batches.sql.');
+                    }
+                    paginatedRpcAvailable = false;
+                } else {
+                    console.warn('[getPaginatedDelegates] RPC failed, using fallback. eventId:', eventId, 'error:', e?.message);
+                }
+            }
 
             let q = supabase.from('delegates').select('*', { count: 'exact' });
             if (eventId) q = q.eq('event_id', eventId);
@@ -1518,7 +1608,9 @@ export const db = {
                 p_event_id: eventId,
                 p_reg_type: source || null,
             });
-            if (!error && Array.isArray(rows)) {
+            if (error) throw error;
+            if (Array.isArray(rows)) {
+                districtCountsRpcAvailable = true;
                 for (const r of rows as any[]) {
                     const label = labelFor(r.district, r.delegate_type);
                     if (label) counts.set(label, (counts.get(label) || 0) + (Number(r.total) || 0));
@@ -1527,8 +1619,16 @@ export const db = {
                     .map(([district, count]) => ({ district, count }))
                     .sort((a, b) => a.district.localeCompare(b.district, undefined, { sensitivity: 'base', numeric: true })));
             }
-        } catch (e) {
-            console.log('[getDistrictsWithDelegates] RPC failed, using client pagination fallback:', (e as any)?.message);
+            throw new Error('RPC returned no rows');
+        } catch (e: any) {
+            if (isMissingFunctionError(e)) {
+                if (districtCountsRpcAvailable) {
+                    console.error('[getDistrictsWithDelegates] get_district_aggregate_counts RPC is missing on the server — falling back to a 1000-row scan. Apply supabase_migration_district_counts_rpc.sql.');
+                }
+                districtCountsRpcAvailable = false;
+            } else {
+                console.warn('[getDistrictsWithDelegates] RPC failed, using client pagination fallback:', e?.message);
+            }
         }
 
         let from = 0;

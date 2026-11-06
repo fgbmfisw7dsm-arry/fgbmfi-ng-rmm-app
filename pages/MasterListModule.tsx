@@ -119,6 +119,7 @@ const MasterListModule = () => {
     const [bulkBusy, setBulkBusy] = useState(false);
     const [bulkNotice, setBulkNotice] = useState<string | null>(null);
     const [confirmText, setConfirmText] = useState('');
+    const [rpcHealth, setRpcHealth] = useState<{ paginated: boolean; districtCounts: boolean }>({ paginated: true, districtCounts: true });
 
     const dateRange = useMemo(() => ({
         from: regFrom || undefined,
@@ -153,6 +154,7 @@ const MasterListModule = () => {
             console.error("Master List Load Error:", err);
         } finally {
             setListLoading(false);
+            setRpcHealth(db.getMasterListRpcHealth());
         }
     }, [searchTerm, selectedDistrict, activeEventId, sourceFilter, activeDateRange, dateBasis, importBatchId]);
 
@@ -195,6 +197,14 @@ const MasterListModule = () => {
             }
             setDistrictSections(init);
 
+            // The page only waits for the district LIST, never for every section's
+            // first page. v1.96 awaited the whole pool, which kept the page-level
+            // splash up for ceil(N/4) sequential rounds even though each section
+            // renders its own "Loading..." row. Clearing here makes the page
+            // usable after ~1 round-trip; sections fill in as they arrive.
+            if (districtsSeq.current !== run) return;
+            setDistrictListLoading(false);
+
             // One RPC per district is inherent (each section paginates on its own),
             // but firing 20-25 at once burst the connection pool. Four at a time
             // keeps the server calm and renders each section as it arrives.
@@ -215,6 +225,7 @@ const MasterListModule = () => {
             if (districtsSeq.current === run) {
                 setDistrictListLoading(false);
                 setListLoading(false);
+                setRpcHealth(db.getMasterListRpcHealth());
             }
         }
     }, [activeEventId, sourceFilter, loadDistrictPage]);
@@ -861,6 +872,19 @@ const MasterListModule = () => {
                     <h1 className="text-2xl font-black uppercase tracking-tight text-blue-900">FGBMFI Nigeria</h1>
                     <h3 className="text-sm font-bold uppercase text-gray-400">Delegates Master List</h3>
                 </div>
+
+                {(!rpcHealth.paginated || !rpcHealth.districtCounts) && (
+                    <div className="no-print mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50">
+                        <p className="text-[10px] font-black text-amber-800 uppercase tracking-wide">
+                            Slow mode — the Master List server functions are not deployed, so loading falls back to per-page queries.
+                        </p>
+                        <p className="text-[10px] font-bold text-amber-700 mt-1">
+                            {!rpcHealth.districtCounts && <>Run <code className="bg-white px-1 rounded">supabase_migration_district_counts_rpc.sql</code>. </>}
+                            {!rpcHealth.paginated && <>Run <code className="bg-white px-1 rounded">supabase_migration_v1.94_import_batches.sql</code>. </>}
+                            Then reload this page.
+                        </p>
+                    </div>
+                )}
 
                 {(mode === 'sections' ? districtListLoading : listLoading) ? (
                     <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Initializing Master Data...</div>
