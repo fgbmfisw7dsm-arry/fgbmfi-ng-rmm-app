@@ -4117,6 +4117,51 @@ export const db = {
         return data === true;
     },
 
+    // v1.98: clear the printed stamp for every delegate in one import batch, so a
+    // reprint list (omissions file) can be produced in full. Chunked client update
+    // (500 ids/request) — no RPC, no URL-limit risk; admin/event_admin only.
+    resetImportBatchBadgeFlags: async (eventId: string, importBatchId: string): Promise<number> => {
+        if (!eventId || !importBatchId) return 0;
+        await ensureEventActive(eventId);
+
+        const ids: string[] = [];
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from('delegates')
+                .select('delegate_id')
+                .eq('event_id', eventId)
+                .eq('last_import_id', importBatchId)
+                .eq('badge_printed', true)
+                .range(from, from + pageSize - 1);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            ids.push(...data.map((d: any) => d.delegate_id));
+            if (data.length < pageSize) break;
+            from += pageSize;
+        }
+        if (ids.length === 0) return 0;
+
+        let cleared = 0;
+        const CHUNK = 500;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const { data, error } = await supabase
+                .from('delegates')
+                .update({ badge_printed: false, badge_printed_at: null })
+                .eq('event_id', eventId)
+                .in('delegate_id', chunk)
+                .select('delegate_id');
+            if (error) throw error;
+            cleared += (data || []).length;
+        }
+        recordAuditLog(eventId, 'badge_flags_reset_batch',
+            `Badge printed flags reset for import batch (${cleared} delegates)`,
+            null, 'import_batch', importBatchId, { cleared });
+        return cleared;
+    },
+
     getBadgePrintLogs: async (eventId: string, delegateId?: string): Promise<BadgePrintLog[]> => {
         let query = supabase.from('badge_print_logs')
             .select('*, delegates(first_name, last_name)')

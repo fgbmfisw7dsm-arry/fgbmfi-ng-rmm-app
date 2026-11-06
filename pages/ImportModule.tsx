@@ -128,7 +128,7 @@ const ImportModule = () => {
     const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
     const [regType, setRegType] = useState<'manual' | 'portal' | 'web'>('manual');
     const [resetBadge, setResetBadge] = useState<'none' | 'changed' | 'all'>('none');
-    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, junk?: number, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
+    const [feedback, setFeedback] = useState<{type: 'success' | 'error', msg: string, inserted?: number, updated?: number, skipped?: number, batchLabel?: string, badgeReset?: number, stamped?: number, junk?: number, resetHint?: boolean, stats?: { bannerUsed: number; shortCodesResolved: number; whatsappFilled: number; chaptersInFile: number; chaptersBlankAtSource: number; portalRows?: number; regType?: string }} | null>(null);
     const [fileName, setFileName] = useState('');
     const [showMapping, setShowMapping] = useState(false);
     const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -629,6 +629,7 @@ const ImportModule = () => {
                     badgeReset: result.badgeReset,
                     stamped: result.stamped,
                     junk: result.junk,
+                    resetHint: resetBadge === 'changed' && result.updated === 0 && (result.skipped - result.junk) > 0,
                     stats: importStats
                 });
                 setProgress(null);
@@ -1270,6 +1271,13 @@ const hasFile = repairHasFile;
                                     {feedback.badgeReset !== undefined && feedback.badgeReset > 0 && (
                                         <p className="text-[10px] font-bold text-red-700 uppercase">
                                             {'\uD83D\uDD16'} {feedback.badgeReset} badge stamps cleared — now Badge Not Printed
+                                        </p>
+                                    )}
+                                    {feedback.resetHint && (
+                                        <p className="text-[9px] font-bold text-amber-700 leading-snug">
+                                            Nothing in the file changed, so no stamps were cleared ("Only where data changed").
+                                            If this is a reprint list, open Batch Badge Printing → select this import batch →
+                                            <strong> Reset N and include all</strong>, or re-import with "All matched".
                                         </p>
                                     )}
                                     {(feedback.stats?.bannerUsed ?? 0) > 0 && (
@@ -1964,6 +1972,10 @@ const hasFile = repairHasFile;
                         <p className="col-span-3 text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-relaxed">
                             Every row in this upload is linked to an import batch — find it later with the <span className="text-gray-600">Import batch</span> filter
                             in Batch Badge Printing or the Master List. Resetting the badge stamp is optional; "Only where data changed" only affects rows this file actually corrected.
+                            <span className="block mt-1 text-amber-700">
+                                Reprint / omissions list where nothing changes? Choose <strong>All matched</strong> — "Only where data changed"
+                                leaves already-complete rows printed, so they would be skipped by the badge run.
+                            </span>
                         </p>
                     </div>
 

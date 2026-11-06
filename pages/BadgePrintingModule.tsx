@@ -129,6 +129,7 @@ const BadgePrintingModule = () => {
   const [previewDelegates, setPreviewDelegates] = useState<Delegate[]>([]);
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false);
   const [cohortStats, setCohortStats] = useState<{ total: number; notPrinted: number } | null>(null);
+  const [resettingBatch, setResettingBatch] = useState(false);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [batchDelegates, setBatchDelegates] = useState<Record<string, BadgeBatchDelegate[]>>({});
   const [batchDelegatesLoading, setBatchDelegatesLoading] = useState<string | null>(null);
@@ -293,6 +294,59 @@ const BadgePrintingModule = () => {
       setPreviewLoadingMore(false);
     }
   }, [activeEventId, activeCohortFilters, previewDelegates.length, previewLoadingMore, sortBy]);
+
+  // v1.98: selecting an import batch is a cohort action — drop the leftovers from
+  // a previous search so they cannot silently narrow the batch (Badge Status is
+  // preserved).
+  const handleSelectImportBatch = (value: string) => {
+    setFilters((f) => ({
+      district: '',
+      chapter: '',
+      delegateType: '',
+      surnameFrom: '',
+      surnameTo: '',
+      delegateNumberFrom: '',
+      delegateNumberTo: '',
+      createdFrom: '',
+      createdTo: '',
+      dateBasis: 'activity',
+      badgePrintedStatus: f.badgePrintedStatus || 'not_printed',
+      importBatchId: value || undefined,
+      selectedIds: [],
+    }));
+    setSelectedDelegates([]);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchPage(1);
+    setSearchTotal(0);
+  };
+
+  const handleResetBatchPrinted = async () => {
+    if (!activeEventId || !filters.importBatchId || resettingBatch) return;
+    const printed = cohortStats ? Math.max(cohortStats.total - cohortStats.notPrinted, 0) : 0;
+    if (printed <= 0) return;
+    if (!window.confirm(
+      `Reset the Badge Printed stamp for ${printed} delegate(s) in this import batch?\n\n` +
+      `They become "Badge Not Printed" so the next run reprints them. This cannot be undone ` +
+      `(badge_printed_at is cleared).`
+    )) return;
+    setResettingBatch(true);
+    try {
+      const cleared = await db.resetImportBatchBadgeFlags(activeEventId, filters.importBatchId);
+      setFeedback({
+        type: 'success',
+        msg: `${cleared} badge stamp(s) cleared — the whole batch is now Badge Not Printed.`,
+      });
+      setBatchDelegates({});
+      await handlePreviewCount();
+      loadBatches();
+      loadPrintLogs();
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: `Reset failed: ${e?.message || 'unknown error'}` });
+    } finally {
+      setResettingBatch(false);
+    }
+  };
 
   const handleToggleBatchDelegates = useCallback(async (batch: BadgeBatch) => {
     setBatchDelegatesError(null);
@@ -1186,10 +1240,8 @@ const BadgePrintingModule = () => {
                 <select
                   className="w-full p-2.5 border border-gray-200 rounded-xl text-xs font-bold focus:border-blue-500 outline-none"
                   value={filters.importBatchId || ''}
-                  onChange={(e) =>
-                    setFilters((f) => ({ ...f, importBatchId: e.target.value || undefined }))
-                  }
-                  title="Every row from one CSV upload is linked to an import batch."
+                  onChange={(e) => handleSelectImportBatch(e.target.value)}
+                  title="Every row from one CSV upload is linked to an import batch. Picking one clears the other filters so the full upload is included."
                 >
                   <option value="">All Imports</option>
                   {importBatches.map((b) => (
@@ -1574,7 +1626,7 @@ const BadgePrintingModule = () => {
 
           {filters.importBatchId && cohortStats && (
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-black text-slate-800 uppercase tracking-widest">
                     Import batch cohort
@@ -1585,19 +1637,36 @@ const BadgePrintingModule = () => {
                     {' · '}<span className="text-amber-600">{cohortStats.total - cohortStats.notPrinted}</span> already printed
                   </p>
                 </div>
-                {(allStatusesCount < cohortStats.total || previewCount < allStatusesCount) && (
-                  <div className="text-right">
-                    <p className="text-[9px] font-black text-amber-700 uppercase tracking-wider">
-                      {cohortStats.total - previewCount} of {cohortStats.total} hidden by the active filters
-                    </p>
-                    <button
-                      onClick={clearCohortFilters}
-                      className="mt-1 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-[8px] font-black uppercase tracking-widest"
-                    >
-                      Clear filters (keep batch)
-                    </button>
-                  </div>
-                )}
+                <div className="text-right space-y-2">
+                  {cohortStats.total - cohortStats.notPrinted > 0 && (
+                    <div>
+                      <p className="text-[9px] font-black text-amber-700 uppercase tracking-wider">
+                        {cohortStats.total - cohortStats.notPrinted} already marked printed
+                      </p>
+                      <button
+                        onClick={handleResetBatchPrinted}
+                        disabled={resettingBatch}
+                        className="mt-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[8px] font-black uppercase tracking-widest disabled:opacity-50"
+                        title="Clear the printed stamp for every printed delegate in this batch so the whole upload reprints"
+                      >
+                        {resettingBatch ? 'Resetting…' : `Reset ${cohortStats.total - cohortStats.notPrinted} and include all`}
+                      </button>
+                    </div>
+                  )}
+                  {cohortStats.total - previewCount > 0 && (
+                    <div>
+                      <p className="text-[9px] font-black text-amber-700 uppercase tracking-wider">
+                        {cohortStats.total - previewCount} of {cohortStats.total} hidden by the active filters
+                      </p>
+                      <button
+                        onClick={clearCohortFilters}
+                        className="mt-1 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-[8px] font-black uppercase tracking-widest"
+                      >
+                        Clear filters (keep batch)
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

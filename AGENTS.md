@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.97 (Import cohort counts — delegates vs rows, junk accounting, pre-import duplicate warning; see §93)
+- **Current Version:** 1.98 (Reprint lists — batch selection clears filters, per-batch badge-stamp reset; see §94)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1336,6 +1336,19 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Why this is the right model:** importing 19 rows that resolve to 18 people genuinely produces 18 badges; the old UI made that look like data loss.
 - **Deploy:** run the migration then the frontend — frontend-first is also safe (the new `stamped` write is best-effort, `junk` simply reads 0, and the cohort card uses live counts).
 - **Verification:** `npm run typecheck` → 0 errors; `npm run build` passes. Manual: import a file containing one repeated person → the amber warning appears pre-import, the banner says "18 delegates (19 rows processed)", and the badge cohort card shows 18 with the printed split.
+
+## 94. Reprint Lists — batch selection clears filters + reset the batch's printed stamps (v1.98)
+
+- **Reported:** the NC4 "omissions" upload (19 rows, all merged = 19 skipped) linked 19 delegates (`stamped = 19` confirmed in the banner), yet Batch Badge Printing listed 18. Cause: one of the 19 already carried a **Badge Printed** stamp, and the default *Badge Status = Not Printed* filter hides it. The import itself was correct — the default reset mode **"Only where data changed"** deliberately does not touch rows where nothing was filled, which is exactly the case for a pure reprint list.
+- **A. Selecting an Import batch is now a cohort action (`handleSelectImportBatch`):** choosing a batch on the badge page clears district, chapter, delegate type, surname range, delegate-number range and the date range/basis (Badge Status is preserved), and clears any manual selection. A stale date range can no longer silently narrow a batch (the earlier 18-vs-19 cause).
+- **B. Reset the batch's printed stamps (`db.resetImportBatchBadgeFlags(eventId, importBatchId)`):** collects delegates carrying that `last_import_id` with `badge_printed = true` (1,000/page), clears `badge_printed`/`badge_printed_at` in 500-id chunks, `ensureEventActive()`, audit `badge_flags_reset_batch`, returns the count. No RPC, no migration (client update, within the existing admin/event_admin UPDATE policy and the 32 KB URL limit).
+  - The Import-batch **cohort card** now shows `X already marked printed` with **“Reset X and include all”** (confirm dialog warning that `badge_printed_at` is cleared and they will be reprinted). After it runs the whole batch is Not Printed, so the default run includes all N. This also repairs batches imported before this change — no re-upload needed.
+  - The card also still offers **Clear filters (keep batch)** whenever active filters hide part of the cohort.
+- **C. Make the import choice unambiguous (`ImportModule`):**
+  - Hint under *Reset Badge Printed stamp*: a reprint/omissions list where nothing changes must use **All matched**; "Only where data changed" leaves already-complete rows printed and they will be skipped by the badge run.
+  - Post-import hint: when the mode was "Only where data changed", `updated = 0` and rows were skipped, the banner adds *"Nothing in the file changed, so no stamps were cleared… open Batch Badge Printing → select this import batch → Reset N and include all, or re-import with All matched."*
+- **No migration.** `npm run typecheck` → 0 errors; `npm run build` passes.
+- **Verification:** import an omissions file → banner names the batch and, if nothing changed, shows the amber hint → open Batch Badge Printing, pick the batch (other filters clear) → card reads `N delegates · M not printed · P already printed` → **Reset P and include all** → preview count and list become N → generate prints all N.
 
 ## Code Conventions
 
