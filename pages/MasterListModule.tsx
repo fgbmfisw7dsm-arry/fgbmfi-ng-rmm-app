@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis, ImportBatch } from '../types';
-import { exportToPDF, exportToCSV, formatCurrency, escapeHtml, downloadJSON, describeDateRange, hasDateRange } from '../services/utils';
+import { exportToCSV, exportMasterListPDF, formatCurrency, downloadJSON, describeDateRange, hasDateRange, sortDelegatesByDistrict } from '../services/utils';
+import type { MasterListPdfColumn, MasterListPdfRow } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
@@ -40,12 +41,6 @@ const activityDateOf = (d: Delegate): string => {
 
 const sourceFilterLabel = (sf: string) => sf === 'portal' ? 'Portal' : sf === 'web' ? 'Web' : sf === 'ems' ? 'EMS' : sf === 'manual' ? 'Manual' : '';
 const showRegId = (d: Delegate) => d.reg_type === 'portal' || d.reg_type === 'web';
-const regBadge = (rt?: string) => {
-    if (rt === 'portal') return `<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[8px] uppercase">Portal</span>`;
-    if (rt === 'web') return `<span class="inline-block px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-black text-[8px] uppercase">Web</span>`;
-    if (rt === 'ems') return `<span class="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-black text-[8px] uppercase">EMS</span>`;
-    return `<span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-black text-[8px] uppercase">Manual</span>`;
-};
 
 const MasterListModule = () => {
     const { activeEventId, activeEvent, user, events, onEventChange } = useContext(AppContext);
@@ -133,6 +128,7 @@ const MasterListModule = () => {
     // a separate RPC that knows nothing about dates).
     const mode: 'sections' | 'unified' =
         (selectedDistrict || searchTerm || sourceFilter || dateRangeActive || importBatchId) ? 'unified' : 'sections';
+    const viewFiltersActive = mode === 'unified';
     const canSelect = canManage;
 
     const loadData = useCallback(async (p?: number) => {
@@ -352,6 +348,7 @@ const MasterListModule = () => {
             } else {
                 await loadData();
             }
+            refreshEventTotal();
         } catch (e: any) {
             alert("DELETE FAILED: " + (e.message || 'An error occurred.'));
         }
@@ -371,6 +368,7 @@ const MasterListModule = () => {
             } else {
                 await loadData();
             }
+            refreshEventTotal();
         } catch (e: any) {
             alert("MERGE FAILED: " + (e.message || 'An error occurred.'));
         } finally {
@@ -406,84 +404,151 @@ const MasterListModule = () => {
     };
 
     const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
+    const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
+    const [exportNotice, setExportNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+    const [eventTotal, setEventTotal] = useState<number | null>(null);
+
+    const refreshEventTotal = useCallback(async () => {
+        if (!activeEventId) { setEventTotal(null); return; }
+        try {
+            setEventTotal(await db.getDelegateCount(activeEventId));
+        } catch (err) {
+            console.error('[MasterList] event total failed:', err);
+            setEventTotal(null);
+        }
+    }, [activeEventId]);
+
+    useEffect(() => { refreshEventTotal(); }, [refreshEventTotal]);
+
+    const exportFileStem = (district?: string) => {
+        const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
+        const sourceLabel = sourceFilterLabel(sourceFilter);
+        const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
+        return `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}`;
+    };
 
     const handleExport = async () => {
         if (!activeEventId) return;
         setExporting('pdf');
+        setExportProgress(null);
+        setExportNotice(null);
         try {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
             const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis, importBatchId || undefined);
-            const colSpan = 9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (dateRangeActive ? 2 : 0);
-            const headerCells = [
-                '<th class="p-3 w-12">#</th><th class="p-3 w-16">Title</th><th class="p-3">Full Name</th><th class="p-3">Chapter</th><th class="p-3">Email</th>',
-                showRank ? '<th class="p-3">Rank</th>' : '',
-                showOffice ? '<th class="p-3">Office</th>' : '',
-                showDelegateType ? '<th class="p-3">Type</th>' : '',
-                '<th class="p-3">Phone</th><th class="p-3">Source</th><th class="p-3">Reg ID</th>',
-                dateRangeActive ? '<th class="p-3">Registered</th><th class="p-3">Last activity</th>' : '',
-                showPaymentCols ? '<th class="p-3">Payment</th><th class="p-3">Payment Ref</th>' : '',
-            ].join('');
-            const rows = all.map((d, i) => {
-                const cells = [
-                    `<td class="p-3 text-[9px] font-mono text-gray-400">${i + 1}</td>`,
-                    `<td class="p-3 font-bold text-gray-400 uppercase">${escapeHtml(d.title)}</td>`,
-                    `<td class="p-3 font-black text-gray-900 uppercase">${escapeHtml(d.first_name)} ${escapeHtml(d.last_name)}</td>`,
-                    `<td class="p-3 font-medium">${escapeHtml(d.chapter) || '-'}</td>`,
-                    `<td class="p-3 font-medium lowercase text-blue-600">${escapeHtml(d.email) || '-'}</td>`,
-                    showRank ? `<td class="p-3 font-black text-blue-800 uppercase">${escapeHtml(d.rank)}</td>` : '',
-                    showOffice ? `<td class="p-3 font-medium uppercase text-[9px]">${escapeHtml(d.office)}</td>` : '',
-                    showDelegateType ? `<td class="p-3 font-medium text-[9px]">${escapeHtml(d.delegate_type) || 'Member'}</td>` : '',
-                    `<td class="p-3 font-black text-gray-500 tracking-tighter">${escapeHtml(d.phone)}</td>`,
-                    `<td class="p-3">${regBadge(d.reg_type)}</td>`,
-                    `<td class="p-3 font-mono text-[9px] text-gray-500">${showRegId(d) ? (escapeHtml(d.external_id) || '-') : '-'}</td>`,
-                    dateRangeActive ? `<td class="p-3 font-mono text-[9px] text-gray-500">${regDateOf(d)}</td><td class="p-3 font-mono text-[9px] text-gray-500">${activityDateOf(d)}</td>` : '',
-                    showPaymentCols ? `<td class="p-3 font-black text-gray-700">${d.payment_amount != null ? formatCurrency(d.payment_amount) : '—'}</td><td class="p-3 font-mono text-[9px] text-gray-500">${escapeHtml(d.payment_reference) || '—'}</td>` : '',
+            if (all.length === 0) throw new Error('No delegates match the current filters');
+            const sorted = sortDelegatesByDistrict(all);
+
+            const columns: MasterListPdfColumn[] = [
+                { label: '#', weight: 4, align: 'right' },
+                { label: 'District', weight: 18 },
+                { label: 'Title', weight: 6 },
+                { label: 'Full Name', weight: 30 },
+                { label: 'Chapter', weight: 13 },
+                { label: 'Email', weight: 21 },
+            ];
+            if (showRank) columns.push({ label: 'Rank', weight: 10 });
+            if (showOffice) columns.push({ label: 'Office', weight: 11 });
+            if (showDelegateType) columns.push({ label: 'Type', weight: 10 });
+            columns.push({ label: 'Phone', weight: 14 });
+            columns.push({ label: 'Source', weight: 7, align: 'center' });
+            columns.push({ label: 'Reg ID', weight: 17 });
+            if (dateRangeActive) columns.push({ label: 'Registered', weight: 9 }, { label: 'Last activity', weight: 9 });
+            if (showPaymentCols) columns.push({ label: 'Payment', weight: 11, align: 'right' }, { label: 'Payment Ref', weight: 13 });
+
+            const rows: MasterListPdfRow[] = sorted.map((d, i) => {
+                const values: string[] = [
+                    String(i + 1),
+                    (d.district || '').trim() || '-',
+                    (d.title || '').trim(),
+                    `${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+                    (d.chapter || '').trim() || '-',
+                    (d.email || '').trim() || '-',
                 ];
-                return `<tr class="hover:bg-gray-50">${cells.join('')}</tr>`;
-            }).join('');
-            const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
-            const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
-            const tableHtml = `<table class="w-full text-[10px] text-left min-w-[1000px]"><thead class="bg-gray-50 border-b uppercase text-gray-500 font-black"><tr>${headerCells}</tr></thead><tbody class="divide-y divide-gray-100">${rows}</tbody></table>`;
-            const container = document.createElement('div');
-            container.innerHTML = tableHtml;
-            container.style.position = 'absolute';
-            container.style.left = '-9999px';
-            document.body.appendChild(container);
-            await new Promise(r => requestAnimationFrame(r));
-            await new Promise(r => setTimeout(r, 300));
-            exportToPDF(container, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}.pdf`, 'landscape', 1600);
-            document.body.removeChild(container);
-        } catch (err) {
+                if (showRank) values.push((d.rank || '').trim());
+                if (showOffice) values.push((d.office || '').trim());
+                if (showDelegateType) values.push((d.delegate_type || 'Member').trim());
+                values.push((d.phone || '').trim());
+                values.push(sourceFilterLabel(d.reg_type || 'manual') || 'Manual');
+                values.push(showRegId(d) ? ((d.external_id || '').trim() || '-') : '-');
+                if (dateRangeActive) values.push(regDateOf(d), activityDateOf(d));
+                if (showPaymentCols) values.push(
+                    d.payment_amount != null ? formatCurrency(d.payment_amount) : '-',
+                    (d.payment_reference || '').trim() || '-'
+                );
+                return { values, district: (d.district || '').trim() };
+            });
+
+            const filename = `${exportFileStem(district)}.pdf`;
+            const filterBits = [
+                district ? `District: ${district}` : 'All Districts',
+                source ? `Source: ${sourceFilterLabel(source)}` : '',
+                search ? `Search: "${search}"` : '',
+                dateRangeActive ? `${dateBasis === 'created' ? 'Registered' : 'Last activity'} ${describeDateRange(dateRange)}` : '',
+                importBatchId ? 'Import batch filter' : '',
+            ].filter(Boolean) as string[];
+            const totalsBit = eventTotal != null && eventTotal !== sorted.length
+                ? `${sorted.length.toLocaleString('en-GB')} delegates exported of ${eventTotal.toLocaleString('en-GB')} in this event`
+                : `${sorted.length.toLocaleString('en-GB')} delegates exported`;
+            const subtitleLines = [
+                [activeEvent?.name, activeEvent?.region].filter(Boolean).join(' - ') || 'FGBMFI Nigeria',
+                filterBits.join('  |  '),
+                `${totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
+            ];
+
+            const result = await exportMasterListPDF({
+                filename,
+                title: 'FGBMFI NIGERIA - DELEGATE MASTER LIST',
+                subtitleLines,
+                columns,
+                rows,
+                groupByDistrict: true,
+                onProgress: (done, total) => setExportProgress({ done, total }),
+            });
+            setExportNotice({
+                kind: 'success',
+                text: `PDF export complete - ${result.rows.toLocaleString('en-GB')} delegates, ${result.pages} page(s). ${filename}`,
+            });
+        } catch (err: any) {
             console.error('PDF export error:', err);
+            setExportNotice({
+                kind: 'error',
+                text: `PDF export failed: ${err?.message || 'unknown error'}. Use the CSV button instead, then print from Excel or Google Sheets.`,
+            });
         } finally {
             setExporting(null);
+            setExportProgress(null);
         }
     };
 
     const handleCSVExport = async () => {
         if (!activeEventId) return;
         setExporting('csv');
+        setExportNotice(null);
         try {
             const district = selectedDistrict || undefined;
             const search = searchTerm || undefined;
             const source = sourceFilter || undefined;
             const all = await db.fetchAllDelegatesForExport(activeEventId, district, search, source, activeDateRange, dateBasis, importBatchId || undefined);
-            const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
-            const sourceLabel = sourceFilterLabel(sourceFilter);
-            const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
-            const cols = ['title', 'first_name', 'last_name', 'chapter', 'email'];
+            if (all.length === 0) throw new Error('No delegates match the current filters');
+            const sorted = sortDelegatesByDistrict(all);
+            const stem = exportFileStem(district);
+            const cols = ['district', 'title', 'first_name', 'last_name', 'chapter', 'email'];
             if (showRank) cols.push('rank');
             if (showOffice) cols.push('office');
             if (showDelegateType) cols.push('delegate_type');
-            cols.push('phone', 'district', 'external_id', 'reg_type');
+            cols.push('phone', 'external_id', 'reg_type');
             if (dateRangeActive) cols.push('created_at', 'last_activity_at');
             if (showPaymentCols) cols.push('payment_amount', 'payment_reference');
-            exportToCSV(all, `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}.csv`, cols);
-        } catch (err) {
+            exportToCSV(sorted, `${stem}.csv`, cols);
+            setExportNotice({
+                kind: 'success',
+                text: `CSV export complete - ${sorted.length.toLocaleString('en-GB')} delegates, sorted by district. ${stem}.csv`,
+            });
+        } catch (err: any) {
             console.error('CSV export error:', err);
+            setExportNotice({ kind: 'error', text: `CSV export failed: ${err?.message || 'unknown error'}.` });
         } finally {
             setExporting(null);
         }
@@ -577,6 +642,7 @@ const MasterListModule = () => {
         } else {
             await loadData(pageRef.current);
         }
+        await refreshEventTotal();
     };
 
     const handleBulkDelete = async () => {
@@ -715,7 +781,17 @@ const MasterListModule = () => {
             )}
 
             <div className="bg-white p-6 rounded-xl shadow-sm border flex flex-col md:flex-row gap-4 justify-between items-center no-print">
-                <h2 className="text-xl font-black uppercase tracking-widest text-blue-900">Delegates Master List</h2>
+                <div className="text-center md:text-left">
+                    <h2 className="text-xl font-black uppercase tracking-widest text-blue-900">Delegates Master List</h2>
+                    <p className="mt-1 text-[10px] font-black uppercase tracking-wider text-gray-500">
+                        {eventTotal == null
+                            ? 'Counting delegates...'
+                            : `${eventTotal.toLocaleString('en-GB')} delegate${eventTotal === 1 ? '' : 's'} across all districts`}
+                        {viewFiltersActive && !listLoading && (
+                            <span className="text-blue-700"> · {totalRecords.toLocaleString('en-GB')} matching this view</span>
+                        )}
+                    </p>
+                </div>
                 <div className="flex flex-1 flex-wrap gap-2 justify-end w-full md:w-auto">
                     <select className="p-2 border rounded-lg bg-gray-50 text-xs font-bold uppercase" value={selectedDistrict} onChange={e => setSelectedDistrict(e.target.value)}>
                         <option value="">All Official Districts</option>
@@ -779,11 +855,28 @@ const MasterListModule = () => {
                         </label>
                     )}
                     <input className="p-2 border rounded-lg text-xs min-w-[200px] font-medium" placeholder="Search by name, phone, email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                    <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">{exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}</button>
+                    <button onClick={handleExport} disabled={!!exporting} className="px-6 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black shadow-lg uppercase tracking-widest disabled:opacity-50">
+                        {exporting === 'pdf'
+                            ? (exportProgress
+                                ? `Exporting ${exportProgress.done.toLocaleString('en-GB')}/${exportProgress.total.toLocaleString('en-GB')}`
+                                : 'Exporting PDF...')
+                            : 'Export PDF'}
+                    </button>
                     <button onClick={handleCSVExport} disabled={!!exporting} className="px-4 py-2 bg-green-700 text-white rounded-lg text-[10px] font-black uppercase disabled:opacity-50">{exporting === 'csv' ? 'Exporting CSV...' : 'CSV'}</button>
-                    <button onClick={() => (mode === 'sections' ? loadAllDistricts() : loadData())} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
+                    <button onClick={() => { if (mode === 'sections') loadAllDistricts(); else loadData(); refreshEventTotal(); }} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-black uppercase border">Refresh</button>
                 </div>
             </div>
+
+            {exportNotice && (
+                <div className={`no-print flex items-start justify-between gap-3 rounded-lg border px-4 py-2 text-[10px] font-black uppercase tracking-wider ${
+                    exportNotice.kind === 'error'
+                        ? 'bg-red-50 border-red-200 text-red-800'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                }`}>
+                    <span className="break-words">{exportNotice.text}</span>
+                    <button onClick={() => setExportNotice(null)} className="shrink-0 px-1 opacity-60 hover:opacity-100" title="Dismiss">×</button>
+                </div>
+            )}
 
             {dateRangeActive && (
                 <div className="no-print -mt-2 text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2">

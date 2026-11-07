@@ -1570,6 +1570,18 @@ export const db = {
         return result;
     },
 
+    // Exact event-wide delegate count (all districts, all sources). Used by the
+    // Master List header total. RLS applies, so district officers see their scope.
+    getDelegateCount: async (eventId: string): Promise<number> => {
+        if (!eventId) return 0;
+        const res = await supabase
+            .from('delegates')
+            .select('delegate_id', { count: 'exact', head: true })
+            .eq('event_id', eventId);
+        if (res.error) handleSupabaseError(res);
+        return res.count || 0;
+    },
+
     getDistrictsWithDelegates: async (eventId: string, source?: RegType): Promise<{ district: string; count: number }[]> => {
         if (!eventId) return [];
         const [settings, typeMap] = await Promise.all([db.getSettings(), db.getDelegateTypeDistrictMap()]);

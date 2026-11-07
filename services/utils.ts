@@ -569,6 +569,30 @@ export const exportToCSV = (rows: Record<string, any>[], filename: string, colum
 };
 
 /**
+ * District-first ordering for the Master List exports (CSV + PDF).
+ * Districts sort naturally (North Central 1 < North Central 2), blank
+ * districts are pushed last, then surname and first name break ties.
+ */
+export const sortDelegatesByDistrict = <T extends {
+    district?: string | null;
+    last_name?: string | null;
+    first_name?: string | null;
+}>(rows: T[]): T[] => {
+    const norm = (v?: string | null) => (v || '').replace(/\s+/g, ' ').trim();
+    return [...rows].sort((a, b) => {
+        const da = norm(a.district);
+        const dbDist = norm(b.district);
+        // Blank districts last.
+        if (!da !== !dbDist) return da ? -1 : 1;
+        const byDistrict = da.localeCompare(dbDist, undefined, { sensitivity: 'base', numeric: true });
+        if (byDistrict !== 0) return byDistrict;
+        const byLast = norm(a.last_name).localeCompare(norm(b.last_name), undefined, { sensitivity: 'base' });
+        if (byLast !== 0) return byLast;
+        return norm(a.first_name).localeCompare(norm(b.first_name), undefined, { sensitivity: 'base' });
+    });
+};
+
+/**
  * Dual-mode PDF Export:
  *
  * REPORT mode (default) — for data tables, matrices, financial grids.
@@ -754,6 +778,227 @@ export const exportToPDF = (
             });
         }, 500);
     });
+};
+
+/* ------------------------------------------------------------------------- *
+ * Master List PDF — vector (jsPDF text) exporter
+ *
+ * The html2canvas path (exportToPDF) renders the WHOLE table into one canvas
+ * at scale 2, which blows past the browser canvas limits at roughly 480 rows
+ * (canvas height cap ~32,767 px, lower on Android). Any full-dataset Master
+ * List export therefore died silently mid-render. This exporter draws text
+ * page by page instead: no canvas, no dimension ceiling, searchable output,
+ * and identical behaviour on desktop and mobile.
+ *
+ * jsPDF's built-in Helvetica only covers WinAnsi, so display text is folded
+ * to ASCII (accents stripped, ẹ/ọ/ṣ and ₦ mapped). CSV keeps the exact bytes.
+ * ------------------------------------------------------------------------- */
+export interface MasterListPdfColumn {
+    label: string;
+    weight: number;
+    align?: 'left' | 'center' | 'right';
+}
+
+export interface MasterListPdfRow {
+    values: string[];
+    district?: string;
+}
+
+export interface MasterListPdfOptions {
+    filename: string;
+    title?: string;
+    subtitleLines?: string[];
+    columns: MasterListPdfColumn[];
+    rows: MasterListPdfRow[];
+    groupByDistrict?: boolean;
+    onProgress?: (done: number, total: number) => void;
+}
+
+const PDF_CHAR_MAP: Record<string, string> = {
+    'ẹ': 'e', 'Ẹ': 'E', 'ọ': 'o', 'Ọ': 'O', 'ṣ': 's', 'Ṣ': 'S', 'ń': 'n', 'Ń': 'N',
+    '₦': 'N', '–': '-', '—': '-', '−': '-', '…': '...',
+    '‘': "'", '’': "'", '“': '"', '”': '"', '·': '-'
+};
+
+const pdfSafeText = (raw: unknown): string => {
+    const mapped = String(raw ?? '').replace(/[ẹẸọỌṣṢńŃ₦–—−…‘’“”·]/g, ch => PDF_CHAR_MAP[ch] ?? ch);
+    return mapped.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
+};
+
+export const exportMasterListPDF = async (opts: MasterListPdfOptions): Promise<{ pages: number; rows: number }> => {
+    const JsPdfCtor = (window as any).jspdf?.jsPDF || (window as any).jsPDF;
+    if (!JsPdfCtor) {
+        throw new Error('PDF library (jsPDF) is not loaded. Reload the page and try again.');
+    }
+    const cols = opts.columns.filter(c => c.weight > 0);
+    if (cols.length === 0) throw new Error('No columns are available for PDF export.');
+
+    const pdf = new JsPdfCtor({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+    const pageW: number = pdf.internal.pageSize.getWidth();
+    const pageH: number = pdf.internal.pageSize.getHeight();
+    const marginX = 6;
+    const marginTop = 6;
+    const marginBottom = 10;
+    const usableW = pageW - marginX * 2;
+    const pageBottom = pageH - marginBottom;
+    const ROW_H = 4.6;
+    const HEADER_H = 6.4;
+    const BAND_H = 5.6;
+    const title = pdfSafeText(opts.title || 'FGBMFI NIGERIA - DELEGATE MASTER LIST');
+    const subtitleLines = (opts.subtitleLines || []).map(pdfSafeText);
+
+    const totalWeight = cols.reduce((sum, c) => sum + c.weight, 0);
+    const widths = cols.map(c => (c.weight / totalWeight) * usableW);
+
+    // Ellipsize with the CURRENT font/size applied.
+    const fit = (text: string, maxW: number): string => {
+        if (!text) return '';
+        if (pdf.getTextWidth(text) <= maxW) return text;
+        let cut = text;
+        while (cut.length > 1 && pdf.getTextWidth(cut + '...') > maxW) cut = cut.slice(0, -1);
+        return cut + '...';
+    };
+
+    const drawPageChrome = (): number => {
+        let y = marginTop;
+        pdf.setTextColor(30, 58, 138);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text(title, marginX, y + 4.2);
+        y += 5.6;
+        pdf.setDrawColor(200, 200, 200);
+        pdf.line(marginX, y, marginX + usableW, y);
+        y += 3.4;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7);
+        pdf.setTextColor(70, 70, 70);
+        for (const line of subtitleLines.slice(0, 3)) {
+            pdf.text(fit(line, usableW), marginX, y + 2.4);
+            y += 3.4;
+        }
+        pdf.setTextColor(0, 0, 0);
+        return y + 1.2;
+    };
+
+    const drawColumnHeader = (yTop: number): number => {
+        pdf.setFillColor(30, 58, 138);
+        pdf.rect(marginX, yTop, usableW, HEADER_H, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(6.8);
+        let x = marginX;
+        cols.forEach((col, i) => {
+            const w = widths[i];
+            // Long labels wrap to two lines inside the header band instead of
+            // being truncated ("Last activity", "Registered", ...).
+            const labelLines = (pdf.splitTextToSize(pdfSafeText(col.label).toUpperCase(), w - 2) as string[])
+                .slice(0, 2)
+                .map(line => fit(line, w - 2));
+            const singleLine = labelLines.length <= 1;
+            labelLines.forEach((line, li) => {
+                const baseline = singleLine ? yTop + HEADER_H - 2 : yTop + 2.7 + li * 2.6;
+                if (col.align === 'right') pdf.text(line, x + w - 1, baseline, { align: 'right' });
+                else if (col.align === 'center') pdf.text(line, x + w / 2, baseline, { align: 'center' });
+                else pdf.text(line, x + 1, baseline);
+            });
+            x += w;
+        });
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.5);
+        return yTop + HEADER_H;
+    };
+
+    const drawDistrictBand = (label: string, count: number, yTop: number) => {
+        pdf.setFillColor(30, 58, 138);
+        pdf.rect(marginX, yTop, usableW, BAND_H, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7.4);
+        const suffix = `${count} DELEGATE${count === 1 ? '' : 'S'}`;
+        pdf.text(fit(`${pdfSafeText(label || 'NO DISTRICT').toUpperCase()} - ${suffix}`, usableW - 4), marginX + 2, yTop + 3.9);
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.5);
+    };
+
+    const drawRow = (values: string[], yTop: number, zebra: boolean) => {
+        if (zebra) {
+            pdf.setFillColor(245, 246, 248);
+            pdf.rect(marginX, yTop, usableW, ROW_H, 'F');
+        }
+        let x = marginX;
+        cols.forEach((col, i) => {
+            const w = widths[i];
+            const raw = pdfSafeText(values[i]);
+            if (raw) {
+                const cell = fit(raw, w - 2);
+                const baseline = yTop + ROW_H - 1.5;
+                if (col.align === 'right') pdf.text(cell, x + w - 1, baseline, { align: 'right' });
+                else if (col.align === 'center') pdf.text(cell, x + w / 2, baseline, { align: 'center' });
+                else pdf.text(cell, x + 1, baseline);
+            }
+            x += w;
+        });
+        pdf.setDrawColor(226, 228, 232);
+        pdf.line(marginX, yTop + ROW_H, marginX + usableW, yTop + ROW_H);
+    };
+
+    const districtCounts = new Map<string, number>();
+    if (opts.groupByDistrict) {
+        opts.rows.forEach(r => {
+            const key = r.district || '';
+            districtCounts.set(key, (districtCounts.get(key) || 0) + 1);
+        });
+    }
+
+    let y = drawPageChrome();
+    y = drawColumnHeader(y);
+    let zebra = false;
+    let lastDistrict: string | null = null;
+
+    for (let i = 0; i < opts.rows.length; i++) {
+        const row = opts.rows[i];
+        const districtKey = opts.groupByDistrict ? (row.district || '') : null;
+        const needsBand = districtKey !== null && districtKey !== lastDistrict;
+
+        if (y + ROW_H + (needsBand ? BAND_H : 0) > pageBottom) {
+            pdf.addPage();
+            y = drawPageChrome();
+            y = drawColumnHeader(y);
+            zebra = false;
+        }
+        if (needsBand && districtKey !== null) {
+            drawDistrictBand(districtKey, districtCounts.get(districtKey) || 0, y);
+            y += BAND_H;
+            lastDistrict = districtKey;
+        }
+        drawRow(row.values, y, zebra);
+        y += ROW_H;
+        zebra = !zebra;
+
+        if (opts.onProgress && (i + 1) % 200 === 0) {
+            opts.onProgress(i + 1, opts.rows.length);
+            await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+    }
+    opts.onProgress?.(opts.rows.length, opts.rows.length);
+
+    const pages = pdf.getNumberOfPages();
+    for (let p = 1; p <= pages; p++) {
+        pdf.setPage(p);
+        pdf.setDrawColor(200, 200, 200);
+        pdf.line(marginX, pageH - 7, marginX + usableW, pageH - 7);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.5);
+        pdf.setTextColor(110, 110, 110);
+        pdf.text('FGBMFI Nigeria EMS - Delegate Master List', marginX, pageH - 4);
+        pdf.text(`Page ${p} of ${pages}`, marginX + usableW, pageH - 4, { align: 'right' });
+    }
+    pdf.setTextColor(0, 0, 0);
+
+    pdf.save(opts.filename);
+    return { pages, rows: opts.rows.length };
 };
 
 // Shared QR payload parser (online scan path + offline roster resolver).
