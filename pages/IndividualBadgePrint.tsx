@@ -7,6 +7,7 @@ import { AppContext } from '../context/AppContext';
 import { generateSingleBadgePDF } from '../services/badgePdfGenerator';
 import { generateBadgeImage } from '../services/badgeImageGenerator';
 import { sharePdfBlob } from '../services/utils';
+import OfflineRosterStatus from '../components/OfflineRosterStatus';
 
 const SEARCH_PAGE_SIZE = 25;
 
@@ -28,6 +29,8 @@ const IndividualBadgePrint = () => {
   const [searchResults, setSearchResults] = useState<Delegate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  // v1.104: search served from the device roster (offline / dead uplink).
+  const [searchOffline, setSearchOffline] = useState(false);
   const [searchPage, setSearchPage] = useState(1);
   const [searchTotal, setSearchTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -69,6 +72,7 @@ const IndividualBadgePrint = () => {
       setSearchResults([]);
       setSearchTotal(0);
       setSearchError(null);
+      setSearchOffline(false);
       setSearchPage(1);
       return;
     }
@@ -76,12 +80,14 @@ const IndividualBadgePrint = () => {
     setSearchError(null);
     setSearchPage(1);
     try {
-      const { data, total } = await db.searchDelegatesPaged(q, activeEventId, districtFilter, undefined, regionFilter, 1, SEARCH_PAGE_SIZE);
+      const { data, total, offline } = await db.searchDelegatesPaged(q, activeEventId, districtFilter, undefined, regionFilter, 1, SEARCH_PAGE_SIZE);
       setSearchResults(data as Delegate[]);
       setSearchTotal(total);
+      setSearchOffline(!!offline);
     } catch (e: any) {
       setSearchResults([]);
       setSearchTotal(0);
+      setSearchOffline(false);
       setSearchError(e?.message || 'Search failed. Check your connection and retry.');
     }
     setSearching(false);
@@ -92,11 +98,12 @@ const IndividualBadgePrint = () => {
     const next = searchPage + 1;
     setLoadingMore(true);
     try {
-      const { data } = await db.searchDelegatesPaged(searchQuery, activeEventId, districtFilter, undefined, regionFilter, next, SEARCH_PAGE_SIZE);
+      const { data, offline } = await db.searchDelegatesPaged(searchQuery, activeEventId, districtFilter, undefined, regionFilter, next, SEARCH_PAGE_SIZE);
       setSearchResults(prev => {
         const seen = new Set(prev.map(d => d.delegate_id));
         return [...prev, ...(data as Delegate[]).filter(d => !seen.has(d.delegate_id))];
       });
+      if (offline) setSearchOffline(true);
       setSearchPage(next);
     } catch (e: any) {
       setSearchError(e?.message || 'Could not load more results.');
@@ -131,6 +138,7 @@ const IndividualBadgePrint = () => {
     setSearchResults([]);
     setSearchPage(1);
     setSearchTotal(0);
+    setSearchOffline(false);
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current);
       previewUrlRef.current = null;
@@ -149,23 +157,21 @@ const IndividualBadgePrint = () => {
     if (!activeEventId || !activeEvent || !selected || !user?.id) return;
     setGenerating(true);
     setFeedback(null);
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
     try {
       let target = selected;
-      if (canRepairExternalId && activeEvent.is_active === true && !selected.external_id?.startsWith('CON26')) {
-        const repaired = await db.repairExternalId(selected.delegate_id);
-        if (repaired) target = { ...selected, external_id: repaired };
+      // v1.104: the external-id repair is a WRITE — never let it block an offline
+      // print. Offline the badge falls back to the delegate-id slice for its ID.
+      if (online && canRepairExternalId && activeEvent.is_active === true && !selected.external_id?.startsWith('CON26')) {
+        try {
+          const repaired = await db.repairExternalId(selected.delegate_id);
+          if (repaired) target = { ...selected, external_id: repaired };
+        } catch (e: any) {
+          console.warn('[IndividualBadgePrint] external-id repair skipped:', e?.message || e);
+        }
       }
 
       const pdfBytes = await generateSingleBadgePDF(target, activeEvent);
-
-      await db.markDelegateBadgePrinted(target.delegate_id, activeEventId, 'reprinted');
-      await db.createBadgePrintLog({
-        batch_id: null,
-        event_id: activeEventId,
-        delegate_id: target.delegate_id,
-        action: 'reprinted',
-        performed_by: user.id,
-      });
 
       if (previewUrlRef.current) {
         URL.revokeObjectURL(previewUrlRef.current);
@@ -194,8 +200,27 @@ const IndividualBadgePrint = () => {
 
       setFeedback({
         type: 'success',
-        msg: `A6 badge generated for ${target.title} ${target.first_name} ${target.last_name}. Print on the pre-cut A6 stock.`,
+        msg: `A6 badge generated for ${target.title} ${target.first_name} ${target.last_name}. Print on the pre-cut A6 stock.${online ? '' : ' Offline — printed status not updated.'}`,
       });
+
+      // v1.104: the badge is already generated + previewed, so the stamp/history
+      // write can NEVER block or hide a print. Online behaviour is unchanged
+      // (badge_printed flag + print log still written); offline nothing is queued.
+      if (online) {
+        try {
+          await db.markDelegateBadgePrinted(target.delegate_id, activeEventId, 'reprinted');
+          await db.createBadgePrintLog({
+            batch_id: null,
+            event_id: activeEventId,
+            delegate_id: target.delegate_id,
+            action: 'reprinted',
+            performed_by: user.id,
+          });
+        } catch (stampErr: any) {
+          console.warn('[IndividualBadgePrint] badge stamp/log skipped:', stampErr?.message || stampErr);
+        }
+      }
+
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 200);
@@ -292,12 +317,20 @@ const IndividualBadgePrint = () => {
             A6 desk printing — pre-cut A6 stock, banner + footer pre-printed
           </p>
         </div>
-        <button
-          onClick={handleClose}
-          className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          <OfflineRosterStatus
+            eventId={activeEventId}
+            scope={scope}
+            syncMode="if-cached"
+            context="badge"
+          />
+          <button
+            onClick={handleClose}
+            className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow transition-all active:scale-95"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       {isLocked && (
@@ -351,7 +384,16 @@ const IndividualBadgePrint = () => {
                   <p className="p-3 text-[10px] text-red-600 font-bold text-center">{searchError}</p>
                 )}
                 {!searching && !searchError && !searchResults.length && (
-                  <p className="p-3 text-[10px] text-gray-400 text-center">No delegates found</p>
+                  <p className="p-3 text-[10px] text-gray-400 text-center">
+                    {typeof navigator !== 'undefined' && navigator.onLine === false
+                      ? 'No cached delegates match — prepare the offline roster while you have signal.'
+                      : 'No delegates found'}
+                  </p>
+                )}
+                {!searching && !searchError && searchResults.length > 0 && searchOffline && (
+                  <p className="px-3 py-2 text-[9px] font-bold text-amber-700 bg-amber-50 text-center uppercase tracking-widest">
+                    Offline results (device cache)
+                  </p>
                 )}
                 {!searching && !searchError && searchResults.length > 0 && (
                   <p className="px-3 py-2 text-[9px] font-bold text-gray-400 text-center bg-gray-50 uppercase tracking-widest">

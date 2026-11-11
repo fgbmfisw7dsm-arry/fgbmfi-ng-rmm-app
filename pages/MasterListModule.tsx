@@ -387,11 +387,21 @@ const MasterListModule = () => {
     const startEditing = (d: Delegate) => {
         const clean = (val?: string) => (val || '').replace(/\s+/g, ' ').trim();
         setEditingId(d.delegate_id);
-        setEditForm({ 
-            ...d, 
+        // v1.103: seed ONLY the editable fields. Spreading the fetched row used to
+        // pull GENERATED columns (search_text / name_search / last_activity_at)
+        // into the form, which Postgres refuses to UPDATE (428C9), breaking every
+        // Master List save. Keep generated/system columns out of the form state.
+        setEditForm({
+            title: clean(d.title),
+            first_name: d.first_name || '',
+            last_name: d.last_name || '',
             district: clean(d.district),
+            chapter: clean(d.chapter),
+            phone: d.phone || '',
+            email: d.email || '',
             rank: clean(d.rank),
-            office: clean(d.office)
+            office: clean(d.office),
+            delegate_type: d.delegate_type || '',
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };

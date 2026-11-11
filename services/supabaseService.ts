@@ -799,6 +799,20 @@ const loadSettingsFresh = async (): Promise<SystemSettings> => {
     return settings;
 };
 
+// v1.103: the ONLY delegate columns the client may write. A fetched delegate row
+// carries GENERATED columns (search_text, name_search, last_activity_at) and
+// derived/system ones (name_display, identity keys, timestamps, PK). Shipping any
+// of those back in an UPDATE makes Postgres reject the whole statement with
+// 428C9 "column ... can only be updated to DEFAULT" — which is exactly how the
+// Master List save broke once search_text became a generated column.
+// Allowlist (not blacklist) so a future generated column can never re-break it.
+const DELEGATE_WRITABLE_FIELDS = [
+    'title', 'first_name', 'last_name', 'district', 'chapter', 'phone', 'email',
+    'rank', 'office', 'room_number', 'delegate_type', 'external_id', 'reg_type',
+    'payment_amount', 'payment_reference', 'registration_source',
+    'badge_printed', 'badge_printed_at', 'last_import_id', 'last_imported_at',
+] as const;
+
 export const db = {
     getEvents: async (): Promise<Event[]> =>
         handleSupabaseError(await supabase.from('events').select('*').order('start_date', { ascending: false })),
@@ -1280,11 +1294,45 @@ export const db = {
 
     getDelegateById: async (delegateId: string, eventId?: string): Promise<Delegate | null> => {
         if (!delegateId) return null;
-        let q = supabase.from('delegates').select('*').eq('delegate_id', delegateId);
-        if (eventId) q = q.eq('event_id', eventId);
-        const { data, error } = await q.maybeSingle();
-        if (error || !data) return null;
-        return data as Delegate;
+        // v1.104: read-only offline fallback for the A6 badge deep link
+        // (#/print-badge?delegate=<id>). Resolves from the encrypted roster cache
+        // (same source of truth as offline check-in) instead of failing silently.
+        const local = async (): Promise<Delegate | null> => {
+            if (!eventId) return null;
+            const entry = await resolveDelegateByIdLocally(eventId, delegateId);
+            if (!entry) return null;
+            return {
+                delegate_id: entry.delegate_id,
+                event_id: entry.event_id,
+                title: entry.title || '',
+                first_name: entry.first_name || '',
+                last_name: entry.last_name || '',
+                name_display: [entry.title, entry.first_name, entry.last_name].filter(Boolean).join(' ').trim(),
+                district: entry.district || '',
+                chapter: entry.chapter || '',
+                phone: entry.phone || '',
+                email: '',
+                rank: '',
+                office: '',
+                room_number: '',
+                delegate_type: entry.delegate_type || '',
+                qr_hash: entry.qr_hash || '',
+                external_id: entry.external_id || '',
+                registration_source: 'import',
+                created_at: '',
+            } as Delegate;
+        };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return await local();
+        try {
+            let q = supabase.from('delegates').select('*').eq('delegate_id', delegateId);
+            if (eventId) q = q.eq('event_id', eventId);
+            const { data, error } = await q.maybeSingle();
+            if (error) return isNetworkErrorMessage(error.message) ? await local() : null;
+            if (!data) return null;
+            return data as Delegate;
+        } catch (e: any) {
+            return isNetworkErrorMessage(e?.message) ? await local() : null;
+        }
     },
 
     // v1.74: tokenized, name word-prefix, server-paginated search. Returns the
@@ -1672,13 +1720,17 @@ export const db = {
     },
 
     updateDelegate: async (id: string, updates: Partial<Delegate>) => {
-        const { name_display, delegate_id, created_at, ...validUpdates } = updates as any;
-        const result = handleSupabaseError(await supabase.from('delegates').update({
-            ...validUpdates,
-            district: normalize(validUpdates.district),
-            chapter: normalize(validUpdates.chapter)
-        }).eq('delegate_id', id).select().single());
-        const changes = Object.keys(validUpdates).filter(k => validUpdates[k] !== undefined);
+        // v1.103: build the payload from the allowlist only — never spread the
+        // fetched row (it contains generated columns Postgres refuses to update).
+        const incoming = updates as Record<string, any>;
+        const validUpdates: Record<string, any> = {};
+        for (const key of DELEGATE_WRITABLE_FIELDS) {
+            if (incoming[key] !== undefined) validUpdates[key] = incoming[key];
+        }
+        if (validUpdates.district !== undefined) validUpdates.district = normalize(validUpdates.district);
+        if (validUpdates.chapter !== undefined) validUpdates.chapter = normalize(validUpdates.chapter);
+        const result = handleSupabaseError(await supabase.from('delegates').update(validUpdates).eq('delegate_id', id).select().single());
+        const changes = Object.keys(validUpdates);
         recordAuditLog(result.event_id, 'delegate_update', `Delegate updated: ${result.first_name} ${result.last_name}`, null, 'delegate', id, { changes });
         return result;
     },

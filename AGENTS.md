@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.102 (Master List — scalable vector PDF export, district-ordered PDF/CSV, header total)
+- **Current Version:** 1.104 (Master List save fix — generated-column round-trip; offline Individual Badge Printing, read-only)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1407,6 +1407,34 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Header total (retains the existing per-district section totals unchanged):** new `db.getDelegateCount(eventId)` (exact `head: true` count, RLS-scoped — so undeclared/blank-district rows are included, unlike the district-section sum) feeds a line under the page title: `12,480 delegates across all districts`, plus `· 1,254 matching this view` whenever a district/search/source/date/import-batch filter is active. Refreshes on event change and after single delete, merge and bulk delete. The exported PDF subtitle carries the same numbers (`N delegates exported of M in this event`).
 - **Non-disruption:** frontend-only. No SQL, RPC, RLS, `types.ts` or `supabaseClient.ts` change; other pages' PDF/CSV exports, the per-district `RECORDS` badges, pagination, selection/bulk delete and realtime flows are unchanged. `npm run typecheck` → 0 errors; `npm run build` passes.
 - **Verification:** export All Districts on desktop and Android (completes, page count matches, headers/footers repeat, no truncation); export one district and each Source value; CSV opens in Excel sorted by district with District in column A; header total equals the event count and updates after a delete; Reports/Financials/Session Summary/User Manual PDFs still export as before.
+
+## 99. Master List Save — Generated-Column Round-Trip (v1.103)
+
+- **Reported (Day 1 of the national convention):** editing a delegate's Title/First Name in the Master List failed with `UPDATE FAILED: column "search_text" can only be updated to DEFAULT`. Every Master List save was failing, not just name/title edits.
+- **Root cause (client, SQLSTATE 428C9):** `startEditing()` seeded the form with the whole fetched row (`setEditForm({...d})`) and `db.updateDelegate` only stripped `name_display`, `delegate_id`, `created_at`. Master List rows come from `get_paginated_delegates`, which is `SELECT d.*`, so the payload carried the **generated** columns `search_text` (v1.68/§67b), `name_search` (v1.74/§73) and `last_activity_at` (v1.93/§89). Postgres rejects any explicit value for a `GENERATED ALWAYS` column and aborts the whole UPDATE. The previous guard targeted `name_display`, which is a plain column with a TRIM default — the wrong column, so it never covered this.
+- **Fix (frontend-only, no migration):**
+  - `services/supabaseService.ts` — new module const `DELEGATE_WRITABLE_FIELDS` (allowlist of the 20 writable delegate columns: identity/contact/demographic fields, `external_id`, `reg_type`, `payment_*`, `registration_source`, `badge_printed*`, `last_import_*`). `updateDelegate` now builds the payload **from the allowlist only**, normalizes district/chapter when present, and derives the audit `changes` list from the sanitized payload. An **allowlist, not a blacklist** — a future generated column can never re-break the save (the same failure class already bit `name_display` and `auth.users.email`, §66).
+  - `pages/MasterListModule.tsx` — `startEditing()` seeds only the ten editable form fields (title, first/last name, district, chapter, phone, email, rank, office, delegate_type) instead of spreading the row, so generated/system columns never enter React state.
+- **Side effect of the old guard:** because the payload also included `event_id`, `qr_hash`, `reg_type` etc. verbatim, the payload is now smaller and can no longer accidentally move a delegate across events.
+- **Not affected:** every other delegate write path (`importDelegates` merge/fallback, `reconcileDistrictPortal`, `repairNamesFromFile`, `reclassifyDelegateSource`, `mergeDelegatePair`, `repairExternalId(s)`, harmonize/rename) already builds explicit payloads. No RLS/RPC/SQL/`types.ts` change.
+- **Verify:** edit a delegate → PATCH body contains no `search_text`/`name_search`/`last_activity_at`; title + first name persist; identity triggers still recompute `title_key`/`name_*_key`/`phone_normalized`; audit row lists only the changed fields. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 100. Offline Individual Badge Printing — Read-Only (v1.104 Stage 1)
+
+- **Goal (product decision, Nov 2026):** allow the A6 desk (Print Individual Delegate Badge) to keep working when the venue link drops, for delegates already in the database. **Read-only offline** — no queued writes, and **no offline "printed" stamp** (per product owner: stamping is not needed for now).
+- **Why it is safe for badge operations:** the feature is additive to one page. `BadgePrintingModule`, `generateBadgePDF`, `mark_badge_batch_printed`, the `badge-pdfs` bucket and the E-Badge are untouched. No migration, no RPC, no RLS, no `types.ts` change. Online behaviour of the A6 page is unchanged, except that the stamp/log write can no longer block a print.
+- **Generation is already local:** `generateSingleBadgePDF()` is `pdf-lib` + `StandardFonts` + `qrcode` with **zero network fetches**, and `generateBadgeImage({ includeDesign:false })` skips the design/banner PNG (`badgeImageGenerator` line 52). The pre-printed A6 shell means no asset is needed offline.
+- **Changes:**
+  1. `services/supabaseService.ts` — `getDelegateById()` gains an offline/dead-uplink fallback to `resolveDelegateByIdLocally()` (encrypted roster), so the `#/print-badge?delegate=<id>` deep link from the New Delegate success panel still works offline. Network errors detected with the existing `isNetworkErrorMessage()`; any other error still returns `null` as before.
+  2. `components/OfflineRosterStatus.tsx` — new optional props: `syncMode?: 'auto' | 'if-cached'` (default `'auto'` = unchanged door-page behaviour) and `context?: 'check-in' | 'badge'` (copy only). `'if-cached'` refreshes **only an already built** roster, so merely opening the print page can never start a national-scope full sync during a live event; the operator builds it explicitly with **Prepare Offline**. `refreshStatus()` now returns the status so the mode decision can be made.
+  3. `pages/IndividualBadgePrint.tsx` —
+     - Roster pill in the header (`syncMode="if-cached"`, `context="badge"`), so the desk can prepare the cache from this page instead of only from Check-In / Session Details.
+     - Search already had an offline path (§v1.82-fix4 `searchDelegatesPaged` → `searchRosterLocally`); the page now consumes the returned `offline` flag and shows an amber **"Offline results (device cache)"** line, plus an offline-specific empty state ("No cached delegates match — prepare the offline roster while you have signal").
+     - `handleGenerate()`: the external-id repair (a WRITE, admin/event_admin only) is skipped while offline and wrapped in its own try/catch; the PDF + A6 canvas are generated and **previewed first**, and the `markDelegateBadgePrinted` + `createBadgePrintLog` writes run **after** in their own try/catch. A stamp failure (locked event, transient error, offline) can therefore never hide or block a badge; the success line appends "Offline — printed status not updated." when offline.
+- **Scope boundary (deliberate):** no pending-sync queue and no offline stamping for badges — a badge printed offline simply is not flagged until someone prints it again online or a batch run marks it. Batch Badge Printing stays online-only (needs design assets, multi-page generation and a storage upload).
+- **Known limitation:** there is still no service worker, so an offline **page reload** fails; offline printing works in an already-open tab/session. A service worker (app-shell + route-chunk caching) is a separate, larger change.
+- **Verify:** DevTools → Offline → open `#/print-badge` → Prepare Offline while online first → search by name/phone → select → Print A6 Badge (preview renders, Print/Download/Share work, feedback says the stamp was not updated) → reconnect and generate again to see the stamp/log written. Roster scope/TTL/owner guards are unchanged (§83): 72h roster TTL, 24h offline window, owner+scope match required.
+- **Deploy:** frontend-only; no SQL. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

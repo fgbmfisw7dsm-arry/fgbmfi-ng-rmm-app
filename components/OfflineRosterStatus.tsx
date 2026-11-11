@@ -24,6 +24,12 @@ interface OfflineRosterStatusProps {
     eventId: string;
     scope?: { district?: string; region?: string };
     className?: string;
+    // v1.104: 'auto' (default, door pages) syncs on mount. 'if-cached' only
+    // refreshes an ALREADY built roster, so opening a page can never start a
+    // national-scope full sync by itself (used by Print Individual Badge).
+    syncMode?: 'auto' | 'if-cached';
+    // v1.104: wording only — badge printing is read-only offline (no queued writes).
+    context?: 'check-in' | 'badge';
 }
 
 const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
@@ -33,39 +39,50 @@ const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
     </div>
 );
 
-const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scope, className }) => {
+const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scope, className, syncMode = 'auto', context = 'check-in' }) => {
     const [roster, setRoster] = useState<RosterStatus | null>(null);
     const [busy, setBusy] = useState(false);
     const [open, setOpen] = useState(false);
     const [connection, setConnection] = useState<ConnectionState>('connected');
     const wasCritical = useRef(false);
 
-    const refreshStatus = useCallback(async () => {
-        if (!eventId) return;
-        try { setRoster(await db.getOfflineRosterStatus(eventId)); } catch { /* best effort */ }
+    const refreshStatus = useCallback(async (): Promise<RosterStatus | null> => {
+        if (!eventId) return null;
+        try {
+            const status = await db.getOfflineRosterStatus(eventId);
+            setRoster(status);
+            return status;
+        } catch { return null; }
     }, [eventId]);
 
     useEffect(() => subscribeConnection(setConnection), []);
 
+    // 'if-cached' matches the existing persisted cooldown/single-flight logic but
+    // never starts the FIRST (full) sync from this page — the operator chooses
+    // that explicitly with "Prepare Offline".
+    const syncIfAllowed = useCallback(async () => {
+        if (!eventId) return;
+        const status = await refreshStatus();
+        if (syncMode === 'auto' || (status?.count || 0) > 0) {
+            void db.ensureOfflineRoster(eventId, scope);
+        }
+    }, [eventId, scope?.district, scope?.region, syncMode, refreshStatus]);
+
     useEffect(() => {
         if (!eventId) return;
-        void refreshStatus();
-        void db.ensureOfflineRoster(eventId, scope);
+        void syncIfAllowed();
         const onRoster = (e: Event) => {
             const detail = (e as CustomEvent).detail;
             if (!detail?.eventId || detail.eventId === eventId) void refreshStatus();
         };
-        const onOnline = () => {
-            void refreshStatus();
-            void db.ensureOfflineRoster(eventId, scope);
-        };
+        const onOnline = () => { void syncIfAllowed(); };
         window.addEventListener('fgbmfi-roster-changed', onRoster);
         window.addEventListener('online', onOnline);
         return () => {
             window.removeEventListener('fgbmfi-roster-changed', onRoster);
             window.removeEventListener('online', onOnline);
         };
-    }, [eventId, scope?.district, scope?.region, refreshStatus]);
+    }, [eventId, syncIfAllowed, refreshStatus]);
 
     const ready = !!roster?.ready;
     const syncing = busy || !!roster?.syncing;
@@ -147,7 +164,9 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
                     </dl>
                     {!ready && (
                         <p className="mt-3 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
-                            QR scans cannot be verified offline until the roster is prepared. Build it while you still have signal.
+                            {context === 'badge'
+                                ? 'Delegate search and badge printing cannot work offline until the roster is prepared. Build it while you still have signal.'
+                                : 'QR scans cannot be verified offline until the roster is prepared. Build it while you still have signal.'}
                         </p>
                     )}
                     {ready && stale && (
@@ -155,7 +174,7 @@ const OfflineRosterStatus: React.FC<OfflineRosterStatusProps> = ({ eventId, scop
                             Roster is older than 12h — refresh it before the session.
                         </p>
                     )}
-                    {ready && windowClosed && (
+                    {ready && windowClosed && context === 'check-in' && (
                         <p className="mt-3 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
                             Offline writes paused after 24h offline — reconnect or sign in again to resume check-in.
                         </p>
