@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.104 (Master List save fix — generated-column round-trip; offline Individual Badge Printing, read-only)
+- **Current Version:** 1.105 (Master List — District column in the date-range / cross-district table)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1435,6 +1435,17 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Known limitation:** there is still no service worker, so an offline **page reload** fails; offline printing works in an already-open tab/session. A service worker (app-shell + route-chunk caching) is a separate, larger change.
 - **Verify:** DevTools → Offline → open `#/print-badge` → Prepare Offline while online first → search by name/phone → select → Print A6 Badge (preview renders, Print/Download/Share work, feedback says the stamp was not updated) → reconnect and generate again to see the stamp/log written. Roster scope/TTL/owner guards are unchanged (§83): 72h roster TTL, 24h offline window, owner+scope match required.
 - **Deploy:** frontend-only; no SQL. `npm run typecheck` → 0 errors; `npm run build` passes.
+
+## 101. Master List - District Column in Cross-District Views (v1.105)
+
+- **Reported (Day 1 of the national convention):** the date-range Master List showed no district information at all - no District column and no district sub-headers, unlike the main Master List.
+- **Root cause:** `mode` (`pages/MasterListModule.tsx:129`) routes any filter - date range, Source, Import batch, search - into the **unified** table. The main view gets its district context from the per-district section **band**; the unified table never rendered a district cell, and rows are ordered by chapter/surname, so districts were both invisible and interleaved (a national, surname-sorted list).
+- **Why it was built that way (v1.92 / §88):** district section bands need a per-district **count** from `get_district_aggregate_counts(p_event_id, p_reg_type)`, which knows nothing about dates or import batches, so a range was routed to the unified table instead of extending that RPC.
+- **Fix (frontend-only, one file, no migration):** the unified table gains a **District** column after *Full Name* plus the matching body cell, both hidden when a specific district is selected (the dark header already prints `{district} DISTRICT`). Pad-row `colSpan` gains `+ (selectedDistrict ? 0 : 1)`; table `min-w-[1000px]` -> `min-w-[1080px]`. The existing pager (First / Prev / `Page X of Y` / Next / Last, `PAGE_SIZE = 25`) is unchanged - it always rendered in this mode.
+- **Coverage:** date range, Source, Import batch and cross-district search all benefit, since they share the unified table.
+- **Not changed:** the sections view (band = district context, so no redundant column), PDF/CSV exports (already carry District and group by district, §98), pagination, selection/merge/delete, realtime refresh.
+- **Deferred - true per-district sections for a date range** (bands with real per-district counts and independent pagers, the full main-list experience): extend `get_district_aggregate_counts` with `p_created_from` / `p_created_to` / `p_date_basis` / `p_import_id`, include the range in the `getDistrictsWithDelegates` cache key, and rework `mode` / `loadAllDistricts` / `loadDistrictPage`. Post-convention change (Option C).
+- **Verify:** date range only -> District column visible; district + range -> column hidden, band shows the district; Source / Import batch / search -> column visible; bulk-select checkboxes and `#` stay aligned; short last page still fills the table. `npm run typecheck` -> 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

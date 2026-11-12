@@ -1101,9 +1101,9 @@ const MasterListModule = () => {
                             </div>
                         )}
                         <div className="overflow-x-auto">
-                            <table className="w-full text-[10px] text-left min-w-[1000px]">
+                            <table className="w-full text-[10px] text-left min-w-[1080px]">
                                 <thead className="bg-gray-50 border-b uppercase text-gray-500 font-black">
-                                    <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th><th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <><th className="p-3">Registered</th><th className="p-3" title="Latest detail change, or registration when never updated. Badge printing does not count.">Last activity</th></>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
+                                    <tr>{canSelect && <th className="p-3 w-10 no-print text-center"><input type="checkbox" disabled={!canDelete} className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 align-middle disabled:opacity-40" checked={delegates.length > 0 && delegates.every(x => selected.has(x.delegate_id))} onChange={() => togglePage(delegates)} title={canDelete ? 'Select every row on this page' : 'Delete is disabled for this event — enable it in Events & Config'} /></th>}<th className="p-3 w-12">#</th><th className="p-3 w-16">Title</th><th className="p-3">Full Name</th>{!selectedDistrict && <th className="p-3">District</th>}<th className="p-3">Chapter</th><th className="p-3">Email</th>{showRank && <th className="p-3">Rank</th>}{showOffice && <th className="p-3">Office</th>}{showDelegateType && <th className="p-3">Type</th>}<th className="p-3">Phone</th><th className="p-3">Source</th><th className="p-3">Reg ID</th>{dateRangeActive && <><th className="p-3">Registered</th><th className="p-3" title="Latest detail change, or registration when never updated. Badge printing does not count.">Last activity</th></>}{showPaymentCols && <><th className="p-3">Payment</th><th className="p-3">Payment Ref</th></>}<th className="p-3 no-print w-24 text-center">Actions</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {delegates.map((d, i) => (
@@ -1117,6 +1117,7 @@ const MasterListModule = () => {
                                             <td className="p-3 text-[9px] font-mono text-gray-400">{(page - 1) * PAGE_SIZE + i + 1}</td>
                                             <td className="p-3 font-bold text-gray-400 uppercase">{d.title}</td>
                                             <td className="p-3 font-black text-gray-900 uppercase">{d.first_name} {d.last_name}</td>
+                                            {!selectedDistrict && <td className="p-3 font-medium uppercase text-[9px] text-gray-700">{(d.district || '').trim() || '-'}</td>}
                                             <td className="p-3 font-medium">{d.chapter || '-'}</td>
                                             <td className="p-3 font-medium lowercase text-blue-600">{d.email || '-'}</td>
                                             {showRank && <td className="p-3 font-black text-blue-800 uppercase">{d.rank}</td>}
@@ -1147,7 +1148,7 @@ const MasterListModule = () => {
                                     ))}
                                     {delegates.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - delegates.length }, (_, i) => (
                                         <tr key={`__pad_${i}`} className="bg-gray-50/50">
-                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 2 : 0)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
+                                            <td colSpan={9 + (showRank ? 1 : 0) + (showOffice ? 1 : 0) + (showDelegateType ? 1 : 0) + (showPaymentCols ? 2 : 0) + (canSelect ? 1 : 0) + (dateRangeActive ? 2 : 0) + (selectedDistrict ? 0 : 1)} className="p-3 text-center text-[9px] text-gray-300 font-mono">&nbsp;</td>
                                         </tr>
                                     ))}
                                 </tbody>
