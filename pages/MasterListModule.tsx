@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis, ImportBatch } from '../types';
-import { exportMasterListCSV, exportMasterListPDF, formatCurrency, downloadJSON, describeDateRange, hasDateRange, sortDelegatesByDistrict } from '../services/utils';
+import { exportMasterListCSV, exportMasterListPDF, formatCurrency, downloadJSON, describeDateRange, hasDateRange, sortDelegatesByDistrict, titleCaseName } from '../services/utils';
 import type { MasterListCsvRow, MasterListPdfColumn, MasterListPdfRow } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
@@ -21,8 +21,13 @@ const exportStamp = (): string => {
 
 interface SelectionInfo { name: string; district: string; }
 
+// Master List display name: first letter of each name word capitalized, even
+// when the stored value is lower case. All-caps records stay as they are.
+const fullNameOf = (d: { first_name?: string | null; last_name?: string | null }): string =>
+    `${titleCaseName(d.first_name)} ${titleCaseName(d.last_name)}`.replace(/\s+/g, ' ').trim();
+
 const selectionInfoOf = (d: Delegate): SelectionInfo => ({
-    name: `${d.title || ''} ${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+    name: `${d.title || ''} ${fullNameOf(d)}`.replace(/\s+/g, ' ').trim(),
     district: (d.district || '').trim(),
 });
 
@@ -340,7 +345,7 @@ const MasterListModule = () => {
             alert("Delete is disabled for this event. Enable \"Allow Admins to Delete Delegates\" in Events & Config first.");
             return;
         }
-        const name = `${d.first_name} ${d.last_name}`.trim();
+        const name = fullNameOf(d);
         if (!window.confirm(`PERMANENTLY DELETE "${name}" (${d.district || ''}${d.chapter ? ' / ' + d.chapter : ''})?\n\nThis will also permanently remove this delegate's check-ins, session responses, and badge print history. Use "Merge" instead when the record is a duplicate of another delegate.\n\nThis action cannot be undone.`)) return;
         try {
             await db.deleteDelegate(d.delegate_id, activeEventId);
@@ -369,7 +374,7 @@ const MasterListModule = () => {
         setMerging(true);
         try {
             await db.mergeDelegatePair({ keepId: keep.delegate_id, dropId: mergePrompt.dropId, eventId: activeEventId, reason: 'lastname duplicate' });
-            alert(`SUCCESS: Records merged into ${keep.first_name} ${keep.last_name}. Check-ins, session responses, and badge history were preserved.`);
+            alert(`SUCCESS: Records merged into ${fullNameOf(keep)}. Check-ins, session responses, and badge history were preserved.`);
             setEditingId(null);
             setMergePrompt(null);
             if (mode === 'sections') {
@@ -514,7 +519,7 @@ const MasterListModule = () => {
                 const values: string[] = [
                     String(seq),
                     (d.title || '').trim(),
-                    `${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+                    fullNameOf(d),
                     (d.chapter || '').trim() || '-',
                     (d.email || '').trim() || '-',
                 ];
@@ -598,7 +603,7 @@ const MasterListModule = () => {
                 const values: string[] = [
                     String(seq),
                     (d.title || '').trim(),
-                    `${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+                    fullNameOf(d),
                     (d.chapter || '').trim(),
                     (d.email || '').trim(),
                 ];

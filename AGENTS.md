@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.107 (Stale-client export guard — build stamp, update prompt, cache headers)
+- **Current Version:** 1.108 (Master List exports capitalize the first letter of first/last names)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1465,6 +1465,15 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Export provenance (`pages/MasterListModule.tsx`):** the PDF subtitle and CSV header block now carry `Build <label>`, the page header shows the running build, and export filenames end with a local `_YYYY-MM-DD_HHmmss` stamp — so a phone can never reopen an older file that shares the name, and any file states which build produced it.
 - **One-time caveat:** the deploy that introduces this patch cannot self-detect (the old bundle has no checker), so the phone needs **one** manual reload; every deploy after that prompts automatically.
 - **Frontend-only:** no SQL, RPC, RLS or `types.ts` change. `npm run typecheck` → 0 errors; `npm run build` passes and emits `dist/version.json`.
+
+## 104. Master List Export Name Casing (v1.108)
+
+- **Reported:** the Master List screen shows names in caps (Tailwind `uppercase`), but the PDF/CSV reports printed the **stored** casing, so lower-case registrations (`john doe`) appeared as-is in the convention report.
+- **Helper (`services/utils.ts`):** `titleCaseName(value)` uppercases the first letter of every name word — space, hyphen, apostrophe, period and `(` are word boundaries — and leaves already-capitalized or all-caps values untouched: `john`→`John`, `ade-bayo`→`Ade-Bayo`, `o'brien`→`O'Brien`, `obinna (jnr)`→`Obinna (Jnr)`, `CHINEDU`→`CHINEDU`, `McDonald` unchanged. Fifteen edge cases verified.
+- **Master List (`pages/MasterListModule.tsx`):** module-level `fullNameOf(d)` applies it to the **PDF rows, CSV rows**, selection labels, the delete confirmation and the merge success message. `handleDelete`'s prompt now uses the same helper.
+- **Display-only — no data write.** Stored values are untouched, so a future persisted correction stays an explicit admin action; this also avoids moving `updated_at`/`last_activity_at` (§89) and disturbing date-range reports, badge cohorts or the offline roster mid-convention. The on-screen table is unchanged (already all-caps via CSS).
+- **Scope:** Master List + its exports only. Check-In search, badges, Reports and New Delegate still render stored values; extend `fullNameOf` usage (or run a later name-repair pass) if app-wide casing is wanted.
+- Frontend-only; no SQL/RPC/types change. `npm run typecheck` → 0 errors; `npm run build` passes.
 
 ## Code Conventions
 

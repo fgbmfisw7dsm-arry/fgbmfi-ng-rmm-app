@@ -203,6 +203,19 @@ export const cleanChapterName = (raw?: string | null): string => {
     return stripChapterCodes(t) || t;
 };
 
+/**
+ * Capitalizes the first letter of every name word — spaces, hyphens,
+ * apostrophes, periods and parentheses are word boundaries — while leaving
+ * already-capitalized or all-caps values untouched:
+ * "john" -> "John", "ade-bayo" -> "Ade-Bayo", "o'brien" -> "O'Brien",
+ * "CHINEDU" -> "CHINEDU".
+ */
+export const titleCaseName = (value?: string | null): string => {
+    const raw = (value || '').trim();
+    if (!raw) return '';
+    return raw.replace(/(^|[\s\-'’.(])([a-z])/g, (_m, sep: string, ch: string) => `${sep}${ch.toUpperCase()}`);
+};
+
 export const normalizePhone = (raw?: string | null): string => {
     let digits = (raw || '').replace(/[^0-9]/g, '');
     if (!digits) return '';
