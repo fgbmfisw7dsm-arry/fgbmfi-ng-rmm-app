@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.106 (Master List Date-Range Report — district-grouped PDF + CSV with per-district totals)
+- **Current Version:** 1.107 (Stale-client export guard — build stamp, update prompt, cache headers)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1455,6 +1455,16 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Master List (`pages/MasterListModule.tsx`):** both exports restart `#` at 1 inside each district (matching the on-screen per-district sections); shared `buildExportContext()` so the PDF and CSV headers state identical filters/totals; a date-range export is titled `FGBMFI NIGERIA - REGISTRATION REPORT (BY DATE RANGE)`. Success notices report the district count.
 - **Frontend-only:** no SQL, RPC, RLS, migration or `types.ts` change — counts are computed from the already-filtered export rows, so the date range is respected. `npm run typecheck` → 0 errors; `npm run build` passes. Verified the CSV layout and the PDF flow (totals block once, bands + continued bands, pagination) with stub-DOM/jsPDF harnesses.
 - **Deliberately unchanged:** the on-screen date-range table (unified, District column) and the deferred per-district *on-screen* sections (Option C in §101) — exports give the registration report without touching load paths.
+
+## 103. Stale-Client Export Guard — Build Stamp + Update Prompt (v1.107)
+
+- **Reported (convention week):** the new district-grouped PDF/CSV was correct on a Windows 10 laptop, but an Android phone still produced the **old flat template**. Fetched the deployed `MasterListModule` chunk from `fgbmfi-ng-rmm-app.vercel.app` and confirmed the new code (`districtTotals`, grouped CSV) **was live** — so the phone was running a pre-deploy bundle (tab left open / cached shell) and/or reopening an older download with the same filename. Neither is a code defect in the exporters.
+- **Build identity (`vite.config.ts` + `services/buildInfo.ts`):** a Vite plugin stamps `__APP_BUILD__` (`YYYYMMDDHHmmss`, UTC) into the bundle and emits `dist/version.json`. `APP_BUILD_LABEL` renders it as `2026-11-14 01:13 UTC` for humans.
+- **Update prompt (`App.tsx`):** on mount, on `visibilitychange`/`focus`, and every 5 min while visible, the app fetches `/version.json?ts=…` (`cache: 'no-store'`) and compares it with its own stamp. On a mismatch it shows a dismissible amber **“New version available — Reload”** banner. It deliberately does **not** auto-reload, so a half-filled registration form is never lost. `ErrorBoundary` keeps its existing chunk-load auto-recovery.
+- **Cache headers (`vercel.json`):** `/` and `/index.html` → `no-cache, no-store, must-revalidate`; `/version.json` → `no-store, max-age=0`. Hashed `/assets/*` remain `immutable`.
+- **Export provenance (`pages/MasterListModule.tsx`):** the PDF subtitle and CSV header block now carry `Build <label>`, the page header shows the running build, and export filenames end with a local `_YYYY-MM-DD_HHmmss` stamp — so a phone can never reopen an older file that shares the name, and any file states which build produced it.
+- **One-time caveat:** the deploy that introduces this patch cannot self-detect (the old bundle has no checker), so the phone needs **one** manual reload; every deploy after that prompts automatically.
+- **Frontend-only:** no SQL, RPC, RLS or `types.ts` change. `npm run typecheck` → 0 errors; `npm run build` passes and emits `dist/version.json`.
 
 ## Code Conventions
 

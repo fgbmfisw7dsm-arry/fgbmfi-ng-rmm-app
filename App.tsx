@@ -13,6 +13,7 @@ import { flushQueueOnConnect } from './services/offlineQueue';
 import { setOfflineSession, refreshOfflineWindow } from './services/offlineRoster';
 import { defaultRouteForRole } from './services/roleRouting';
 import { startPresence, stopPresence, getDeviceId } from './services/presenceService';import { useIdleTimeout } from './hooks/useIdleTimeout';
+import { APP_BUILD_LABEL, checkForNewBuild, reloadForNewBuild } from './services/buildInfo';
 import IdleTimeoutModal from './components/IdleTimeoutModal';
 
 // Modules — LoginPage stays eager for first paint; the rest are route-level
@@ -93,8 +94,31 @@ const AppContent = () => {
   const [activeEvent, setActiveEvent] = useState<Event | null>(null);
   const [liveEventId, setLiveEventId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [updateReady, setUpdateReady] = useState(false);
   
   const userIdRef = useRef<string | null>(null);
+
+  // A phone that left the app open keeps running the old bundle (and old export
+  // templates) after a deploy. Re-check on focus/visibility and offer a reload.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      checkForNewBuild()
+        .then(ready => { if (!cancelled && ready) setUpdateReady(true); })
+        .catch(() => { /* offline / transient */ });
+    };
+    check();
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') check(); }, 5 * 60_000);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -389,6 +413,27 @@ const AppContent = () => {
     }}>
       {user?.id && idleWarning && (
         <IdleTimeoutModal secondsLeft={idleSeconds} onStay={stayActive} onSignOut={signOutNow} />
+      )}
+      {updateReady && (
+        <div className="no-print fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-1.5rem)] max-w-md bg-amber-500 text-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-wider leading-tight">New version available</p>
+            <p className="text-[9px] font-bold text-amber-50 uppercase tracking-wider mt-0.5">Reload to use the latest templates (build {APP_BUILD_LABEL})</p>
+          </div>
+          <button
+            onClick={reloadForNewBuild}
+            className="shrink-0 bg-white text-amber-700 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider"
+          >
+            Reload
+          </button>
+          <button
+            onClick={() => setUpdateReady(false)}
+            aria-label="Dismiss"
+            className="shrink-0 text-white/80 hover:text-white text-lg font-black leading-none px-1"
+          >
+            ×
+          </button>
+        </div>
       )}
       <HashRouter>
         <Routes>

@@ -1,13 +1,32 @@
 import path from 'path';
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+
+// Stamps every build with a UTC id and emits /version.json, so a client that is
+// still holding an older bundle can detect it (services/buildInfo.ts) instead of
+// silently exporting with outdated templates.
+const buildInfo = (): Plugin => {
+    const build = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '');
+    return {
+        name: 'fgbmfi-build-info',
+        config: () => ({ define: { __APP_BUILD__: JSON.stringify(build) } }),
+        generateBundle() {
+            this.emitFile({
+                type: 'asset',
+                fileName: 'version.json',
+                source: JSON.stringify({ build, builtAt: new Date().toISOString() }),
+            });
+        },
+    };
+};
 
 export default defineConfig({
     server: {
         port: 3000,
         host: 'localhost',
     },
-    plugins: [react()],
+    plugins: [react(), buildInfo()],
     resolve: {
         alias: {
             '@': path.resolve(__dirname, '.'),

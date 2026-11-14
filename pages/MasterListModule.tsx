@@ -7,8 +7,17 @@ import { exportMasterListCSV, exportMasterListPDF, formatCurrency, downloadJSON,
 import type { MasterListCsvRow, MasterListPdfColumn, MasterListPdfRow } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
+import { APP_BUILD_LABEL } from '../services/buildInfo';
 
 const PAGE_SIZE = 25;
+
+// Unique per export, so a phone never opens a previously downloaded file with
+// the same name (the old "same filename, old template" confusion).
+const exportStamp = (): string => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+};
 
 interface SelectionInfo { name: string; district: string; }
 
@@ -434,7 +443,7 @@ const MasterListModule = () => {
         const distLabel = district ? district.replace(/[^A-Za-z0-9-]/g, '-') : 'All-Districts';
         const sourceLabel = sourceFilterLabel(sourceFilter);
         const rangeLabel = dateRangeActive ? `${regFrom || 'start'}_to_${regTo || 'end'}${dateBasis === 'created' ? '_created' : ''}` : (importBatchId ? 'import-batch' : '');
-        return `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}`;
+        return `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}_${exportStamp()}`;
     };
 
     // Shared header context so the PDF and the grouped CSV state the same event,
@@ -528,7 +537,7 @@ const MasterListModule = () => {
             const subtitleLines = [
                 ctx.eventLine,
                 ctx.filterBits.join('  |  '),
-                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
+                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}  |  Build ${APP_BUILD_LABEL}`,
             ];
 
             const result = await exportMasterListPDF({
@@ -612,7 +621,7 @@ const MasterListModule = () => {
                 ctx.reportTitle,
                 ctx.eventLine,
                 ctx.filterBits.join('  |  '),
-                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
+                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}  |  Build ${APP_BUILD_LABEL}`,
             ];
 
             const result = exportMasterListCSV({
@@ -870,6 +879,7 @@ const MasterListModule = () => {
                         {viewFiltersActive && !listLoading && (
                             <span className="text-blue-700"> · {totalRecords.toLocaleString('en-GB')} matching this view</span>
                         )}
+                        <span className="text-gray-400"> · Build {APP_BUILD_LABEL}</span>
                     </p>
                 </div>
                 <div className="flex flex-1 flex-wrap gap-2 justify-end w-full md:w-auto">
