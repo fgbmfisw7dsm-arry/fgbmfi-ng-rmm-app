@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name:** FGBMFI Nigeria Events Management System (FGBMFI-EMS)
-- **Current Version:** 1.105 (Master List — District column in the date-range / cross-district table)
+- **Current Version:** 1.106 (Master List Date-Range Report — district-grouped PDF + CSV with per-district totals)
 - **Domain:** FGBMFI Nigeria events — conventions, regional council meetings (RCM), district conferences, leadership retreats, trainings, special events
 - **Stack:** React 19 + TypeScript 5.8 + Vite 6 + Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Deployment:** Vercel (SPA with hash-based routing — do NOT switch to browser router)
@@ -1446,6 +1446,15 @@ Browser console diagnostic logs use the `[functionName]` prefix convention:
 - **Not changed:** the sections view (band = district context, so no redundant column), PDF/CSV exports (already carry District and group by district, §98), pagination, selection/merge/delete, realtime refresh.
 - **Deferred - true per-district sections for a date range** (bands with real per-district counts and independent pagers, the full main-list experience): extend `get_district_aggregate_counts` with `p_created_from` / `p_created_to` / `p_date_basis` / `p_import_id`, include the range in the `getDistrictsWithDelegates` cache key, and rework `mode` / `loadAllDistricts` / `loadDistrictPage`. Post-convention change (Option C).
 - **Verify:** date range only -> District column visible; district + range -> column hidden, band shows the district; Source / Import batch / search -> column visible; bulk-select checkboxes and `#` stay aligned; short last page still fills the table. `npm run typecheck` -> 0 errors; `npm run build` passes.
+
+## 102. Master List Date-Range Report — District-Grouped PDF + CSV (v1.106)
+
+- **Reported (convention week):** the date-range Master List export was not usable as a Convention Registration Report — no district structure and no per-district totals, unlike the Full Master List sections.
+- **PDF (`exportMasterListPDF`, `services/utils.ts`):** new `districtTotals` option draws a bordered **DISTRICT TOTALS** block under the report header on page 1 (every district + count + grand total, 1–4 auto-sized columns so 25+ districts stay compact). Bands are now `X DISTRICT - N DELEGATES` and repeat as `X DISTRICT (CONTINUED) - N DELEGATES` when a district spans a page break. Master List drops the now-redundant District column, freeing width for names/emails.
+- **CSV (`exportMasterListCSV`, new in `services/utils.ts`):** `exportToCSV` is untouched for its other call sites. The grouped file carries a header block (report title, event, active filters, exported/total + generated timestamp), a **DISTRICT TOTALS** table, then one sub-header row per district followed by its delegates and a final `TOTAL`. UTF-8 **BOM** so Excel renders `ọ/ẹ/ṣ` correctly. Sub-header/`TOTAL` rows carry no name data, so the Bulk Import junk guard skips them if a file is ever round-tripped.
+- **Master List (`pages/MasterListModule.tsx`):** both exports restart `#` at 1 inside each district (matching the on-screen per-district sections); shared `buildExportContext()` so the PDF and CSV headers state identical filters/totals; a date-range export is titled `FGBMFI NIGERIA - REGISTRATION REPORT (BY DATE RANGE)`. Success notices report the district count.
+- **Frontend-only:** no SQL, RPC, RLS, migration or `types.ts` change — counts are computed from the already-filtered export rows, so the date range is respected. `npm run typecheck` → 0 errors; `npm run build` passes. Verified the CSV layout and the PDF flow (totals block once, bands + continued bands, pagination) with stub-DOM/jsPDF harnesses.
+- **Deliberately unchanged:** the on-screen date-range table (unified, District column) and the deferred per-district *on-screen* sections (Option C in §101) — exports give the registration report without touching load paths.
 
 ## Code Conventions
 

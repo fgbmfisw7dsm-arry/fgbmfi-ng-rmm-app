@@ -3,8 +3,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } 
 import { db } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 import { Delegate, SystemSettings, Chapter, isAdminRole, isEventAdminRole, DateBasis, ImportBatch } from '../types';
-import { exportToCSV, exportMasterListPDF, formatCurrency, downloadJSON, describeDateRange, hasDateRange, sortDelegatesByDistrict } from '../services/utils';
-import type { MasterListPdfColumn, MasterListPdfRow } from '../services/utils';
+import { exportMasterListCSV, exportMasterListPDF, formatCurrency, downloadJSON, describeDateRange, hasDateRange, sortDelegatesByDistrict } from '../services/utils';
+import type { MasterListCsvRow, MasterListPdfColumn, MasterListPdfRow } from '../services/utils';
 import { getScopeFilter } from '../types';
 import { AppContext } from '../context/AppContext';
 
@@ -437,6 +437,32 @@ const MasterListModule = () => {
         return `Delegate_Master_List_${sourceLabel ? sourceLabel + '_' : ''}${distLabel}${rangeLabel ? '_' + rangeLabel : ''}`;
     };
 
+    // Shared header context so the PDF and the grouped CSV state the same event,
+    // filters and totals (the per-district totals are drawn by the exporters).
+    const buildExportContext = (rowCount: number) => {
+        const district = selectedDistrict || undefined;
+        const search = searchTerm || undefined;
+        const source = sourceFilter || undefined;
+        const filterBits = [
+            district ? `District: ${district}` : 'All Districts',
+            source ? `Source: ${sourceFilterLabel(source)}` : '',
+            search ? `Search: "${search}"` : '',
+            dateRangeActive ? `${dateBasis === 'created' ? 'Registered' : 'Last activity'} ${describeDateRange(dateRange)}` : '',
+            importBatchId ? 'Import batch filter' : '',
+        ].filter(Boolean) as string[];
+        const totalsBit = eventTotal != null && eventTotal !== rowCount
+            ? `${rowCount.toLocaleString('en-GB')} delegates exported of ${eventTotal.toLocaleString('en-GB')} in this event`
+            : `${rowCount.toLocaleString('en-GB')} delegates exported`;
+        return {
+            filterBits,
+            totalsBit,
+            reportTitle: dateRangeActive
+                ? 'FGBMFI NIGERIA - REGISTRATION REPORT (BY DATE RANGE)'
+                : 'FGBMFI NIGERIA - DELEGATE MASTER LIST',
+            eventLine: [activeEvent?.name, activeEvent?.region].filter(Boolean).join(' - ') || 'FGBMFI Nigeria',
+        };
+    };
+
     const handleExport = async () => {
         if (!activeEventId) return;
         setExporting('pdf');
@@ -450,13 +476,14 @@ const MasterListModule = () => {
             if (all.length === 0) throw new Error('No delegates match the current filters');
             const sorted = sortDelegatesByDistrict(all);
 
+            // The district is carried by the band sub-header, so the column is
+            // dropped and the freed width goes to names/emails.
             const columns: MasterListPdfColumn[] = [
                 { label: '#', weight: 4, align: 'right' },
-                { label: 'District', weight: 18 },
                 { label: 'Title', weight: 6 },
-                { label: 'Full Name', weight: 30 },
-                { label: 'Chapter', weight: 13 },
-                { label: 'Email', weight: 21 },
+                { label: 'Full Name', weight: 32 },
+                { label: 'Chapter', weight: 14 },
+                { label: 'Email', weight: 22 },
             ];
             if (showRank) columns.push({ label: 'Rank', weight: 10 });
             if (showOffice) columns.push({ label: 'Office', weight: 11 });
@@ -467,10 +494,16 @@ const MasterListModule = () => {
             if (dateRangeActive) columns.push({ label: 'Registered', weight: 9 }, { label: 'Last activity', weight: 9 });
             if (showPaymentCols) columns.push({ label: 'Payment', weight: 11, align: 'right' }, { label: 'Payment Ref', weight: 13 });
 
-            const rows: MasterListPdfRow[] = sorted.map((d, i) => {
+            // District groups restart their own numbering, matching the on-screen
+            // per-district sections (each district starts at #1).
+            let seq = 0;
+            let prevDistrict: string | null = null;
+            const rows: MasterListPdfRow[] = sorted.map((d) => {
+                const district = (d.district || '').trim();
+                if (district !== prevDistrict) { seq = 0; prevDistrict = district; }
+                seq += 1;
                 const values: string[] = [
-                    String(i + 1),
-                    (d.district || '').trim() || '-',
+                    String(seq),
                     (d.title || '').trim(),
                     `${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
                     (d.chapter || '').trim() || '-',
@@ -487,33 +520,25 @@ const MasterListModule = () => {
                     d.payment_amount != null ? formatCurrency(d.payment_amount) : '-',
                     (d.payment_reference || '').trim() || '-'
                 );
-                return { values, district: (d.district || '').trim() };
+                return { values, district };
             });
 
             const filename = `${exportFileStem(district)}.pdf`;
-            const filterBits = [
-                district ? `District: ${district}` : 'All Districts',
-                source ? `Source: ${sourceFilterLabel(source)}` : '',
-                search ? `Search: "${search}"` : '',
-                dateRangeActive ? `${dateBasis === 'created' ? 'Registered' : 'Last activity'} ${describeDateRange(dateRange)}` : '',
-                importBatchId ? 'Import batch filter' : '',
-            ].filter(Boolean) as string[];
-            const totalsBit = eventTotal != null && eventTotal !== sorted.length
-                ? `${sorted.length.toLocaleString('en-GB')} delegates exported of ${eventTotal.toLocaleString('en-GB')} in this event`
-                : `${sorted.length.toLocaleString('en-GB')} delegates exported`;
+            const ctx = buildExportContext(sorted.length);
             const subtitleLines = [
-                [activeEvent?.name, activeEvent?.region].filter(Boolean).join(' - ') || 'FGBMFI Nigeria',
-                filterBits.join('  |  '),
-                `${totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
+                ctx.eventLine,
+                ctx.filterBits.join('  |  '),
+                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
             ];
 
             const result = await exportMasterListPDF({
                 filename,
-                title: 'FGBMFI NIGERIA - DELEGATE MASTER LIST',
+                title: ctx.reportTitle,
                 subtitleLines,
                 columns,
                 rows,
                 groupByDistrict: true,
+                districtTotals: true,
                 onProgress: (done, total) => setExportProgress({ done, total }),
             });
             setExportNotice({
@@ -544,17 +569,62 @@ const MasterListModule = () => {
             if (all.length === 0) throw new Error('No delegates match the current filters');
             const sorted = sortDelegatesByDistrict(all);
             const stem = exportFileStem(district);
-            const cols = ['district', 'title', 'first_name', 'last_name', 'chapter', 'email'];
-            if (showRank) cols.push('rank');
-            if (showOffice) cols.push('office');
-            if (showDelegateType) cols.push('delegate_type');
-            cols.push('phone', 'external_id', 'reg_type');
-            if (dateRangeActive) cols.push('created_at', 'last_activity_at');
-            if (showPaymentCols) cols.push('payment_amount', 'payment_reference');
-            exportToCSV(sorted, `${stem}.csv`, cols);
+
+            const columns = ['#', 'Title', 'Full Name', 'Chapter', 'Email'];
+            if (showRank) columns.push('Rank');
+            if (showOffice) columns.push('Office');
+            if (showDelegateType) columns.push('Type');
+            columns.push('Phone', 'Source', 'Reg ID');
+            if (dateRangeActive) columns.push('Registered', 'Last activity');
+            if (showPaymentCols) columns.push('Payment', 'Payment Ref');
+
+            // Same shape as the PDF: district sub-header, then that district's rows
+            // renumbered from 1.
+            let seq = 0;
+            let prevDistrict: string | null = null;
+            const rows: MasterListCsvRow[] = sorted.map(d => {
+                const districtLabel = (d.district || '').trim();
+                if (districtLabel !== prevDistrict) { seq = 0; prevDistrict = districtLabel; }
+                seq += 1;
+                const values: string[] = [
+                    String(seq),
+                    (d.title || '').trim(),
+                    `${d.first_name || ''} ${d.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+                    (d.chapter || '').trim(),
+                    (d.email || '').trim(),
+                ];
+                if (showRank) values.push((d.rank || '').trim());
+                if (showOffice) values.push((d.office || '').trim());
+                if (showDelegateType) values.push((d.delegate_type || '').trim());
+                values.push((d.phone || '').trim());
+                values.push((d.reg_type || 'manual').trim());
+                values.push((d.external_id || '').trim());
+                if (dateRangeActive) values.push(regDateOf(d), activityDateOf(d));
+                if (showPaymentCols) values.push(
+                    d.payment_amount != null ? String(d.payment_amount) : '',
+                    (d.payment_reference || '').trim()
+                );
+                return { values, district: districtLabel };
+            });
+
+            const ctx = buildExportContext(sorted.length);
+            const headerLines = [
+                ctx.reportTitle,
+                ctx.eventLine,
+                ctx.filterBits.join('  |  '),
+                `${ctx.totalsBit}  |  Generated ${new Date().toLocaleString('en-GB')}`,
+            ];
+
+            const result = exportMasterListCSV({
+                filename: `${stem}.csv`,
+                headerLines,
+                columns,
+                rows,
+                groupByDistrict: true,
+            });
             setExportNotice({
                 kind: 'success',
-                text: `CSV export complete - ${sorted.length.toLocaleString('en-GB')} delegates, sorted by district. ${stem}.csv`,
+                text: `CSV export complete - ${result.rows.toLocaleString('en-GB')} delegates in ${result.districts} district(s), grouped with district totals. ${stem}.csv`,
             });
         } catch (err: any) {
             console.error('CSV export error:', err);

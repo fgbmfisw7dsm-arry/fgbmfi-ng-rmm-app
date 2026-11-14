@@ -811,6 +811,8 @@ export interface MasterListPdfOptions {
     columns: MasterListPdfColumn[];
     rows: MasterListPdfRow[];
     groupByDistrict?: boolean;
+    /** Draws the per-district totals block under the report header on page 1. */
+    districtTotals?: boolean;
     onProgress?: (done: number, total: number) => void;
 }
 
@@ -909,17 +911,70 @@ export const exportMasterListPDF = async (opts: MasterListPdfOptions): Promise<{
         return yTop + HEADER_H;
     };
 
-    const drawDistrictBand = (label: string, count: number, yTop: number) => {
+    const drawDistrictBand = (label: string, count: number, yTop: number, continued = false) => {
         pdf.setFillColor(30, 58, 138);
         pdf.rect(marginX, yTop, usableW, BAND_H, 'F');
         pdf.setTextColor(255, 255, 255);
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(7.4);
         const suffix = `${count} DELEGATE${count === 1 ? '' : 'S'}`;
-        pdf.text(fit(`${pdfSafeText(label || 'NO DISTRICT').toUpperCase()} - ${suffix}`, usableW - 4), marginX + 2, yTop + 3.9);
+        const bandName = label
+            ? `${pdfSafeText(label).toUpperCase()} DISTRICT`
+            : 'NO DISTRICT';
+        const bandLabel = `${bandName}${continued ? ' (CONTINUED)' : ''} - ${suffix}`;
+        pdf.text(fit(bandLabel, usableW - 4), marginX + 2, yTop + 3.9);
         pdf.setTextColor(0, 0, 0);
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(6.5);
+    };
+
+    // Per-district totals in the report header: the same numbers the bands carry,
+    // stated once up front so a printed report can be read without paging through.
+    const drawDistrictTotals = (yTop: number): number => {
+        if (districtCounts.size === 0) return yTop;
+        const pairs = Array.from(districtCounts.entries()).map(([label, count]) => ({
+            label: pdfSafeText(label || 'NO DISTRICT').toUpperCase(),
+            count,
+        }));
+        const totalCount = pairs.reduce((sum, p) => sum + p.count, 0);
+        const cols = Math.min(4, Math.max(1, Math.ceil(pairs.length / 12)));
+        const rowsNeeded = Math.ceil(pairs.length / cols);
+        const rowH = 3.2;
+        const headH = 5;
+        const blockH = headH + rowsNeeded * rowH + 2.4;
+
+        pdf.setFillColor(246, 247, 249);
+        pdf.setDrawColor(208, 213, 221);
+        pdf.rect(marginX, yTop, usableW, blockH, 'FD');
+
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7.2);
+        pdf.setTextColor(30, 58, 138);
+        pdf.text('DISTRICT TOTALS', marginX + 2, yTop + 3.4);
+        pdf.text(
+            `${totalCount.toLocaleString('en-GB')} DELEGATE${totalCount === 1 ? '' : 'S'}`,
+            marginX + usableW - 2,
+            yTop + 3.4,
+            { align: 'right' }
+        );
+
+        pdf.setTextColor(40, 40, 40);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.4);
+        const colW = (usableW - 4) / cols;
+        pairs.forEach((pair, i) => {
+            const col = Math.floor(i / rowsNeeded);
+            const rowIdx = i % rowsNeeded;
+            const x = marginX + 2 + col * colW;
+            const baseline = yTop + headH + rowIdx * rowH + 2.2;
+            pdf.text(fit(pair.label, colW - 12), x, baseline);
+            pdf.text(String(pair.count), x + colW - 3, baseline, { align: 'right' });
+        });
+
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.5);
+        return yTop + blockH + 2.4;
     };
 
     const drawRow = (values: string[], yTop: number, zebra: boolean) => {
@@ -953,6 +1008,9 @@ export const exportMasterListPDF = async (opts: MasterListPdfOptions): Promise<{
     }
 
     let y = drawPageChrome();
+    if (opts.groupByDistrict && opts.districtTotals !== false) {
+        y = drawDistrictTotals(y);
+    }
     y = drawColumnHeader(y);
     let zebra = false;
     let lastDistrict: string | null = null;
@@ -967,6 +1025,11 @@ export const exportMasterListPDF = async (opts: MasterListPdfOptions): Promise<{
             y = drawPageChrome();
             y = drawColumnHeader(y);
             zebra = false;
+            // A district that continues onto a new page keeps its context.
+            if (districtKey !== null && !needsBand) {
+                drawDistrictBand(districtKey, districtCounts.get(districtKey) || 0, y, true);
+                y += BAND_H;
+            }
         }
         if (needsBand && districtKey !== null) {
             drawDistrictBand(districtKey, districtCounts.get(districtKey) || 0, y);
@@ -999,6 +1062,89 @@ export const exportMasterListPDF = async (opts: MasterListPdfOptions): Promise<{
 
     pdf.save(opts.filename);
     return { pages, rows: opts.rows.length };
+};
+
+/* ------------------------------------------------------------------------- *
+ * Master List CSV — district-grouped report layout
+ *
+ * The PDF groups rows under district bands, so the CSV mirrors that structure:
+ * a report header block, a DISTRICT TOTALS table, then one sub-header row per
+ * district followed by its delegates. Panel rows carry no name data, so the
+ * import junk guard skips them if a file is ever fed back through Bulk Import.
+ * ------------------------------------------------------------------------- */
+export interface MasterListCsvRow {
+    values: string[];
+    district?: string;
+}
+
+export interface MasterListCsvOptions {
+    filename: string;
+    headerLines?: string[];
+    columns: string[];
+    rows: MasterListCsvRow[];
+    groupByDistrict?: boolean;
+    /** UTF-8 BOM (default on) so Excel renders Nigerian diacritics correctly. */
+    bom?: boolean;
+}
+
+export const exportMasterListCSV = (opts: MasterListCsvOptions): { rows: number; districts: number } => {
+    const group = opts.groupByDistrict !== false;
+    const districtCounts = new Map<string, number>();
+    if (group) {
+        opts.rows.forEach(r => {
+            const key = (r.district || '').trim();
+            districtCounts.set(key, (districtCounts.get(key) || 0) + 1);
+        });
+    }
+
+    const cells = (values: (string | number)[]): string => values.map(v => csvEscape(String(v ?? ''))).join(',');
+    const blankTail = (from: number): string[] => opts.columns.slice(from).map(() => '');
+    const out: string[] = [];
+
+    for (const line of opts.headerLines || []) out.push(csvEscape(line));
+    out.push('');
+
+    if (group && districtCounts.size > 0) {
+        out.push(csvEscape('DISTRICT TOTALS'));
+        out.push(cells(['District', 'Delegates']));
+        for (const [label, count] of districtCounts) {
+            out.push(cells([label || 'NO DISTRICT', count]));
+        }
+        out.push(cells(['TOTAL', opts.rows.length]));
+        out.push('');
+    }
+
+    out.push(cells(opts.columns));
+
+    let lastDistrict: string | null = null;
+    for (const row of opts.rows) {
+        const key = group ? (row.district || '').trim() : null;
+        if (key !== null && key !== lastDistrict) {
+            out.push(cells([
+                key ? `${key.toUpperCase()} DISTRICT` : 'NO DISTRICT',
+                String(districtCounts.get(key) || 0),
+                ...blankTail(2),
+            ]));
+            lastDistrict = key;
+        }
+        out.push(cells(row.values));
+    }
+
+    if (group) {
+        out.push(cells(['TOTAL', opts.rows.length, ...blankTail(2)]));
+    }
+
+    const csv = (opts.bom === false ? '' : '\uFEFF') + out.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', opts.filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    return { rows: opts.rows.length, districts: districtCounts.size };
 };
 
 // Shared QR payload parser (online scan path + offline roster resolver).
